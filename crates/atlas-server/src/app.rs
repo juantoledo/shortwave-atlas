@@ -218,6 +218,7 @@ impl Atlas {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use atlas_core::audio::default_device;
     use atlas_core::rig::{Power, RigCommand};
 
     #[tokio::test]
@@ -269,7 +270,7 @@ mod tests {
         assert_eq!(e.kind, ErrorKind::Invalid);
         assert!(!path.exists(), "a refused choice must not be saved");
 
-        let codec = AudioChoice { enabled: true, device: "plughw:CARD=CODEC,DEV=0".into(), rate: 8_000 };
+        let codec = AudioChoice { enabled: true, device: default_device(Os::CURRENT).into(), rate: 8_000 };
         atlas.call(Call::ApplyAudio(codec.clone())).await.unwrap();
         let info = atlas.call(Call::Info).await.unwrap();
         assert_eq!((info["audio"].as_bool(), info["audio_rate"].as_u64()), (Some(true), Some(8_000)));

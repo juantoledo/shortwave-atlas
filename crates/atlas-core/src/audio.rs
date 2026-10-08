@@ -10,6 +10,16 @@ use crate::platform::Os;
 /// Sample rates offered in the UI (16-bit mono PCM: 16 kHz = 256 kbit/s per listener).
 pub const AUDIO_RATES: [u32; 5] = [8_000, 12_000, 16_000, 24_000, 48_000];
 
+/// The rig codec's device name on `os`: the default `[audio] device`, so turning audio on
+/// works without picking a card when the radio is the usual Burr-Brown codec.
+pub fn default_device(os: Os) -> &'static str {
+    match os {
+        Os::Linux => "plughw:CARD=CODEC,DEV=0",
+        Os::Windows => "Microphone (USB AUDIO  CODEC)",
+        Os::Macos => "USB AUDIO  CODEC",
+    }
+}
+
 /// The part of `[audio]` the settings page may change. Like `RigChoice`, it has no
 /// executable path, so no client can make the core run an arbitrary program.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -397,6 +407,17 @@ dummy: Immediate exit requested
             capture_input_args(Os::Macos, "USB AUDIO  CODEC"),
             ["-f", "avfoundation", "-i", ":USB AUDIO  CODEC"]
         );
+    }
+
+    #[test]
+    fn default_devices_are_valid_on_their_os() {
+        for os in [Os::Linux, Os::Windows, Os::Macos] {
+            let c = AudioChoice { enabled: true, device: default_device(os).into(), rate: 16_000 };
+            assert!(validate_audio(os, &c).is_ok(), "{os:?}");
+        }
+        // and they are the names the device lists report for the codec
+        assert_eq!(parse_dshow_devices(DSHOW)[0].device, default_device(Os::Windows));
+        assert_eq!(parse_avfoundation_devices(AVF)[0].device, default_device(Os::Macos));
     }
 
     #[test]

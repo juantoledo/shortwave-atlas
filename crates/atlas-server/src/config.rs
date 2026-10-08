@@ -4,7 +4,7 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use atlas_core::api::Qth;
-use atlas_core::audio::{validate_audio, AudioChoice};
+use atlas_core::audio::{default_device, validate_audio, AudioChoice};
 use atlas_core::platform::Os;
 use atlas_core::setup::RigChoice;
 use atlas_rig::{BackendKind, RigConfig};
@@ -65,7 +65,7 @@ pub struct AudioConfig {
 
 impl Default for AudioConfig {
     fn default() -> Self {
-        Self { enabled: false, device: "plughw:CARD=CODEC,DEV=0".into(), rate: 16_000, ffmpeg: "ffmpeg".into() }
+        Self { enabled: false, device: default_device(Os::CURRENT).into(), rate: 16_000, ffmpeg: "ffmpeg".into() }
     }
 }
 
@@ -306,7 +306,7 @@ mod tests {
             ("RIGCTLD_PORT", "4533"),
             ("WEB_BIND", "0.0.0.0"),
             ("WEB_AUTH", "me:secret"),
-            ("AUDIO_DEVICE", "hw:1"),
+            ("AUDIO_DEVICE", default_device(Os::CURRENT)),
         ]))
         .unwrap();
         assert_eq!((c.rig.backend, c.rig.port), (BackendKind::External, 4533));
