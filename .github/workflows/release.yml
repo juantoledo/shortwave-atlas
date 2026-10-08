@@ -1,19 +1,80 @@
-# On a version tag: desktop installers for all three OSes and a swatlas-server archive per
-# OS, attached to a draft GitHub release.
+# Build a release into its draft: desktop installers (signed for the updater) and the update
+# manifest, a swatlas-server archive per OS, smoke tests of what was built, then provenance
+# attestations, SBOMs and checksums. Called by release-please.yml when the release PR is
+# merged; run it by hand to rebuild a draft. Publishing the draft is done by a person.
 name: Release
-on:
-  push:
-    tags: ["v*"]
 
-permissions:
-  contents: write
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of an existing draft release, e.g. v0.2.0
+        type: string
+        required: true
+
+permissions: {}
+
+env:
+  TAG: ${{ inputs.tag }}
 
 jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # draft releases are only listed to writers
+    outputs:
+      release_id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - name: The tag matches the version
+        run: |
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG does not match the workspace version $version"
+            exit 1
+          fi
+      - id: release
+        name: Its release is still a draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          read -r id draft < <(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$TAG\") | \"\(.id) \(.draft)\"" | head -1)
+          if [ -z "$id" ]; then echo "::error::no release for $TAG"; exit 1; fi
+          if [ "$draft" != true ]; then echo "::error::$TAG is already published; only drafts are built"; exit 1; fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
+      - name: Cargo.lock is current
+        run: cargo metadata --locked --format-version 1 > /dev/null
+      - uses: EmbarkStudios/cargo-deny-action@c3bbe7e4e3f7baeee1a3dd9aec0a3b2aded580fb # v2.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: No known vulnerabilities in the UI's dependencies
+        run: npm --prefix ui audit --omit=dev --audit-level=high
+
   sidecars:
+    needs: gate
+    permissions:
+      contents: read
     uses: ./.github/workflows/sidecars.yml
+    with:
+      ref: ${{ inputs.tag }}
 
   desktop:
-    needs: sidecars
+    needs: [gate, sidecars]
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -23,12 +84,16 @@ jobs:
           - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, sidecars: false, args: "" }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
           targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -40,7 +105,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: matrix.sidecars
         with:
           name: sidecars-${{ matrix.target }}
@@ -49,17 +114,23 @@ jobs:
         if: matrix.sidecars && runner.os == 'macOS'
         run: chmod +x src-tauri/binaries/*-apple-darwin
       - run: npm ci && npm --prefix ui ci
-      - uses: tauri-apps/tauri-action@v0
+      # Builds the installers plus the updater bundles and their signatures, uploads them to the
+      # draft, and adds this OS to latest.json (merged across the three jobs).
+      - uses: tauri-apps/tauri-action@2d793bf2c8c505b9b76211601b09aab48922225d # v1.0.0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: SW Atlas ${{ github.ref_name }}
-          releaseDraft: true
-          args: ${{ matrix.args }}
+          releaseId: ${{ needs.gate.outputs.release_id }}
+          args: ${{ matrix.args }} --config src-tauri/tauri.updater.conf.json
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
 
   server:
-    needs: sidecars
+    needs: [gate, sidecars]
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -69,15 +140,20 @@ jobs:
           - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, sidecars: false }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - run: npm --prefix ui ci && npm --prefix ui run build
-      - run: cargo build --release -p atlas-server --bin swatlas-server
-      - uses: actions/download-artifact@v4
+      - run: cargo build --release --locked -p atlas-server --bin swatlas-server
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: matrix.sidecars
         with:
           name: sidecars-${{ matrix.target == 'aarch64-apple-darwin' && 'universal-apple-darwin' || matrix.target }}
@@ -87,10 +163,10 @@ jobs:
         shell: bash
         run: |
           set -e
-          name=swatlas-server-${{ github.ref_name }}-${{ matrix.target }}
+          name=swatlas-server-$TAG-${{ matrix.target }}
           mkdir -p "$name"
           cp -r ui/dist "$name/ui"
-          cp README.md THIRD_PARTY_NOTICES.md docs/swatlas.example.toml "$name/"
+          cp README.md THIRD_PARTY_NOTICES.md LICENSE docs/swatlas.example.toml "$name/"
           if [ "$RUNNER_OS" = Windows ]; then
             cp target/release/swatlas-server.exe "$name/"
             cp sidecars/rigctld-*.exe "$name/rigctld.exe"
@@ -105,10 +181,152 @@ jobs:
             chmod +x "$name/rigctld" "$name/ffmpeg"
           fi
           if [ -d sidecars/licenses ]; then cp -r sidecars/licenses "$name/"; fi
-          if [ "$RUNNER_OS" = Windows ]; then 7z a "$name.zip" "$name" >/dev/null; echo "ARCHIVE=$name.zip" >> "$GITHUB_ENV"
-          else tar czf "$name.tar.gz" "$name"; echo "ARCHIVE=$name.tar.gz" >> "$GITHUB_ENV"; fi
-      - uses: softprops/action-gh-release@v2
+          echo "DIR=$name" >> "$GITHUB_ENV"
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -e
+          ext=""; [ "$RUNNER_OS" = Windows ] && ext=.exe
+          out=$("$DIR/swatlas-server$ext" --version)
+          echo "$out"
+          [ "$out" = "swatlas-server ${TAG#v}" ]
+          if [ "$RUNNER_OS" != Linux ]; then
+            "$DIR/rigctld$ext" --version
+            "$DIR/ffmpeg$ext" -version | head -1
+          fi
+      - name: Upload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then 7z a "$DIR.zip" "$DIR" > /dev/null; archive=$DIR.zip
+          else tar czf "$DIR.tar.gz" "$DIR"; archive=$DIR.tar.gz; fi
+          gh release upload "$TAG" "$archive" --clobber -R "$GITHUB_REPOSITORY"
+
+  # Install and start what was built, on clean runners.
+  smoke:
+    needs: desktop
+    permissions:
+      contents: write # assets of a draft are only visible to writers
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          gh release download $env:TAG -R $env:GITHUB_REPOSITORY -D dist -p '*-setup.exe'
+          $setup = Get-ChildItem dist -Filter *-setup.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/S' -Wait
+          $dir = Join-Path $env:LOCALAPPDATA 'SW Atlas'
+          Get-ChildItem $dir
+          & (Join-Path $dir 'rigctld.exe') --version
+          if ($LASTEXITCODE) { throw 'rigctld does not run' }
+          & (Join-Path $dir 'ffmpeg.exe') -version | Select-Object -First 1
+          if ($LASTEXITCODE) { throw 'ffmpeg does not run' }
+          $app = Get-ChildItem $dir -Filter *.exe | Where-Object { $_.Name -notin 'rigctld.exe', 'ffmpeg.exe', 'uninstall.exe' } | Select-Object -First 1
+          $p = Start-Process $app.FullName -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { throw "SW Atlas exited with code $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+      - name: macOS disk image
+        if: runner.os == 'macOS'
+        run: |
+          set -e
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D dist -p '*.dmg'
+          hdiutil attach dist/*.dmg -nobrowse -readonly -mountpoint /Volumes/swatlas
+          app=$(ls -d /Volumes/swatlas/*.app | head -1)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          "$app/Contents/MacOS/rigctld" --version
+          "$app/Contents/MacOS/ffmpeg" -version | head -1
+          "$app/Contents/MacOS/$(defaults read "$app/Contents/Info" CFBundleExecutable)" &
+          pid=$!
+          sleep 15
+          kill -0 "$pid" || { echo "::error::SW Atlas exited"; exit 1; }
+          kill "$pid"
+          hdiutil detach /Volumes/swatlas
+      - name: Linux AppImage and .deb
+        if: runner.os == 'Linux'
+        run: |
+          set -e
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D dist -p '*.AppImage' -p '*.deb'
+          sudo apt-get update && sudo apt-get install -y xvfb
+          app=$(ls dist/*.AppImage | head -1)
+          chmod +x "$app"
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a "$app" &
+          pid=$!
+          sleep 20
+          kill -0 "$pid" || { echo "::error::the AppImage exited"; exit 1; }
+          kill "$pid" || true
+          # the .deb, with its dependencies (Hamlib, ffmpeg, WebKitGTK), on a clean Ubuntu
+          deb=$(basename "$(ls dist/*.deb | head -1)")
+          docker run --rm -v "$PWD/dist:/dist" ubuntu:22.04 bash -ec "
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /dist/$deb > /dev/null
+            pkg=\$(dpkg-deb -f /dist/$deb Package)
+            dpkg -L \$pkg | grep /usr/bin/
+            command -v rigctld ffmpeg"
+
+  finalize:
+    needs: [desktop, server, smoke]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          tag_name: ${{ github.ref_name }}
-          draft: true
-          files: ${{ env.ARCHIVE }}
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - name: Download the release
+        run: gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D dist
+      - name: The update manifest is complete and signed
+        run: |
+          m=dist/latest.json
+          jq -e --arg v "${TAG#v}" '.version | ltrimstr("v") == $v' "$m" > /dev/null \
+            || { echo "::error::latest.json is not for $TAG"; exit 1; }
+          for p in windows-x86_64 darwin-aarch64 darwin-x86_64 linux-x86_64; do
+            jq -e --arg p "$p" '.platforms[$p] | (.url | startswith("https://")) and ((.signature // "") | length > 0)' "$m" > /dev/null \
+              || { echo "::error::latest.json: $p is missing or unsigned"; exit 1; }
+          done
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: SBOMs (CycloneDX)
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --format json --target all
+          for f in $(git ls-files -o --exclude-standard '*.cdx.json'); do
+            cp "$f" "dist/sbom-$(basename "$f")"
+          done
+          npm --prefix ui ci --ignore-scripts
+          (cd ui && npx --yes @cyclonedx/cyclonedx-npm@4 --omit dev --output-file ../dist/sbom-ui.cdx.json)
+          ls dist/sbom-*
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum -- * > ../SHA256SUMS
+          mv ../SHA256SUMS .
+          cat SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+      - name: Upload
+        run: |
+          gh release upload "$TAG" dist/sbom-*.cdx.json dist/SHA256SUMS --clobber -R "$GITHUB_REPOSITORY"
+          {
+            echo "### $TAG is built"
+            echo "Install it from the draft and try it, then publish the release to send it to users."
+            echo "Verify a file: \`gh attestation verify <file> -R $GITHUB_REPOSITORY\`"
+          } >> "$GITHUB_STEP_SUMMARY"

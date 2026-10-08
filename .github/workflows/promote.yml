@@ -1,0 +1,74 @@
+# Publishing a release sends it to users: its latest.json becomes the beta update manifest,
+# and for a full release also the stable one, on GitHub Pages (`gh-pages` branch, /updates).
+# Rollback: run this by hand with an older tag. Apps already on the bad version stay on it
+# until a fixed, higher version ships; nobody else gets it. See docs/releasing.md.
+name: Promote
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release to serve, e.g. v0.2.0
+        type: string
+        required: true
+      channels:
+        description: Which manifests point to it
+        type: choice
+        options: [stable and beta, beta only]
+        default: stable and beta
+
+permissions: {}
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      BETA_ONLY: ${{ github.event_name == 'release' && github.event.release.prerelease || inputs.channels == 'beta only' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The release's manifest, with its published notes
+        run: |
+          draft=$(gh release view "$TAG" --json isDraft --jq .isDraft)
+          if [ "$draft" != false ]; then echo "::error::$TAG is not published"; exit 1; fi
+          gh release download "$TAG" -p latest.json -O "$RUNNER_TEMP/latest.json"
+          gh release view "$TAG" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+          jq --rawfile notes "$RUNNER_TEMP/notes.md" '.notes = $notes' "$RUNNER_TEMP/latest.json" > "$RUNNER_TEMP/manifest.json"
+          jq '{version, pub_date, platforms: (.platforms | keys)}' "$RUNNER_TEMP/manifest.json"
+      - name: Write the channel manifests
+        run: |
+          if git fetch --depth 1 origin gh-pages:gh-pages 2>/dev/null; then
+            git switch gh-pages
+          else
+            git switch --orphan gh-pages
+          fi
+          mkdir -p updates
+          touch .nojekyll
+          cp "$RUNNER_TEMP/manifest.json" updates/beta.json
+          if [ "$BETA_ONLY" != true ]; then cp "$RUNNER_TEMP/manifest.json" updates/stable.json; fi
+          git add .nojekyll updates
+          if git diff --cached --quiet; then echo "Nothing changed"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Serve $TAG ($([ "$BETA_ONLY" = true ] && echo beta || echo stable and beta))"
+          git push origin gh-pages
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: updates/*.json
+      - name: Summary
+        run: |
+          echo "### $TAG is live" >> "$GITHUB_STEP_SUMMARY"
+          for c in stable beta; do
+            [ -f "updates/$c.json" ] && echo "- $c: $(jq -r .version "updates/$c.json")" >> "$GITHUB_STEP_SUMMARY"
+          done

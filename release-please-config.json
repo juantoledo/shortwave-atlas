@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "74d9d759242c5cf3f83cdda5f4df5a2d4a27ba7e",
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "draft": true,
+  "force-tag-creation": true,
+  "prerelease": true,
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "package-name": "swatlas",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        { "type": "toml", "path": "Cargo.toml", "jsonpath": "$.workspace.package.version" },
+        { "type": "json", "path": "ui/package.json", "jsonpath": "$.version" }
+      ]
+    }
+  }
+}
