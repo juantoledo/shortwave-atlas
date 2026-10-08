@@ -1,0 +1,114 @@
+# On a version tag: desktop installers for all three OSes and a swatlas-server archive per
+# OS, attached to a draft GitHub release.
+name: Release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  sidecars:
+    uses: ./.github/workflows/sidecars.yml
+
+  desktop:
+    needs: sidecars
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, sidecars: true, args: "" }
+          - { os: macos-14, target: universal-apple-darwin, sidecars: true, args: "--target universal-apple-darwin" }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, sidecars: false, args: "" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: actions/download-artifact@v4
+        if: matrix.sidecars
+        with:
+          name: sidecars-${{ matrix.target }}
+          path: src-tauri/binaries
+      - name: Sidecars are executable
+        if: matrix.sidecars && runner.os == 'macOS'
+        run: chmod +x src-tauri/binaries/*-apple-darwin
+      - run: npm ci && npm --prefix ui ci
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: SW Atlas ${{ github.ref_name }}
+          releaseDraft: true
+          args: ${{ matrix.args }}
+
+  server:
+    needs: sidecars
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, sidecars: true }
+          - { os: macos-14, target: aarch64-apple-darwin, sidecars: true }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, sidecars: false }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm --prefix ui ci && npm --prefix ui run build
+      - run: cargo build --release -p atlas-server --bin swatlas-server
+      - uses: actions/download-artifact@v4
+        if: matrix.sidecars
+        with:
+          name: sidecars-${{ matrix.target == 'aarch64-apple-darwin' && 'universal-apple-darwin' || matrix.target }}
+          path: sidecars
+      # The server finds rigctld/ffmpeg and the UI next to its executable.
+      - name: Package
+        shell: bash
+        run: |
+          set -e
+          name=swatlas-server-${{ github.ref_name }}-${{ matrix.target }}
+          mkdir -p "$name"
+          cp -r ui/dist "$name/ui"
+          cp README.md THIRD_PARTY_NOTICES.md docs/swatlas.example.toml "$name/"
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp target/release/swatlas-server.exe "$name/"
+            cp sidecars/rigctld-*.exe "$name/rigctld.exe"
+            cp sidecars/ffmpeg-*.exe "$name/ffmpeg.exe"
+            cp sidecars/windows/*.dll "$name/"
+          else
+            cp target/release/swatlas-server "$name/"
+          fi
+          if [ "$RUNNER_OS" = macOS ]; then
+            cp sidecars/rigctld-universal-apple-darwin "$name/rigctld"
+            cp sidecars/ffmpeg-universal-apple-darwin "$name/ffmpeg"
+            chmod +x "$name/rigctld" "$name/ffmpeg"
+          fi
+          if [ -d sidecars/licenses ]; then cp -r sidecars/licenses "$name/"; fi
+          if [ "$RUNNER_OS" = Windows ]; then 7z a "$name.zip" "$name" >/dev/null; echo "ARCHIVE=$name.zip" >> "$GITHUB_ENV"
+          else tar czf "$name.tar.gz" "$name"; echo "ARCHIVE=$name.tar.gz" >> "$GITHUB_ENV"; fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          files: ${{ env.ARCHIVE }}

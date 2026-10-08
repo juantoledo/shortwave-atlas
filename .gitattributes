@@ -1,0 +1,6 @@
+# LF everywhere: the TOML and fixture tests compare text, and Windows checkouts default to CRLF.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary

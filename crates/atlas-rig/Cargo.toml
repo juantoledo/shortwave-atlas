@@ -1,0 +1,18 @@
+[package]
+name = "atlas-rig"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+async-trait = "0.1.92"
+atlas-core = { version = "0.1.0", path = "../atlas-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+tokio = { version = "1.53.2", features = ["net", "io-util", "sync", "time", "process", "macros", "rt-multi-thread"] }
+tracing = "0.1.44"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.190"
+
+[target.'cfg(windows)'.dependencies]
+serialport = { version = "4.10.1", default-features = false }

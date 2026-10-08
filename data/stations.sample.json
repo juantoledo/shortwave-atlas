@@ -1,0 +1,25 @@
+{
+  "_comment": "Sample data from the prototype, NOT verified: schedules and powers are approximate. Replaced by EiBi in phase 2.",
+  "sites": [
+    { "id": "greenville", "name": "Greenville, North Carolina, USA", "short": "Greenville, USA", "lat": 35.47, "lon": -77.19, "tz": "America/New_York" },
+    { "id": "bauta", "name": "Bauta, Cuba", "short": "Bauta, Cuba", "lat": 22.98, "lon": -82.55, "tz": "America/Havana" },
+    { "id": "okeechobee", "name": "Okeechobee, Florida, USA", "short": "Okeechobee, USA", "lat": 27.24, "lon": -80.83, "tz": "America/New_York" },
+    { "id": "monticello", "name": "Monticello, Maine, USA", "short": "Monticello, USA", "lat": 46.31, "lon": -67.84, "tz": "America/New_York" },
+    { "id": "ottawa", "name": "Ottawa, Ontario, Canada", "short": "Ottawa, Canada", "lat": 45.3, "lon": -75.76, "tz": "America/Toronto" },
+    { "id": "fortcollins", "name": "Fort Collins, Colorado, USA", "short": "Fort Collins, USA", "lat": 40.68, "lon": -105.04, "tz": "America/Denver" },
+    { "id": "kekaha", "name": "Kekaha, Kauai, Hawaii, USA", "short": "Kekaha, Hawaii", "lat": 21.99, "lon": -159.77, "tz": "Pacific/Honolulu" },
+    { "id": "pucheng", "name": "Pucheng, Shaanxi, China", "short": "Pucheng, China", "lat": 34.95, "lon": 109.55, "tz": "Asia/Shanghai" }
+  ],
+  "stations": [
+    { "id": "marti-13570", "name": "Radio Martí", "freq_hz": 13570000, "mode": "AM", "lang": "Spanish", "target": "Cuba", "site": "greenville", "kw": null, "sched": [[540, 1380]], "note": "US Spanish-language service aimed at Cuba. From Santiago it arrives from the north, over a long path across the Caribbean." },
+    { "id": "rebelde-5025", "name": "Radio Rebelde", "freq_hz": 5025000, "mode": "AM", "lang": "Spanish", "target": "Cuba (domestic)", "site": "bauta", "kw": null, "sched": [[0, 1440]], "note": "Cuban national network, on the 60 m tropical band." },
+    { "id": "rhc-6000", "name": "Radio Habana Cuba", "freq_hz": 6000000, "mode": "AM", "lang": "Spanish and English", "target": "Americas", "site": "bauta", "kw": null, "sched": [[0, 360], [1080, 1440]], "note": "Cuba's international service, broadcasting in time blocks." },
+    { "id": "wrmi-5950", "name": "WRMI Radio Miami", "freq_hz": 5950000, "mode": "AM", "lang": "Spanish and English", "target": "Americas", "site": "okeechobee", "kw": null, "sched": [[1200, 1440], [0, 240]], "note": "Private shortwave station that leases airtime to many programmes." },
+    { "id": "wbcq-7490", "name": "WBCQ The Planet", "freq_hz": 7490000, "mode": "AM", "lang": "English", "target": "North America", "site": "monticello", "kw": null, "sched": [[0, 1440]], "note": "Private shortwave station in Maine with varied, very local programming." },
+    { "id": "chu-7850", "name": "CHU Canada", "freq_hz": 7850000, "mode": "USB", "lang": "English and French", "target": "Time signal", "site": "ottawa", "kw": 10, "sched": [[0, 1440]], "note": "Time and standard-frequency signal of the National Research Council of Canada." },
+    { "id": "wwv-10000", "name": "WWV", "freq_hz": 10000000, "mode": "AM", "lang": "English", "target": "Time signal", "site": "fortcollins", "kw": 10, "sched": [[0, 1440]], "note": "NIST time and standard-frequency signal, transmitted from Colorado." },
+    { "id": "wwv-15000", "name": "WWV", "freq_hz": 15000000, "mode": "AM", "lang": "English", "target": "Time signal", "site": "fortcollins", "kw": 10, "sched": [[0, 1440]], "note": "Same station on 15 MHz. Shares the frequency with WWVH and BPM." },
+    { "id": "wwvh-15000", "name": "WWVH", "freq_hz": 15000000, "mode": "AM", "lang": "English", "target": "Time signal", "site": "kekaha", "kw": 10, "sched": [[0, 1440]], "note": "WWV's sister station in Hawaii. Tell them apart by the voice of the time announcements." },
+    { "id": "bpm-15000", "name": "BPM China", "freq_hz": 15000000, "mode": "AM", "lang": "Chinese", "target": "Time signal", "site": "pucheng", "kw": null, "sched": [[0, 60], [420, 1440]], "note": "Time signal of China's National Time Service Center." }
+  ]
+}

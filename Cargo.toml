@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["crates/atlas-core", "crates/atlas-rig", "crates/atlas-server", "src-tauri"]
+# src-tauri needs the webkit2gtk dev libraries; plain `cargo test` skips it.
+default-members = ["crates/atlas-core", "crates/atlas-rig", "crates/atlas-server", "src-tauri"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.0"

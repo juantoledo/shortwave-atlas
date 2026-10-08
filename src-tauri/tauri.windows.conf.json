@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["nsis", "msi"],
+    "externalBin": ["binaries/rigctld", "binaries/ffmpeg"],
+    "resources": {
+      "binaries/windows/*.dll": "./",
+      "binaries/licenses/**/*": "licenses/",
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    },
+    "windows": { "webviewInstallMode": { "type": "downloadBootstrapper" } }
+  }
+}

@@ -1,0 +1,35 @@
+# SW Atlas config: ~/.config/swatlas/swatlas.toml (or $SWATLAS_CONFIG).
+# Shared by the desktop app and swatlas-server. Every key is optional.
+# Environment overrides: SWATLAS_RIG, RIGCTLD_HOST, RIGCTLD_PORT, SWATLAS_RIG_MODEL,
+# SWATLAS_RIG_DEVICE, SWATLAS_RIG_BAUD, WEB_BIND, WEB_PORT, WEB_AUTH, AUDIO_DEVICE,
+# AUDIO_RATE, SWATLAS_LANG, SWATLAS_STATIONS, SWATLAS_UI_DIR.
+
+# lang = "es"                 # UI language; default follows the browser/OS
+# stations = "/path/to.json"  # default: the bundled sample (10 stations, not verified)
+
+[rig]
+# "sim" (no hardware, default) | "external" (a rigctld already running) | "spawn" (start our own)
+backend = "spawn"
+model = 1042                  # FTDX10 (`rigctl -l`)
+device = "/dev/serial/by-id/usb-Silicon_Labs_CP2105_Dual_USB_to_UART_Bridge_Controller_01A82072-if00-port0"
+baud = 9600                   # must match the radio's CAT RATE menu
+port = 4532                   # rigctld always listens on 127.0.0.1 only
+# host = "127.0.0.1"          # external only
+# rigctld = "rigctld"         # executable
+
+[qth]                         # starting QTH; a click on the globe overrides it (saved in qth.json)
+name = "Santiago, Chile"
+lat = -33.45
+lon = -70.67
+
+[server]                      # remote browser UI (always on in swatlas-server)
+enabled = false               # desktop app: also serve the remote UI
+bind = "127.0.0.1"            # anything beyond loopback requires auth
+port = 8080
+# auth = "user:A_LONG_PASSWORD"
+
+[audio]                       # rig audio (ffmpeg), for the desktop app and remote browsers
+enabled = false               # or pick the sound card in Settings → Audio
+device = "plughw:CARD=CODEC,DEV=0"
+rate = 16000                  # 16-bit mono PCM: 16 kHz = 256 kbit/s per listener
+# ffmpeg = "ffmpeg"           # executable

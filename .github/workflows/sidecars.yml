@@ -1,0 +1,33 @@
+# rigctld and ffmpeg for the Windows and macOS installers (assets/sidecars/build.py).
+# Cached by the script's hash: the pinned versions and build flags live in it.
+name: Sidecars
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          # cross-compiled with MinGW-w64; Hamlib's own Windows build is downloaded
+          - { target: x86_64-pc-windows-msvc, os: ubuntu-22.04 }
+          - { target: universal-apple-darwin, os: macos-14 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/binaries
+          key: sidecars-${{ matrix.target }}-${{ hashFiles('assets/sidecars/build.py') }}
+      - name: MinGW-w64
+        if: steps.cache.outputs.cache-hit != 'true' && matrix.target == 'x86_64-pc-windows-msvc'
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64 make
+      - name: Build
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: python3 assets/sidecars/build.py ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sidecars-${{ matrix.target }}
+          path: src-tauri/binaries
