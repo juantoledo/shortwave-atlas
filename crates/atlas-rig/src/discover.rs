@@ -115,6 +115,9 @@ pub fn scan_cu(root: &Path) -> Vec<SerialPortInfo> {
 /// Stable `/dev/serial/by-id/*` names first, then any `ttyUSB*` / `ttyACM*` they don't
 /// cover. Legacy `ttyS*` ports are skipped: almost all of them are phantoms.
 pub fn scan_dev(root: &Path) -> Vec<SerialPortInfo> {
+    // by-id targets are compared after canonicalize(), so the root must be canonical too
+    // (a temp dir under a symlink, like macOS's /var -> /private/var, would never match)
+    let root = &std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let dev = root.join("dev");
     let shown = |p: &Path| format!("/{}", p.strip_prefix(root).unwrap_or(p).to_string_lossy());
     let mut out = vec![];
