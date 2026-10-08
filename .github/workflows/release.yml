@@ -46,8 +46,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          read -r id draft < <(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
-            --jq ".[] | select(.tag_name == \"$TAG\") | \"\(.id) \(.draft)\"" | head -1)
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$TAG\") | \"\(.id) \(.draft)\"" > "$RUNNER_TEMP/releases"
+          # The installers go to this release by id, but the smoke tests and Promote find it by tag.
+          if [ "$(wc -l < "$RUNNER_TEMP/releases")" -gt 1 ]; then
+            echo "::error::more than one release for $TAG; delete the extra one"; exit 1
+          fi
+          read -r id draft < "$RUNNER_TEMP/releases" || true
           if [ -z "$id" ]; then echo "::error::no release for $TAG"; exit 1; fi
           if [ "$draft" != true ]; then echo "::error::$TAG is already published; only drafts are built"; exit 1; fi
           echo "id=$id" >> "$GITHUB_OUTPUT"
@@ -257,7 +262,7 @@ jobs:
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D dist -p '*.AppImage' -p '*.deb'
           # An AppImage never bundles the GL/EGL stack (it must match the host's driver); every
           # desktop has it, a bare runner does not.
-          sudo apt-get update && sudo apt-get install -y xvfb libegl1 libgl1 libgbm1
+          sudo apt-get update && sudo apt-get install -y xvfb libegl1 libgl1 libgles2 libgbm1
           app=$(ls dist/*.AppImage | head -1)
           chmod +x "$app"
           # Name every library the host still lacks at once, rather than one per release.
