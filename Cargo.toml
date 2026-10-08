@@ -8,3 +8,5 @@ default-members = ["crates/atlas-core", "crates/atlas-rig", "crates/atlas-server
 edition = "2021"
 license = "MIT"
 version = "0.1.0"
+# internal crates, never published to crates.io
+publish = false

@@ -281,3 +281,21 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--cool); outl
 .log { margin-top: 12px; }
 .log summary { cursor: pointer; font: 500 10.5px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
 .log pre { max-height: 220px; overflow: auto; margin: 8px 0 0; padding: 8px; background: #050a11; border: 1px solid var(--line); border-radius: 6px; font: 10.5px/1.45 var(--font-mono); color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Update available: a lit pill top right on the globe, and its panel */
+.hud-tr { top: 12px; right: 12px; pointer-events: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: min(360px, calc(100% - 24px)); }
+.update { text-transform: none; letter-spacing: normal; }
+.update-pill { color: var(--amber); border-color: rgba(255, 179, 63, 0.6); }
+.update-pill .lamp { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+.update-pill.warn { color: #ff8a7a; border-color: rgba(255, 138, 122, 0.6); }
+.update-pill.warn .lamp { background: #ff8a7a; box-shadow: none; }
+.update-panel {
+  width: 100%; max-height: min(60vh, 460px); overflow: auto; padding: 14px 16px;
+  background: rgba(8, 14, 23, 0.94); border: 1px solid var(--line-strong); border-radius: 10px;
+  font: 14px/1.5 var(--font-body); color: var(--text);
+}
+.update-panel h2 { margin: 0; font: 700 18px/1.2 var(--font-display); letter-spacing: 0.03em; text-transform: uppercase; }
+.update-panel .actions { flex-wrap: wrap; margin-top: 14px; }
+.update-panel a.btn { text-decoration: none; }
+.update-panel progress { width: 100%; margin-top: 12px; accent-color: var(--amber); }
+.note.url { overflow-wrap: anywhere; user-select: text; }

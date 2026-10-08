@@ -5,6 +5,7 @@ pub mod app;
 pub mod audio;
 pub mod config;
 pub mod server;
+pub mod update;
 
 pub use app::Atlas;
 pub use config::AppConfig;

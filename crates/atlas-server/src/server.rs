@@ -5,12 +5,15 @@
 //! - `GET /api/audio`: endless raw PCM (s16le, mono, rate in `X-Audio-Rate`) while audio is enabled
 //!   (the desktop app gets the same blocks over its `audio_open` channel).
 //! - everything else: the built UI.
+//!
+//! Remote browsers may not install updates: `Call::InstallUpdate` restarts the app on the
+//! host, so only the desktop window can send it.
 
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use atlas_core::api::{ClientMsg, ServerMsg};
+use atlas_core::api::{ApiError, Call, ClientMsg, ErrorKind, ServerMsg};
 use axum::body::Body;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Request, State};
@@ -118,7 +121,14 @@ async fn session(socket: WebSocket, atlas: Arc<Atlas>) {
         // one task per call: a slow power-on must not hold up lookups
         let (atlas, tx) = (atlas.clone(), tx.clone());
         tokio::spawn(async move {
-            let reply = match atlas.call(call).await {
+            let result = match call {
+                Call::InstallUpdate => Err(ApiError {
+                    kind: ErrorKind::Invalid,
+                    message: "Install updates from the SW Atlas window on the host.".into(),
+                }),
+                call => atlas.call(call).await,
+            };
+            let reply = match result {
                 Ok(v) => ServerMsg::Reply { id, ok: Some(v), err: None },
                 Err(e) => ServerMsg::Reply { id, ok: None, err: Some(e) },
             };
@@ -165,7 +175,7 @@ mod tests {
     use tokio_tungstenite::tungstenite;
 
     async fn start(auth: Option<&str>) -> (u16, Arc<Atlas>) {
-        let atlas = Atlas::start(AppConfig::default(), None, None).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), None, None, crate::app::tests::no_updates()).unwrap();
         let cfg = ServerConfig { auth: auth.map(String::from), ..ServerConfig::default() };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -212,6 +222,17 @@ mod tests {
             if let ServerMsg::Reply { id, ok, err } = serde_json::from_str(&t).unwrap() {
                 assert_eq!((id, err), (7, None));
                 assert_eq!(ok.unwrap()[0]["station"]["id"], "rebelde-5025");
+                break;
+            }
+        }
+
+        // remote browsers see updates but can't install them on the host
+        let call = r#"{"id":8,"call":{"cmd":"install_update"}}"#;
+        ws.send(tungstenite::Message::Text(call.into())).await.unwrap();
+        loop {
+            let tungstenite::Message::Text(t) = ws.next().await.unwrap().unwrap() else { continue };
+            if let ServerMsg::Reply { id, err, .. } = serde_json::from_str(&t).unwrap() {
+                assert_eq!((id, err.map(|e| e.kind)), (8, Some(ErrorKind::Invalid)));
                 break;
             }
         }

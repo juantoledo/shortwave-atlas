@@ -9,6 +9,7 @@ use crate::geo::LatLon;
 use crate::platform::Os;
 use crate::rig::{CommandError, RigCommand, RigState};
 use crate::setup::{BackendKind, Hint, RigChoice, RigctldStatus};
+use crate::update::Channel;
 
 /// The listener's location.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -68,6 +69,23 @@ pub enum Call {
     ApplyAudio(AudioChoice),
     /// Live capture status (result: `AudioDiagnostics`).
     AudioDiagnostics,
+    /// Update check and install progress (result: `UpdateStatus`).
+    UpdateStatus,
+    /// Check for an update now (result: `UpdateStatus`).
+    CheckUpdate,
+    /// Download, verify and install the offered update, then restart. Returns at once;
+    /// follow it with `UpdateStatus`. Desktop window only: the WebSocket refuses it.
+    InstallUpdate,
+    /// Turn automatic checks on or off, pick the channel, and save both.
+    SetUpdatePrefs(UpdatePrefs),
+}
+
+/// Argument of `Call::SetUpdatePrefs`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdatePrefs {
+    pub check: bool,
+    pub channel: Channel,
 }
 
 /// Result of `Call::RigSettings`.

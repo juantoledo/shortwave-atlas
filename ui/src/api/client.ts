@@ -14,6 +14,8 @@ import type { RigSettings } from '../types/generated/RigSettings';
 import type { RigState } from '../types/generated/RigState';
 import type { SerialPortInfo } from '../types/generated/SerialPortInfo';
 import type { SoundCard } from '../types/generated/SoundCard';
+import type { UpdatePrefs } from '../types/generated/UpdatePrefs';
+import type { UpdateStatus } from '../types/generated/UpdateStatus';
 import type { Transport } from './transport';
 
 export class Api {
@@ -37,4 +39,10 @@ export class Api {
   soundCards = () => this.transport.call({ cmd: 'sound_cards' }) as Promise<SoundCard[]>;
   applyAudio = (args: AudioChoice) => this.transport.call({ cmd: 'apply_audio', args }) as Promise<null>;
   audioDiagnostics = () => this.transport.call({ cmd: 'audio_diagnostics' }) as Promise<AudioDiagnostics>;
+
+  updateStatus = () => this.transport.call({ cmd: 'update_status' }) as Promise<UpdateStatus>;
+  checkUpdate = () => this.transport.call({ cmd: 'check_update' }) as Promise<UpdateStatus>;
+  /** Desktop window only: a remote browser gets an `invalid` error. */
+  installUpdate = () => this.transport.call({ cmd: 'install_update' }) as Promise<null>;
+  setUpdatePrefs = (args: UpdatePrefs) => this.transport.call({ cmd: 'set_update_prefs', args }) as Promise<null>;
 }

@@ -2,10 +2,12 @@
 //! `Call`, used by both the Tauri shell and the WebSocket.
 
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use atlas_core::api::{ApiError, AudioDiagnostics, AudioSettings, Call, ErrorKind, Info, Qth, RigSettings};
+use atlas_core::api::{
+    ApiError, AudioDiagnostics, AudioSettings, Call, ErrorKind, Info, Qth, RigSettings, UpdatePrefs,
+};
 use atlas_core::audio::{diagnose_audio, validate_audio, AudioChoice};
 use atlas_core::platform::Os;
 use atlas_core::setup::{validate_choice, RigChoice, RigModel};
@@ -16,7 +18,8 @@ use serde_json::Value;
 use tokio::sync::OnceCell;
 
 use crate::audio::{ffmpeg_version, sound_cards, AudioHub};
-use crate::config::{save_audio, save_rig, AppConfig};
+use crate::config::{save_audio, save_rig, save_update, AppConfig};
+use crate::update::{InstallRefused, UpdateService, Updater};
 
 const SAMPLE_STATIONS: &str = include_str!("../../../data/stations.sample.json");
 
@@ -35,6 +38,10 @@ pub struct Atlas {
     /// Where a QTH picked in the UI is saved (kept apart from the hand-edited TOML).
     qth_file: Option<PathBuf>,
     models: OnceCell<Vec<RigModel>>,
+    /// "Update available": checks, and installs on the desktop.
+    pub update: Arc<UpdateService>,
+    /// Ourselves, for the background install task.
+    me: Weak<Atlas>,
 }
 
 fn invalid(message: impl Into<String>) -> ApiError {
@@ -42,11 +49,13 @@ fn invalid(message: impl Into<String>) -> ApiError {
 }
 
 impl Atlas {
-    /// Load stations and the saved QTH, and start the rig. Needs a tokio runtime.
+    /// Load stations and the saved QTH, and start the rig and the update checks. Needs a
+    /// tokio runtime. `updater` is the desktop shell's, or a `ManifestUpdater`.
     pub fn start(
         config: AppConfig,
         config_path: Option<PathBuf>,
         qth_file: Option<PathBuf>,
+        updater: Arc<dyn Updater>,
     ) -> Result<Arc<Self>, String> {
         let json = match &config.stations {
             Some(p) => std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?,
@@ -61,7 +70,9 @@ impl Atlas {
         let rig = Rig::from_config(&config.rig, stations.clone(), qth.clone());
         let rig_config = RwLock::new(config.rig.clone());
         let audio = AudioHub::new(&config.audio.ffmpeg, config.audio.choice());
-        Ok(Arc::new(Self {
+        let update = UpdateService::new(updater, &config.update, config.update_locked.clone());
+        update.spawn_checks();
+        Ok(Arc::new_cyclic(|me| Self {
             rig,
             audio,
             config,
@@ -71,6 +82,8 @@ impl Atlas {
             qth,
             qth_file,
             models: OnceCell::new(),
+            update,
+            me: me.clone(),
         }))
     }
 
@@ -142,6 +155,35 @@ impl Atlas {
     fn audio_diagnostics(&self) -> AudioDiagnostics {
         let status = self.audio.status();
         AudioDiagnostics { hints: diagnose_audio(Os::CURRENT, &status), status }
+    }
+
+    /// Start downloading and installing the offered update in the background.
+    fn install_update(&self) -> Result<(), ApiError> {
+        self.update.begin_install().map_err(|e| match e {
+            InstallRefused::Manual => invalid("This copy of SW Atlas is updated by hand: download the new version."),
+            InstallRefused::NotNow(why) => ApiError { kind: ErrorKind::Conflict, message: why.into() },
+        })?;
+        let atlas = self.me.upgrade().ok_or_else(|| ApiError::internal("shutting down"))?;
+        tokio::spawn(async move {
+            let (a, b) = (atlas.clone(), atlas.clone());
+            atlas.update.clone().run_install(async move { a.shutdown().await }, async move { b.resume().await }).await;
+        });
+        Ok(())
+    }
+
+    /// Bring the rig back after an install that failed past `shutdown` (audio restarts with
+    /// the next listener).
+    async fn resume(&self) {
+        self.rig.reconfigure(&self.rig_config()).await;
+    }
+
+    fn set_update_prefs(&self, p: UpdatePrefs) -> Result<(), ApiError> {
+        self.update.set_prefs(p.check, p.channel);
+        if let Some(path) = &self.config_path {
+            save_update(path, p.check, p.channel)
+                .map_err(|e| ApiError::internal(format!("Changed, but could not save: {e}")))?;
+        }
+        Ok(())
     }
 
     pub fn qth(&self) -> Qth {
@@ -218,21 +260,39 @@ impl Atlas {
                 Ok(Value::Null)
             }
             Call::AudioDiagnostics => json(serde_json::to_value(self.audio_diagnostics())),
+            Call::UpdateStatus => json(serde_json::to_value(self.update.status())),
+            Call::CheckUpdate => json(serde_json::to_value(self.update.check_now().await)),
+            Call::InstallUpdate => {
+                self.install_update()?;
+                Ok(Value::Null)
+            }
+            Call::SetUpdatePrefs(p) => {
+                self.set_update_prefs(p)?;
+                Ok(Value::Null)
+            }
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use atlas_core::audio::default_device;
     use atlas_core::rig::{Power, RigCommand};
+    use atlas_core::update::{Channel, Packaging, UpdateState};
+
+    use crate::update::fake::FakeUpdater;
+
+    /// The server's updater, finding nothing.
+    pub(crate) fn no_updates() -> Arc<dyn Updater> {
+        FakeUpdater::new(Packaging::Server, None)
+    }
 
     #[tokio::test]
     async fn lookup_and_qth_round_trip() {
         let dir = std::env::temp_dir().join(format!("swatlas-test-{}", std::process::id()));
         let qth_file = dir.join("qth.json");
-        let atlas = Atlas::start(AppConfig::default(), None, Some(qth_file.clone())).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), None, Some(qth_file.clone()), no_updates()).unwrap();
 
         let c = atlas.call(Call::Lookup { freq_hz: 13_570_000 }).await.unwrap();
         assert_eq!(c[0]["site"]["id"], "greenville");
@@ -241,7 +301,7 @@ mod tests {
         atlas.call(Call::SetQth(madrid.clone())).await.unwrap();
         assert_eq!(atlas.qth(), madrid);
         // a new instance picks the saved QTH up
-        let again = Atlas::start(AppConfig::default(), None, Some(qth_file)).unwrap();
+        let again = Atlas::start(AppConfig::default(), None, Some(qth_file), no_updates()).unwrap();
         assert_eq!(again.qth(), madrid);
         let _ = std::fs::remove_dir_all(dir);
 
@@ -251,7 +311,7 @@ mod tests {
 
     #[tokio::test]
     async fn sim_rig_is_driven_through_calls() {
-        let atlas = Atlas::start(AppConfig::default(), None, None).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), None, None, no_updates()).unwrap();
         let mut rx = atlas.rig.subscribe();
         while atlas.rig.state().power != Power::On {
             rx.changed().await.unwrap();
@@ -270,7 +330,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("swatlas-audio-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("swatlas.toml");
-        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, no_updates()).unwrap();
 
         let bad = AudioChoice { enabled: true, device: "-f lavfi".into(), rate: 16_000 };
         let e = atlas.call(Call::ApplyAudio(bad)).await.unwrap_err();
@@ -299,7 +359,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("swatlas-apply-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("swatlas.toml");
-        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, no_updates()).unwrap();
         assert_eq!(atlas.call(Call::Info).await.unwrap()["configured"], false);
 
         let bad = RigChoice {
@@ -339,6 +399,36 @@ mod tests {
         while atlas.rig.state().link != Link::Off {
             rx.changed().await.unwrap();
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn update_calls() {
+        let dir = std::env::temp_dir().join(format!("swatlas-update-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("swatlas.toml");
+        let fake = FakeUpdater::new(Packaging::Desktop { appimage: true }, Some("9.0.0"));
+        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, fake.clone()).unwrap();
+
+        let s = atlas.call(Call::UpdateStatus).await.unwrap();
+        assert_eq!((s["state"]["state"].as_str(), s["install"]["kind"].as_str()), (Some("idle"), Some("auto")));
+        let e = atlas.call(Call::InstallUpdate).await.unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Conflict, "nothing offered yet");
+        let s = atlas.call(Call::CheckUpdate).await.unwrap();
+        assert_eq!(s["state"]["release"]["version"], "9.0.0");
+
+        atlas.call(Call::InstallUpdate).await.unwrap();
+        // the fake installs but can't restart the app: the failure says so
+        while !matches!(atlas.update.status().state, UpdateState::Failed { .. }) {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(fake.installed());
+
+        atlas.call(Call::SetUpdatePrefs(UpdatePrefs { check: false, channel: Channel::Beta })).await.unwrap();
+        let saved: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!((saved.update.check, saved.update.channel), (false, Channel::Beta));
+        let s = atlas.call(Call::UpdateStatus).await.unwrap();
+        assert_eq!((s["check"].as_bool(), s["channel"].as_str()), (Some(false), Some("beta")));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

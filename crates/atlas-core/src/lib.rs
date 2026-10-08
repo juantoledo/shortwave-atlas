@@ -10,6 +10,7 @@ pub mod schedule;
 pub mod setup;
 pub mod stations;
 pub mod tools;
+pub mod update;
 
 /// Minutes since 00:00 UTC for a Unix time in seconds.
 pub fn utc_minute(unix_secs: u64) -> u32 {

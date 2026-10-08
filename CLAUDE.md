@@ -10,7 +10,12 @@ See README.md for layout and commands.
   `Atlas::call` (`crates/atlas-server/src/app.rs`), and add a method in `ui/src/api/client.ts`.
   Do not add Tauri-only commands or WebSocket-only messages. The one exception is the rig audio
   PCM, a transport stream rather than a `Call`: `GET /api/audio` (browser) and the Tauri
-  `audio_open`/`audio_close` channel (desktop) carry the same `AudioHub` blocks.
+  `audio_open`/`audio_close` channel (desktop) carry the same `AudioHub` blocks. And the WebSocket
+  refuses `Call::InstallUpdate`: only the desktop window may restart the app on the host.
+- Updates: `atlas_core::update` (manifest, versions, per-OS install mode, state) and
+  `atlas-server/src/update.rs` (`UpdateService`, checks). The desktop installs through Tauri's
+  updater (`TauriUpdater` in `src-tauri`), verified with the `pubkey` in `tauri.conf.json`.
+  Releases, channels and the signing key: `docs/releasing.md`.
 - Shared types are generated: `cargo test` writes `ui/src/types/generated/` (ts-rs). Commit them
   and never edit them by hand.
 - Logic that doesn't touch IO goes in `atlas-core`, with unit tests. The UI only keeps animation
@@ -30,7 +35,8 @@ See README.md for layout and commands.
 - `cargo test` (core, rig and server; the real-rigctld test skips without `rigctld`)
 - `cargo clippy --all-targets`
 - Windows/macOS compile check (no SDKs needed): `cargo check -p atlas-core -p atlas-rig -p atlas-server
-  --all-targets --target x86_64-pc-windows-msvc` (and `aarch64-apple-darwin`)
+  --all-targets --no-default-features --target x86_64-pc-windows-msvc` (and `aarch64-apple-darwin`;
+  `--no-default-features` drops the update check's HTTPS, whose `ring` needs a C compiler for the target)
 - `npm --prefix ui test`, `npm --prefix ui run typecheck`
 - `npm run dev` (desktop), `npm run server` (headless + remote UI on :8080)
 - Toolchain: Node 22 via nvm (`~/.nvm`), Rust via rustup (`~/.cargo/bin`).

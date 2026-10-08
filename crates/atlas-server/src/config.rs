@@ -7,6 +7,7 @@ use atlas_core::api::Qth;
 use atlas_core::audio::{default_device, validate_audio, AudioChoice};
 use atlas_core::platform::Os;
 use atlas_core::setup::RigChoice;
+use atlas_core::update::Channel;
 use atlas_rig::{BackendKind, RigConfig};
 use serde::{Deserialize, Serialize};
 use toml_edit::{DocumentMut, Item, Table, Value};
@@ -17,6 +18,7 @@ pub struct AppConfig {
     pub rig: RigConfig,
     pub server: ServerConfig,
     pub audio: AudioConfig,
+    pub update: UpdateConfig,
     /// Starting QTH; a QTH picked in the UI is saved separately (see `Atlas`).
     pub qth: Qth,
     /// UI language (`en`, `es`); unset = follow the browser/OS.
@@ -29,6 +31,9 @@ pub struct AppConfig {
     /// `AudioChoice` fields forced by environment variables.
     #[serde(skip)]
     pub audio_locked: Vec<String>,
+    /// `UpdateConfig` fields forced by environment variables.
+    #[serde(skip)]
+    pub update_locked: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -76,6 +81,23 @@ impl AudioConfig {
 
     pub fn with_choice(&self, c: &AudioChoice) -> Self {
         Self { enabled: c.enabled, device: c.device.clone(), rate: c.rate, ffmpeg: self.ffmpeg.clone() }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateConfig {
+    /// Check for a new release at start and every few hours (one small file from GitHub
+    /// Pages; nothing about you or your rig is sent).
+    pub check: bool,
+    pub channel: Channel,
+    /// Read this manifest instead of the channel's (to test a release candidate).
+    pub url: Option<String>,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self { check: true, channel: Channel::Stable, url: None }
     }
 }
 
@@ -171,7 +193,28 @@ impl AppConfig {
         if let Some(v) = get("SWATLAS_UI_DIR") {
             self.server.ui_dir = Some(v.into());
         }
+        if let Some(v) = get("SWATLAS_UPDATE_CHECK") {
+            self.update.check = match v.to_ascii_lowercase().as_str() {
+                "1" | "true" | "yes" | "on" => true,
+                "0" | "false" | "no" | "off" => false,
+                _ => return Err(format!("SWATLAS_UPDATE_CHECK must be 1 or 0, not {v:?}")),
+            };
+            if !self.update_locked.iter().any(|f| f == "check") {
+                self.update_locked.push("check".into());
+            }
+        }
+        if let Some(v) = get("SWATLAS_UPDATE_URL") {
+            self.update.url = Some(v).filter(|s| !s.is_empty());
+        }
         Ok(())
+    }
+
+    /// Development builds (`npm run dev`, `npm run server`) don't look for updates unless
+    /// `SWATLAS_UPDATE_CHECK` says so.
+    pub fn quiet_dev_updates(&mut self, debug_build: bool) {
+        if debug_build && !self.update_locked.iter().any(|f| f == "check") {
+            self.update.check = false;
+        }
     }
 
     /// Refuse unsafe server settings before anything listens.
@@ -224,6 +267,12 @@ pub fn save_audio(path: &Path, choice: &AudioChoice) -> Result<(), String> {
             ("rate", i64::from(choice.rate).into()),
         ],
     )
+}
+
+/// Write the update preferences into the `[update]` table, the same way as `save_rig`
+/// (`url` is kept).
+pub fn save_update(path: &Path, check: bool, channel: Channel) -> Result<(), String> {
+    save_table(path, "update", [("check", check.into()), ("channel", channel.as_str().into())])
 }
 
 /// Set `keys` in table `name` of the TOML at `path`, keeping everything else.
@@ -417,6 +466,37 @@ mod tests {
         let c: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(c.rig.choice(), ftdx10());
         assert_eq!(c.rig.rigctld, "rigctld");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn update_settings() {
+        let c: AppConfig = toml::from_str(
+            "[update]
+channel = \"beta\"",
+        )
+        .unwrap();
+        assert_eq!((c.update.check, c.update.channel), (true, Channel::Beta));
+
+        let mut c = AppConfig::default();
+        c.quiet_dev_updates(true);
+        assert!(!c.update.check, "dev builds stay quiet");
+        let mut c = AppConfig::default();
+        c.apply_env(env(&[("SWATLAS_UPDATE_CHECK", "1"), ("SWATLAS_UPDATE_URL", "https://x/beta.json")])).unwrap();
+        c.quiet_dev_updates(true);
+        assert!(c.update.check, "unless asked to check");
+        assert_eq!(
+            (c.update_locked.as_slice(), c.update.url.as_deref()),
+            (&["check".to_string()][..], Some("https://x/beta.json"))
+        );
+        assert!(AppConfig::default().apply_env(env(&[("SWATLAS_UPDATE_CHECK", "maybe")])).is_err());
+
+        let path = tmp("update");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, include_str!("../../../docs/swatlas.example.toml")).unwrap();
+        save_update(&path, false, Channel::Beta).unwrap();
+        let c: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!((c.update.check, c.update.channel, c.rig.model), (false, Channel::Beta, 1042));
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

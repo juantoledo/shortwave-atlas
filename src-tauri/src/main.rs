@@ -5,6 +5,8 @@
 //! Rig audio comes over a binary channel (`audio_open`/`audio_close`), the counterpart of
 //! the browser's `GET /api/audio`, fed by the same `AudioHub`.
 //! With `server.enabled`, the same process also serves the remote browser UI.
+//! Updates are found, downloaded, verified and installed by Tauri's updater, driven by the
+//! shared `UpdateService` through `TauriUpdater`.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -12,12 +14,16 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
 use atlas_core::api::{ApiError, Call, ErrorKind};
+use atlas_core::update::{release_page, Packaging, Release, RELEASES_PAGE};
 use atlas_server::config::config_dir;
+use atlas_server::update::{Progress, Updater};
 use atlas_server::{server, AppConfig, Atlas};
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::{Channel, InvokeResponseBody};
-use tauri::{Emitter, Manager, RunEvent, State};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+use tauri_plugin_updater::{Update, UpdaterExt};
 
 #[tauri::command]
 async fn call(atlas: State<'_, Arc<Atlas>>, call: Call) -> Result<serde_json::Value, ApiError> {
@@ -71,24 +77,86 @@ fn audio_close(streams: State<'_, AudioStreams>, id: u32) {
     }
 }
 
+/// Tauri's updater: checks the manifest, downloads, verifies the signature against the
+/// `pubkey` in `tauri.conf.json`, installs and restarts.
+struct TauriUpdater {
+    app: AppHandle,
+    /// The update found by the last check, and its verified bytes once downloaded.
+    pending: tokio::sync::Mutex<Option<(Update, Option<Vec<u8>>)>>,
+}
+
+#[async_trait]
+impl Updater for TauriUpdater {
+    fn packaging(&self) -> Packaging {
+        // only an AppImage can replace itself on Linux; ignored elsewhere
+        Packaging::Desktop { appimage: std::env::var_os("APPIMAGE").is_some() }
+    }
+
+    async fn check(&self, url: &str) -> Result<Option<Release>, String> {
+        let endpoint = url.parse().map_err(|e| format!("{url}: {e}"))?;
+        let updater =
+            self.app.updater_builder().endpoints(vec![endpoint]).and_then(|b| b.build()).map_err(|e| e.to_string())?;
+        let found = updater.check().await.map_err(|e| e.to_string())?;
+        let release = found.as_ref().map(|u| Release {
+            version: u.version.clone(),
+            notes: u.body.clone().unwrap_or_default(),
+            pub_date: u.raw_json.get("pub_date").and_then(|d| d.as_str()).map(String::from),
+            url: release_page(u.download_url.as_str()).unwrap_or_else(|| RELEASES_PAGE.into()),
+        });
+        *self.pending.lock().await = found.map(|u| (u, None));
+        Ok(release)
+    }
+
+    async fn download(&self, progress: Progress) -> Result<(), String> {
+        let mut pending = self.pending.lock().await;
+        let Some((update, bytes)) = pending.as_mut() else { return Err("check for updates first".into()) };
+        let mut done = 0u64;
+        let data = update
+            .download(
+                |chunk, total| {
+                    done += chunk as u64;
+                    progress(done, total);
+                },
+                || {},
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        *bytes = Some(data);
+        Ok(())
+    }
+
+    async fn install(&self) -> Result<(), String> {
+        let pending = self.pending.lock().await;
+        let Some((update, Some(bytes))) = pending.as_ref() else { return Err("nothing downloaded".into()) };
+        // Windows: starts the installer and exits; macOS and Linux: replaces the app in place
+        update.install(bytes).map_err(|e| e.to_string())?;
+        tracing::info!("updated to {}, restarting", update.version);
+        self.app.restart()
+    }
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // Same config as swatlas-server, so both can share one machine's settings.
             let dir = config_dir();
             let path = std::env::var_os("SWATLAS_CONFIG").map(Into::into).unwrap_or_else(|| dir.join("swatlas.toml"));
-            let cfg = AppConfig::load(&path)?;
+            let mut cfg = AppConfig::load(&path)?;
+            cfg.quiet_dev_updates(cfg!(debug_assertions));
             if cfg.server.enabled {
                 cfg.validate_server()?;
             }
             let server_cfg = cfg.server.clone();
+            let updater = Arc::new(TauriUpdater { app: app.handle().clone(), pending: Default::default() });
             // Atlas spawns its tasks on Tauri's tokio runtime.
-            let atlas =
-                tauri::async_runtime::block_on(async { Atlas::start(cfg, Some(path), Some(dir.join("qth.json"))) })?;
+            let atlas = tauri::async_runtime::block_on(async {
+                Atlas::start(cfg, Some(path), Some(dir.join("qth.json")), updater)
+            })?;
 
             let mut states = atlas.rig.subscribe();
             let handle = app.handle().clone();

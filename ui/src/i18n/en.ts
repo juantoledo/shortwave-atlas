@@ -2,6 +2,7 @@
 
 import type { AudioHint } from '../types/generated/AudioHint';
 import type { Hint } from '../types/generated/Hint';
+import type { ManualReason } from '../types/generated/ManualReason';
 import type { Os } from '../types/generated/Os';
 
 /** Hint texts that differ on some OS (the shared text is the Linux one). */
@@ -147,6 +148,45 @@ export const en = {
       device_busy: ['The serial port is in use', 'Another program (WSJT-X, flrig, another rigctld) has it open. Close it, or connect to that program\'s rigctld with "Running rigctld".'],
     },
   } as ByOs<Hint>,
+
+  updatePill: (v: string) => `Update ${v} available`,
+  updateDownloadingPill: (pct: string) => `Downloading update ${pct}`,
+  updateInstallingPill: 'Installing update…',
+  updateFailedPill: 'Update failed',
+  updateTitle: (v: string) => `SW Atlas ${v} is available`,
+  updateCurrent: (v: string) => `You have ${v}.`,
+  updateNotes: "What's new",
+  updateInstall: 'Install and restart',
+  updateRestartNote: 'SW Atlas restarts to finish. The radio connection and the audio stop for a moment.',
+  updateDownload: 'Download',
+  updateManual: {
+    server: 'Download the new swatlas-server archive, replace the files and restart the service.',
+    linux_package: 'Download the new .deb and install it (or switch to the AppImage, which updates itself).',
+  } as Record<ManualReason, string>,
+  updateOnHost: 'Install it from the SW Atlas window on the computer wired to the radio.',
+  updateDownloading: 'Downloading and checking the signature…',
+  updateInstalling: 'Installing. SW Atlas will restart.',
+  updateLater: 'Later',
+  updateSkip: 'Skip this version',
+  updateRetry: 'Retry',
+  updatesSection: 'Updates',
+  updateVersion: (v: string) => `version ${v}`,
+  updateAuto: 'Check automatically',
+  updateOn: 'On',
+  updateOff: 'Off',
+  updateChannel: 'Channel',
+  updateStable: 'Stable',
+  updateBeta: 'Beta',
+  updateBetaHelp: 'Beta also offers release candidates, a few days before everyone else.',
+  updatePrivacy: 'At start and every 6 hours SW Atlas reads one small file from GitHub Pages. Nothing about you or your radio is sent.',
+  updateCheckNow: 'Check now',
+  updateIdle: 'Not checked yet',
+  updateChecking: 'Checking…',
+  updateUpToDate: (at: string) => `Up to date · checked at ${at}`,
+  updateDisabled: 'Automatic checks are off',
+  updateAvailable: (v: string) => `Version ${v} is available`,
+  updateBusy: (v: string) => `Installing ${v}…`,
+  updateCheckFailed: (m: string) => `Could not check: ${m}`,
 
   audioSection: 'Audio',
   audioOffLabel: 'Off',

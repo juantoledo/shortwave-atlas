@@ -3,10 +3,11 @@ name = "atlas-rig"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
+publish.workspace = true
 
 [dependencies]
 async-trait = "0.1.92"
-atlas-core = { version = "0.1.0", path = "../atlas-core" }
+atlas-core = { path = "../atlas-core" }
 serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.53.2", features = ["net", "io-util", "sync", "time", "process", "macros", "rt-multi-thread"] }
 tracing = "0.1.44"

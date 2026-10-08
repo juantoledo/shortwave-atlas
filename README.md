@@ -28,7 +28,7 @@ reference             the prototypes this grew from
 ```
 
 ## Install
-Releases have installers for each OS: `.deb` or AppImage for Linux, `.msi` or `-setup.exe` for
+Releases have installers for each OS: `.deb` or AppImage for Linux, `-setup.exe` for
 Windows, and `.dmg` for macOS. There is also a `swatlas-server` archive per OS.
 
 | | Rig (rigctld) and audio (ffmpeg) | Serial port | Notes |
@@ -100,6 +100,26 @@ desktop app and the server share it. The prototype's environment variables (`RIG
 still work as overrides. A QTH picked by clicking the globe is saved in `~/.config/swatlas/qth.json`.
 
 Rig-specific notes live in `docs/rigs/` (start with `ftdx10.md`).
+
+## Updates
+When a new version is out, a lamp on the globe says **Update x.y.z available**. Open it for the
+release notes and:
+- **Windows, macOS and the Linux AppImage:** press **Install and restart**. SW Atlas downloads the
+  update, checks its signature, stops rigctld and ffmpeg, installs and starts again. Nothing is
+  downloaded until you press it.
+- **Linux `.deb` and `swatlas-server`:** the panel links to the release; install it the way you
+  installed the first one.
+- **A remote browser** sees the notice, but only the window on the computer wired to the radio
+  can install.
+
+*Settings → Updates* turns the automatic check off and picks the channel: **Stable**, or **Beta**
+for release candidates as well. The check reads one small file from GitHub Pages at start and
+every 6 hours; nothing about you or your radio is sent. In the config file it is `[update]`
+(`check = false`), or set `SWATLAS_UPDATE_CHECK=0`.
+
+Every release lists `SHA256SUMS`, CycloneDX SBOMs and GitHub build attestations. To check that a
+file was built by this repository's release workflow: `gh attestation verify <file> -R
+juantoledo/shortwave-atlas`. How releases are made: [docs/releasing.md](docs/releasing.md).
 
 ## Remote access
 `swatlas-server` refuses to listen beyond loopback without `server.auth`. Use Tailscale rather than

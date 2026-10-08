@@ -33,3 +33,7 @@ enabled = false               # or pick the sound card in Settings → Audio
 device = "plughw:CARD=CODEC,DEV=0"
 rate = 16000                  # 16-bit mono PCM: 16 kHz = 256 kbit/s per listener
 # ffmpeg = "ffmpeg"           # executable
+
+[update]                      # "Update available": one small file from GitHub Pages, nothing about you is sent
+check = true                  # at start and every 6 hours; or Settings → Updates (SWATLAS_UPDATE_CHECK=0)
+channel = "stable"            # "beta" also offers release candidates

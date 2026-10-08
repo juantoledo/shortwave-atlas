@@ -6,7 +6,9 @@ import { Hud } from './components/Hud';
 import { Settings } from './components/settings/Settings';
 import { StationList } from './components/StationList';
 import { Tuner } from './components/Tuner';
+import { UpdateBanner } from './components/UpdateBanner';
 import { useCandidates, useCore, useNow, useStationList, useTuning } from './hooks/useCore';
+import { useUpdate } from './hooks/useUpdate';
 import { I18nProvider, pickMessages } from './i18n';
 import type { Candidate } from './types/generated/Candidate';
 import type { Mode } from './types/generated/Mode';
@@ -16,6 +18,7 @@ const MSG_MS = 6000;
 
 export function App() {
   const { api, info, reloadInfo, rig, status } = useCore();
+  const update = useUpdate(api);
   const [view, setView] = useState<'atlas' | 'settings'>('atlas');
   const t = useMemo(() => pickMessages(info?.lang, navigator.languages), [info?.lang]);
   useEffect(() => { document.documentElement.lang = t.locale; }, [t]);
@@ -84,11 +87,12 @@ export function App() {
         <main className="stage" aria-label={t.globe}>
           {qth && <Globe sel={on ? sel : null} qth={qth} frame={frame} onQth={moveQth} failedMsg={t.globeFailed} />}
           <Hud frame={frame} onFrame={() => setFrame((f) => !f)} />
+          {api && <UpdateBanner update={update} transport={api.transport.kind} onError={onError} />}
         </main>
 
         <aside className="console" aria-label={view === 'settings' ? t.settings : t.stations}>
           {view === 'settings' && api && (
-            <Settings api={api} os={info?.os ?? 'linux'} rig={rig} onBack={() => setView('atlas')} onError={onError} onApplied={reloadInfo} />
+            <Settings api={api} os={info?.os ?? 'linux'} rig={rig} update={update} onBack={() => setView('atlas')} onError={onError} onApplied={reloadInfo} />
           )}
           {/* kept mounted while Settings is open, so audio keeps playing */}
           <div className="pane" hidden={view === 'settings'}>

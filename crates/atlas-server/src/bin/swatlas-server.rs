@@ -7,25 +7,36 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use std::sync::Arc;
+
+use atlas_core::update::Packaging;
 use atlas_server::config::config_dir;
+use atlas_server::update::{ManifestUpdater, CURRENT};
 use atlas_server::{server, AppConfig, Atlas};
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    if std::env::args().nth(1).is_some_and(|a| a == "--version" || a == "-V") {
+        println!("swatlas-server {CURRENT}");
+        return ExitCode::SUCCESS;
+    }
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
     let path =
         std::env::var_os("SWATLAS_CONFIG").map(PathBuf::from).unwrap_or_else(|| config_dir().join("swatlas.toml"));
-    let cfg = match AppConfig::load(&path).and_then(|c| c.validate_server().map(|_| c)) {
+    let mut cfg = match AppConfig::load(&path).and_then(|c| c.validate_server().map(|_| c)) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("swatlas-server: {e}");
             return ExitCode::FAILURE;
         }
     };
+    cfg.quiet_dev_updates(cfg!(debug_assertions));
     let server_cfg = cfg.server.clone();
-    let atlas = match Atlas::start(cfg, Some(path), Some(config_dir().join("qth.json"))) {
+    // the server only says that an update exists: it is replaced by hand
+    let updater = Arc::new(ManifestUpdater::new(Packaging::Server));
+    let atlas = match Atlas::start(cfg, Some(path), Some(config_dir().join("qth.json")), updater) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("swatlas-server: {e}");
