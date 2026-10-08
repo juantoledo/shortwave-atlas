@@ -334,11 +334,10 @@ mod tests {
     async fn unreachable_external_rigctld_is_diagnosed() {
         let rig = Rig::start(Arc::new(hamlib::Hamlib::new("127.0.0.1", 1)));
         let mut rx = rig.subscribe();
-        // first poll fails to connect
-        for _ in 0..50 {
-            if rig.diagnostics().last_error.is_some() {
-                break;
-            }
+        // first poll fails to connect: at once on Linux and macOS, but Windows retries a
+        // refused connection for ~2 s before reporting it
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while rig.diagnostics().last_error.is_none() && tokio::time::Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert_eq!(rx.borrow_and_update().link, Link::Down);
