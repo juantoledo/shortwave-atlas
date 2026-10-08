@@ -255,9 +255,17 @@ jobs:
         run: |
           set -e
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D dist -p '*.AppImage' -p '*.deb'
-          sudo apt-get update && sudo apt-get install -y xvfb
+          # An AppImage never bundles the GL/EGL stack (it must match the host's driver); every
+          # desktop has it, a bare runner does not.
+          sudo apt-get update && sudo apt-get install -y xvfb libegl1 libgl1 libgbm1
           app=$(ls dist/*.AppImage | head -1)
           chmod +x "$app"
+          # Name every library the host still lacks at once, rather than one per release.
+          (cd dist && "./$(basename "$app")" --appimage-extract > /dev/null)
+          root=dist/squashfs-root/usr
+          missing=$(LD_LIBRARY_PATH="$root/lib:$root/lib/x86_64-linux-gnu" ldd "$root"/bin/* 2>/dev/null | grep 'not found' | sort -u || true)
+          [ -z "$missing" ] || { echo "::error::the AppImage needs host libraries:"; echo "$missing"; exit 1; }
+          rm -rf dist/squashfs-root
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a "$app" &
           pid=$!
           sleep 20
