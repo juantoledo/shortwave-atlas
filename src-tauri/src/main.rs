@@ -17,7 +17,7 @@ use atlas_server::config::config_dir;
 use atlas_server::{server, AppConfig, Atlas};
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::{Channel, InvokeResponseBody};
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, Manager, RunEvent, State};
 
 #[tauri::command]
 async fn call(atlas: State<'_, Arc<Atlas>>, call: Call) -> Result<serde_json::Value, ApiError> {
@@ -112,6 +112,14 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![call, audio_open, audio_close])
-        .run(tauri::generate_context!())
-        .expect("error while running SW Atlas");
+        .build(tauri::generate_context!())
+        .expect("error while running SW Atlas")
+        .run(|app, event| {
+            // Tauri exits the process without dropping state, so stop rigctld and ffmpeg here
+            if let RunEvent::Exit = event {
+                if let Some(atlas) = app.try_state::<Arc<Atlas>>() {
+                    tauri::async_runtime::block_on(atlas.shutdown());
+                }
+            }
+        });
 }

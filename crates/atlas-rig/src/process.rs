@@ -36,6 +36,67 @@ pub fn command(name: &str) -> Command {
     cmd
 }
 
+/// Tie a started helper to this process, so it cannot outlive SW Atlas. A clean exit stops
+/// the helpers itself (`Atlas::shutdown`); this covers a crash or Task Manager on Windows,
+/// where the helper joins a job that the OS kills when our last handle to it closes.
+/// Elsewhere it does nothing.
+pub fn tie_to_app(child: &tokio::process::Child) {
+    #[cfg(windows)]
+    if let Some(h) = child.raw_handle() {
+        job::assign(h);
+    }
+    #[cfg(not(windows))]
+    let _ = child;
+}
+
+#[cfg(windows)]
+mod job {
+    use std::os::windows::io::RawHandle;
+    use std::sync::OnceLock;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    /// The job's handle (0 if it could not be made), open until the process ends.
+    static JOB: OnceLock<usize> = OnceLock::new();
+
+    fn job() -> Option<HANDLE> {
+        let h = *JOB.get_or_init(|| unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                tracing::warn!("cannot create a job for helper processes: {}", std::io::Error::last_os_error());
+                return 0;
+            }
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let ok = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&raw const info).cast(),
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            if ok == 0 {
+                tracing::warn!("cannot set up the helper job: {}", std::io::Error::last_os_error());
+                CloseHandle(job);
+                return 0;
+            }
+            job as usize
+        });
+        (h != 0).then_some(h as HANDLE)
+    }
+
+    pub fn assign(process: RawHandle) {
+        let Some(job) = job() else { return };
+        // fails only if the helper already exited, or our own job forbids it
+        if unsafe { AssignProcessToJobObject(job, process as HANDLE) } == 0 {
+            tracing::debug!("helper not tied to the app: {}", std::io::Error::last_os_error());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

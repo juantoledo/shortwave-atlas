@@ -161,6 +161,7 @@ pub fn supervise(spec: Spec) -> Supervisor {
                         set(&|s| s.status.spawn_error = Some(msg.clone()));
                     }
                     Ok(mut child) => {
+                        crate::process::tie_to_app(&child);
                         tracing::info!("rigctld started: {} {}", spec.program, spec.args().join(" "));
                         set(&|s| {
                             s.status.spawn_error = None;

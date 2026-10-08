@@ -41,8 +41,7 @@ async fn main() -> ExitCode {
         }
         _ = shutdown() => tracing::info!("stopping"),
     }
-    // dropping the last Atlas stops the poller and any rigctld we started
-    drop(atlas);
+    atlas.shutdown().await;
     ExitCode::SUCCESS
 }
 

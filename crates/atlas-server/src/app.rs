@@ -74,6 +74,13 @@ impl Atlas {
         }))
     }
 
+    /// Stop the helpers we started (rigctld, ffmpeg) and wait until they have exited, so the
+    /// serial port, rigctld's TCP port and the sound card are free when the app is gone.
+    pub async fn shutdown(&self) {
+        self.audio.shutdown().await;
+        self.rig.disconnect().await;
+    }
+
     pub fn rig_config(&self) -> RigConfig {
         self.rig_config.read().expect("rig config lock").clone()
     }

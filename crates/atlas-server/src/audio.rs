@@ -16,7 +16,7 @@ use atlas_core::audio::{
     SoundCard,
 };
 use atlas_core::platform::Os;
-use atlas_rig::process::command;
+use atlas_rig::process::{command, tie_to_app};
 use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::{Child, ChildStderr};
@@ -147,7 +147,10 @@ impl AudioHub {
                 .kill_on_drop(true)
                 .spawn();
             let child = match spawned {
-                Ok(c) => c,
+                Ok(c) => {
+                    tie_to_app(&c);
+                    c
+                }
                 Err(e) => {
                     inner.spawn_error = Some(e.to_string());
                     return Err(OpenError::Spawn(e));
@@ -185,6 +188,21 @@ impl AudioHub {
         inner.last_error = None;
         inner.spawn_error = None;
         inner.log.clear();
+    }
+
+    /// Stop ffmpeg and end every stream, waiting until ffmpeg is gone (app exit).
+    pub async fn shutdown(&self) {
+        let pump = {
+            let mut inner = self.inner.lock().expect("audio lock");
+            inner.subs.clear();
+            inner.generation += 1;
+            inner.running = false;
+            inner.pump.take()
+        };
+        if let Some(p) = pump {
+            p.abort();
+            let _ = p.await; // the pump's child is dropped, so killed, by now
+        }
     }
 
     pub fn choice(&self) -> AudioChoice {
