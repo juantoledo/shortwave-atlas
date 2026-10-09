@@ -9,11 +9,11 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use atlas_core::audio::{
-    capture_input_args, parse_asound, parse_avfoundation_devices, parse_dshow_devices, AudioChoice, AudioStatus,
-    SoundCard,
+    capture_filter_args, capture_input_args, parse_asound, parse_avfoundation_devices, parse_dshow_devices, rate_drift,
+    AudioChoice, AudioStatus, SoundCard,
 };
 use atlas_core::platform::Os;
 use atlas_rig::process::{command, tie_to_app};
@@ -29,6 +29,8 @@ const QUEUE_BLOCKS: usize = 50;
 pub const AUDIO_STALL: Duration = Duration::from_secs(5);
 /// ffmpeg stderr lines kept for the settings page.
 const LOG_LINES: usize = 30;
+/// How long after the first block the delivered rate is checked against the declared one.
+const DRIFT_CHECK: Duration = Duration::from_secs(10);
 
 struct Inner {
     choice: AudioChoice,
@@ -129,6 +131,7 @@ impl AudioHub {
         head.iter()
             .map(|s| s.to_string())
             .chain(capture_input_args(os, &choice.device))
+            .chain(capture_filter_args(os))
             .chain(tail.iter().map(|s| s.to_string()))
             .collect()
     }
@@ -159,8 +162,7 @@ impl AudioHub {
             inner.generation += 1;
             inner.spawn_error = None;
             inner.log.clear();
-            let chunk = Self::chunk(inner.choice.rate);
-            inner.pump = Some(tokio::spawn(pump(Arc::downgrade(self), child, inner.generation, chunk)));
+            inner.pump = Some(tokio::spawn(pump(Arc::downgrade(self), child, inner.generation, inner.choice.rate)));
         }
         let (tx, rx) = mpsc::channel(QUEUE_BLOCKS);
         let id = inner.next_id;
@@ -277,17 +279,35 @@ async fn read_stderr(hub: Weak<AudioHub>, err: ChildStderr, generation: u64) {
     }
 }
 
-async fn pump(hub: Weak<AudioHub>, mut child: Child, generation: u64, chunk: usize) {
+async fn pump(hub: Weak<AudioHub>, mut child: Child, generation: u64, rate: u32) {
+    let chunk = AudioHub::chunk(rate);
     let mut out = child.stdout.take().expect("piped stdout");
     let stderr = tokio::spawn(read_stderr(hub.clone(), child.stderr.take().expect("piped stderr"), generation));
     let mut buf = BytesMut::with_capacity(chunk * 2);
     let mut read = vec![0u8; 4096];
+    // bytes after the first read, checked once against `rate` (a short stream cuts out)
+    let (mut first, mut since_first, mut drift_checked) = (None::<Instant>, 0u64, false);
     loop {
         let n = match out.read(&mut read).await {
             Ok(0) | Err(_) => break,
             Ok(n) => n,
         };
         buf.extend_from_slice(&read[..n]);
+        match first {
+            None => first = Some(Instant::now()),
+            Some(start) if !drift_checked => {
+                since_first += n as u64;
+                if start.elapsed() >= DRIFT_CHECK {
+                    drift_checked = true;
+                    if let Some(line) = rate_drift(since_first, start.elapsed(), rate) {
+                        tracing::warn!("ffmpeg {line}");
+                        let Some(h) = hub.upgrade() else { return };
+                        h.log_line(generation, line);
+                    }
+                }
+            }
+            Some(_) => {}
+        }
         if buf.len() < chunk {
             continue;
         }
@@ -355,6 +375,13 @@ mod tests {
         assert!(a.contains("-f alsa -ac 2 -ar 48000 -i plughw:CARD=CODEC,DEV=0"));
         assert!(a.ends_with("-ac 1 -ar 16000 -f s16le -flush_packets 1 pipe:1"));
         assert_eq!(AudioHub::chunk(16_000), 640);
+        let m = AudioHub::ffmpeg_args(Os::Macos, &AudioChoice { device: "USB AUDIO  CODEC".into(), ..codec(16_000) });
+        let m = m.join(" ");
+        assert!(
+            m.contains("-i :USB AUDIO  CODEC -af aresample=async=5000:first_pts=0 -ac 1 -ar 16000 -f s16le"),
+            "{m}"
+        );
+        assert!(!a.contains("-af"));
     }
 
     #[tokio::test]
