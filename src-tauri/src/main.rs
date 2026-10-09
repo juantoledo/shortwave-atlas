@@ -177,6 +177,9 @@ fn main() {
             }
             app.manage(atlas);
             app.manage(AudioStreams::default());
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_title(&format!("Shortwave Atlas v{}", app.package_info().version));
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![call, audio_open, audio_close])
