@@ -1,7 +1,8 @@
 // Choose the rig and connect: backend, Hamlib model, serial port, baud; live status and hints.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import type { Api } from '../../api/client';
+import { Combobox, Dropdown, type DropOpt } from '../Dropdown';
 import { useRigSettings } from '../../hooks/useRigSettings';
 import { fmtKhz, hintText, useT, type Messages } from '../../i18n';
 import type { BackendKind } from '../../types/generated/BackendKind';
@@ -80,13 +81,15 @@ export function RigSection({ api, os, rig, onError, onApplied }: Props) {
   const { settings, models, ports, diag, reload, refreshPorts } = useRigSettings(api);
   const [draft, setDraft] = useState<RigChoice | null>(null);
   const [modelText, setModelText] = useState('');
+  const uid = useId();
   const [otherPort, setOtherPort] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // start from the saved choice
+  // start from the saved choice; the simulated rig (the unconfigured default) is not offered
   useEffect(() => {
     if (!settings) return;
-    setDraft(settings.choice);
+    const c = settings.choice;
+    setDraft(c.backend === 'sim' ? { ...c, backend: 'spawn' } : c);
     setOtherPort(false);
   }, [settings]);
   useEffect(() => {
@@ -97,6 +100,7 @@ export function RigSection({ api, os, rig, onError, onApplied }: Props) {
   }, [models, settings]);
 
   const model = useMemo(() => models.find((m) => m.id === draft?.model) ?? null, [models, draft?.model]);
+  const modelOpts = useMemo<DropOpt[]>(() => models.map((m) => ({ value: String(m.id), label: `${m.mfg} ${m.model}`, hint: `${m.id} · ${m.status}` })), [models]);
   if (!settings || !draft) return <p className="note">{t.connecting}</p>;
 
   const set = (patch: Partial<RigChoice>) => setDraft({ ...draft, ...patch });
@@ -125,7 +129,6 @@ export function RigSection({ api, os, rig, onError, onApplied }: Props) {
   };
 
   const kinds: [BackendKind, string, string][] = [
-    ['sim', t.backendSim, t.backendSimHelp],
     ['spawn', t.backendSpawn, t.backendSpawnHelp],
     ['external', t.backendExternal, t.backendExternalHelp],
   ];
@@ -140,51 +143,60 @@ export function RigSection({ api, os, rig, onError, onApplied }: Props) {
         ))}
       </div>
       <p className="note">{kinds.find(([k]) => k === draft.backend)![2]}</p>
+      <div className="hint">
+        <b><span aria-hidden="true">⚠ </span>{t.rigRiskTitle}</b>
+        <span>{t.rigRisk}</span>
+      </div>
       {settings.locked.length > 0 && <p className="note warn">{t.lockedByEnv(settings.locked.join(', '))}</p>}
       {draft.backend === 'spawn' && !settings.rigctld_version && <p className="note warn">{t.hamlibMissing}</p>}
 
       {draft.backend === 'spawn' && (
         <>
-          <label className="field">
-            <span>{t.model}</span>
-            <input
-              list="rig-models"
-              value={modelText}
+          <div className="field">
+            <span id={`${uid}-model`}>{t.model}</span>
+            <Combobox
+              labelledBy={`${uid}-model`}
+              text={modelText}
               placeholder={t.modelPlaceholder}
-              onChange={(e) => {
-                setModelText(e.currentTarget.value);
-                const id = parseModel(e.currentTarget.value);
+              opts={modelOpts}
+              selected={String(draft.model)}
+              empty={t.noModel}
+              onText={(text) => {
+                setModelText(text);
+                const id = parseModel(text);
                 if (id !== null) set({ model: id });
               }}
+              onPick={(o) => {
+                const m = models.find((x) => String(x.id) === o.value);
+                if (!m) return;
+                setModelText(modelLabel(m));
+                set({ model: m.id });
+              }}
             />
-            <datalist id="rig-models">
-              {models.map((m) => <option key={m.id} value={modelLabel(m)}>{m.status}</option>)}
-            </datalist>
             <small>{models.length === 0 ? t.modelsMissing : model ? `${model.mfg} ${model.model} · ${model.status}` : t.modelPick}</small>
-          </label>
+          </div>
 
-          <label className="field">
-            <span>{t.serialPort}</span>
+          <div className="field">
+            <span id={`${uid}-port`}>{t.serialPort}</span>
             <span className="row-inline">
-              <select
+              <Dropdown
+                labelledBy={`${uid}-port`}
                 value={portValue}
-                onChange={(e) => {
-                  const v = e.currentTarget.value;
+                opts={[
+                  ...(!draft.device ? [{ value: '', label: '—' }] : []),
+                  ...(draft.device && !knownPort ? [{ value: draft.device, label: draft.device, hint: t.notFound }] : []),
+                  ...ports.map((p) => ({ value: p.path, label: p.label, hint: p.accessible ? undefined : `⚠ ${t.noPermission}` })),
+                  { value: OTHER, label: t.otherPort },
+                ]}
+                onChange={(v) => {
                   setOtherPort(v === OTHER);
                   if (v !== OTHER) set({ device: v });
                 }}
-              >
-                {!draft.device && <option value="">—</option>}
-                {draft.device && !knownPort && <option value={draft.device}>{draft.device} ({t.notFound})</option>}
-                {ports.map((p) => (
-                  <option key={p.path} value={p.path}>{p.label}{p.accessible ? '' : ` ⚠ ${t.noPermission}`}</option>
-                ))}
-                <option value={OTHER}>{t.otherPort}</option>
-              </select>
+              />
               <button className="btn" type="button" onClick={refreshPorts}>{t.refresh}</button>
             </span>
             {ports.length === 0 && <small>{t.noPorts}</small>}
-          </label>
+          </div>
           {portValue === OTHER && (
             <label className="field">
               <span>{t.portPath}</span>
@@ -192,13 +204,16 @@ export function RigSection({ api, os, rig, onError, onApplied }: Props) {
             </label>
           )}
 
-          <label className="field">
-            <span>{t.baud}</span>
-            <select value={draft.baud} onChange={(e) => set({ baud: Number(e.currentTarget.value) })}>
-              {BAUDS.map((b) => <option key={b} value={b}>{b === 0 ? t.baudDefault : b}</option>)}
-            </select>
+          <div className="field">
+            <span id={`${uid}-baud`}>{t.baud}</span>
+            <Dropdown
+              labelledBy={`${uid}-baud`}
+              value={String(draft.baud)}
+              opts={BAUDS.map((b) => ({ value: String(b), label: b === 0 ? t.baudDefault : String(b) }))}
+              onChange={(v) => set({ baud: Number(v) })}
+            />
             <small>{t.baudHelp}</small>
-          </label>
+          </div>
 
           <details className="field">
             <summary>{t.advanced}</summary>

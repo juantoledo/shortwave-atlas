@@ -56,5 +56,17 @@ export function sunPos(d: Date): LatLon {
   return { lat: decl, lon };
 }
 
+/**
+ * Camera altitude (in globe radii) that looks the same in a view of `aspect` (width / height)
+ * as `alt` does in a square one. The camera's field of view is vertical, so wide views change
+ * nothing; tall views pull back until the globe takes the same share of the width.
+ */
+export function fitAltitude(alt: number, aspect: number): number {
+  if (!(aspect > 0) || aspect >= 1) return alt;
+  const th = Math.asin(1 / (1 + alt));
+  const fitted = Math.atan(aspect * Math.tan(th));
+  return 1 / Math.sin(fitted) - 1;
+}
+
 /** Ease in-out cubic, for camera flights. */
 export const easeInOut = (k: number) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);

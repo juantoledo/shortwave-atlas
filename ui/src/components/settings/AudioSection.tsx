@@ -1,7 +1,8 @@
 // Rig audio: enable it, pick the sound card and the rate; live capture status and hints.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { Api } from '../../api/client';
+import { Dropdown } from '../Dropdown';
 import { useAudioSettings } from '../../hooks/useAudioSettings';
 import { audioHintText, useT, type Messages } from '../../i18n';
 import type { AudioChoice } from '../../types/generated/AudioChoice';
@@ -61,6 +62,7 @@ export function AudioSection({ api, os, onError, onApplied }: Props) {
   const { settings, cards, diag, reload, refreshCards } = useAudioSettings(api);
   const [draft, setDraft] = useState<AudioChoice | null>(null);
   const [other, setOther] = useState(false);
+  const uid = useId();
   const [busy, setBusy] = useState(false);
 
   // start from the saved choice
@@ -106,25 +108,26 @@ export function AudioSection({ api, os, onError, onApplied }: Props) {
 
       {draft.enabled && (
         <>
-          <label className="field">
-            <span>{t.soundCard}</span>
+          <div className="field">
+            <span id={`${uid}-card`}>{t.soundCard}</span>
             <span className="row-inline">
-              <select
+              <Dropdown
+                labelledBy={`${uid}-card`}
                 value={cardValue}
-                onChange={(e) => {
-                  const v = e.currentTarget.value;
+                opts={[
+                  ...(draft.device && !known ? [{ value: draft.device, label: draft.device, hint: t.notFound }] : []),
+                  ...cards.map((c) => ({ value: c.device, label: cardLabel(c, t.rigCodec) })),
+                  { value: OTHER, label: t.otherCard },
+                ]}
+                onChange={(v) => {
                   setOther(v === OTHER);
                   if (v !== OTHER) set({ device: v });
                 }}
-              >
-                {draft.device && !known && <option value={draft.device}>{draft.device} ({t.notFound})</option>}
-                {cards.map((c) => <option key={c.device} value={c.device}>{cardLabel(c, t.rigCodec)}</option>)}
-                <option value={OTHER}>{t.otherCard}</option>
-              </select>
+              />
               <button className="btn" type="button" onClick={refreshCards}>{t.refresh}</button>
             </span>
             <small>{cards.length === 0 ? t.noCards : draft.device}</small>
-          </label>
+          </div>
           {other && (
             <label className="field">
               <span>{t.alsaDevice}</span>
@@ -132,13 +135,16 @@ export function AudioSection({ api, os, onError, onApplied }: Props) {
             </label>
           )}
 
-          <label className="field">
-            <span>{t.audioRate}</span>
-            <select value={draft.rate} onChange={(e) => set({ rate: Number(e.currentTarget.value) })}>
-              {rates.map((r) => <option key={r} value={r}>{r / 1000} kHz</option>)}
-            </select>
+          <div className="field">
+            <span id={`${uid}-rate`}>{t.audioRate}</span>
+            <Dropdown
+              labelledBy={`${uid}-rate`}
+              value={String(draft.rate)}
+              opts={rates.map((r) => ({ value: String(r), label: `${r / 1000} kHz` }))}
+              onChange={(v) => set({ rate: Number(v) })}
+            />
             <small>{t.audioRateHelp(draft.rate / 2000, (draft.rate * 16) / 1000)}</small>
-          </label>
+          </div>
         </>
       )}
 

@@ -1,4 +1,4 @@
-//! `rigctld` client over TCP (port of `rig()` / `get_status()` from `reference/ftdx10_web.py`).
+//! `rigctld` client over TCP (port of `rig()` / `get_status()` from the original Python prototype).
 //!
 //! One persistent connection, serialised by a mutex. Any IO error or timeout drops the
 //! connection so a late answer can never be read as the reply to the next command.

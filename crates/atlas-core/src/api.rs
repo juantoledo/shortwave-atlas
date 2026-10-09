@@ -9,6 +9,7 @@ use crate::geo::LatLon;
 use crate::platform::Os;
 use crate::rig::{CommandError, RigCommand, RigState};
 use crate::setup::{BackendKind, Hint, RigChoice, RigctldStatus};
+use crate::stations::StationQuery;
 use crate::update::Channel;
 
 /// The listener's location.
@@ -46,8 +47,12 @@ pub enum Call {
     Lookup {
         freq_hz: u32,
     },
-    /// Every station by frequency (result: `Candidate[]`).
-    List,
+    /// Filtered, paged station list (result: `StationPage`).
+    Search(StationQuery),
+    /// Every transmitter site with what is on the air now (result: `Overview`).
+    Overview,
+    /// Code tables and facts about the station data (result: `CatalogMeta`).
+    StationsMeta,
     SetQth(Qth),
     /// Current rig choice and what the page needs around it (result: `RigSettings`).
     RigSettings,
@@ -211,13 +216,20 @@ pub enum ServerMsg {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::country::Region;
 
     #[test]
     fn call_json_shape() {
         let c: Call = serde_json::from_str(r#"{"cmd":"lookup","args":{"freq_hz":13570000}}"#).unwrap();
         assert_eq!(c, Call::Lookup { freq_hz: 13_570_000 });
-        let c: Call = serde_json::from_str(r#"{"cmd":"list"}"#).unwrap();
-        assert_eq!(c, Call::List);
+        let c: Call = serde_json::from_str(r#"{"cmd":"search","args":{"q":"bbc"}}"#).unwrap();
+        assert_eq!(c, Call::Search(StationQuery { q: "bbc".into(), ..Default::default() }));
+        let c: Call = serde_json::from_str(r#"{"cmd":"search","args":{"regions":["am"],"on_air":true}}"#).unwrap();
+        assert_eq!(c, Call::Search(StationQuery { regions: vec![Region::Am], on_air: true, ..Default::default() }));
+        let c: Call = serde_json::from_str(r#"{"cmd":"overview"}"#).unwrap();
+        assert_eq!(c, Call::Overview);
+        let c: Call = serde_json::from_str(r#"{"cmd":"stations_meta"}"#).unwrap();
+        assert_eq!(c, Call::StationsMeta);
         let c: Call = serde_json::from_str(r#"{"cmd":"rig","args":{"cmd":"set_power","on":false}}"#).unwrap();
         assert_eq!(c, Call::Rig(RigCommand::SetPower { on: false }));
         let c: Call =

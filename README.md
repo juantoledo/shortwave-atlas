@@ -1,10 +1,48 @@
-# SW Atlas
+# Shortwave Atlas
 
-Shortwave atlas for your rig. Tune a frequency and the globe flies to the transmitter, draws the
-great-circle path to your QTH over the live day/night terminator, and opens the station's card:
-on-air status, distance, bearing, local time and schedule.
+[![CI](https://github.com/juantoledo/shortwave-atlas/actions/workflows/ci.yml/badge.svg)](https://github.com/juantoledo/shortwave-atlas/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/juantoledo/shortwave-atlas?sort=semver)](https://github.com/juantoledo/shortwave-atlas/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/juantoledo/shortwave-atlas/total)](https://github.com/juantoledo/shortwave-atlas/releases)
+[![License: MIT](https://img.shields.io/github/license/juantoledo/shortwave-atlas)](LICENSE)
+![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-informational)
+![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
+![Tauri v2](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)
+![Receive only](https://img.shields.io/badge/receive--only-never%20transmits-success)
 
-The rig is a frequency sensor: SW Atlas only reads and sets frequency and mode, reads the
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/J6F024AKJE)
+
+**See what you're hearing.** Shortwave Atlas connects to your radio and turns every frequency you
+tune into a place on the map. Spin the dial and the globe flies to the transmitter, traces the path
+from your station across the live day/night line, and tells you who's on the air, how far away
+they are, which way to point your antenna and when they broadcast next.
+
+![Shortwave Atlas tuned to WRMI on 5850 kHz: the station list, the globe with the transmitter sites and the QTH, the station card and the band scale](docs/images/screenshot.png)
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<b>Plug in your radio and go.</b> Pick your model from Hamlib's list of hundreds of rigs, choose
+the serial port and press Connect. Shortwave Atlas starts and looks after the CAT link for you,
+and tells you in plain words what's wrong if the radio doesn't answer.
+</td>
+<td width="50%" valign="top">
+<b>Listen from anywhere.</b> Turn on Listen and the rig's own audio plays in the app, and in any
+browser on your network or Tailscale, with an audio waterfall alongside. Your radio's USB sound
+card is found and listed first.
+</td>
+</tr>
+<tr>
+<td align="center"><img src="docs/images/connectyourrig.png" width="380" alt="Settings → Rig: My radio selected, the Hamlib model list open on the Yaesu FTDX-10, and the status Connected · 7205.0 kHz AM with rigctld running"></td>
+<td align="center"><img src="docs/images/listen.png" width="380" alt="Settings → Audio: Listen to the rig selected, the sound card list open with the rig's USB AUDIO CODEC first, and the status Ready · nobody is listening"></td>
+</tr>
+</table>
+
+The station data is the [EiBi](http://www.eibispace.de/dx/) shortwave schedule (about 2,000
+frequency and station pairs from 170 transmitter sites), bundled with each release. Search it by
+station, country, language or kHz, filter by band, language, target area and country, or click a
+transmitter on the globe to list what it broadcasts.
+
+The rig is a frequency sensor: Shortwave Atlas only reads and sets frequency and mode, reads the
 S-meter and switches power. **It never transmits.**
 
 It runs on Linux, Windows and macOS.
@@ -23,8 +61,7 @@ crates/atlas-server   config, the Atlas dispatcher, audio hub, HTTP/WebSocket se
 src-tauri             desktop shell (per-OS bundle settings in tauri.{linux,windows,macos}.conf.json)
 ui                    React + TypeScript + Vite (react-globe.gl)
 assets/sidecars       builds the rigctld and ffmpeg that the Windows and macOS installers ship
-data                  sample station data (10 stations, NOT verified)
-reference             the prototypes this grew from
+data/eibi             the EiBi schedule bundled into the binary (see data/eibi/README.md)
 ```
 
 ## Install
@@ -55,7 +92,7 @@ npm install && npm --prefix ui install
 On Windows or macOS, install Rust, Node 22 and the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 Then build the sidecars once: `python3 assets/sidecars/build.py universal-apple-darwin` on a Mac, or
 `x86_64-pc-windows-msvc` from Linux with `mingw-w64`. Without them, put Hamlib and ffmpeg on PATH:
-SW Atlas looks next to its executable, then on PATH, then in Homebrew (`/opt/homebrew/bin`,
+Shortwave Atlas looks next to its executable, then on PATH, then in Homebrew (`/opt/homebrew/bin`,
 `/usr/local/bin`) and in Hamlib's Windows install folder.
 
 ## Run
@@ -77,10 +114,15 @@ rigctl -m 2 -r 127.0.0.1:4532 F 5025000    # the globe flies to Cuba
 ## Configure
 The easiest way: press **⚙** in the app (or the "connect your radio" link on a first run). There you
 can:
-- pick **Simulated**, **My radio** (SW Atlas starts and supervises Hamlib `rigctld`) or **Running
-  rigctld** (connect to one you already run);
+- pick **My radio** (Shortwave Atlas starts and supervises Hamlib `rigctld`) or **Running rigctld**
+  (connect to one you already run);
 - choose the Hamlib model, serial port and baud rate;
 - press **Connect**.
+
+The page shows the live connection status and explains common problems: no `dialout` permission,
+port unplugged or busy, the rigctld TCP port taken, the radio not answering, Hamlib missing.
+**Connect** saves the choice into `swatlas.toml`, keeping your comments. The rigctld executable path
+can only be set in the file, never from the page.
 
 The **Audio** section on the same page turns on **Listen**. It captures the rig's audio from a
 sound card with `ffmpeg` (`sudo apt install ffmpeg`), for the desktop app and remote browsers alike.
@@ -89,11 +131,6 @@ It lists the sound cards that can capture, with the rig's USB codec first (the B
 16 kHz carries audio up to 8 kHz and costs 256 kbit/s per listener. **Apply** switches over live and
 saves the choice. The page shows whether ffmpeg is capturing, and explains a busy or missing card or
 a missing `audio` group. The ffmpeg executable path can only be set in the file.
-
-The page shows the live connection status and explains common problems: no `dialout` permission,
-port unplugged or busy, the rigctld TCP port taken, the radio not answering, Hamlib missing.
-**Connect** saves the choice into `swatlas.toml`, keeping your comments. The rigctld executable path
-can only be set in the file, never from the page.
 
 To configure by hand, copy `docs/swatlas.example.toml` to `~/.config/swatlas/swatlas.toml`. The
 desktop app and the server share it. The prototype's environment variables (`RIGCTLD_PORT`, `WEB_AUTH`, `AUDIO_DEVICE`, ...)
@@ -104,7 +141,7 @@ Rig-specific notes live in `docs/rigs/` (start with `ftdx10.md`).
 ## Updates
 When a new version is out, a lamp on the globe says **Update x.y.z available**. Open it for the
 release notes and:
-- **Windows, macOS and the Linux AppImage:** press **Install and restart**. SW Atlas downloads the
+- **Windows, macOS and the Linux AppImage:** press **Install and restart**. Shortwave Atlas downloads the
   update, checks its signature, stops rigctld and ffmpeg, installs and starts again. Nothing is
   downloaded until you press it.
 - **Linux `.deb` and `swatlas-server`:** the panel links to the release; install it the way you
@@ -137,7 +174,7 @@ rigctld and ffmpeg side by side; run it from there.
 `/etc/systemd/system/swatlas.service`
 ```
 [Unit]
-Description=SW Atlas server
+Description=Shortwave Atlas server
 After=network.target
 
 [Service]
@@ -161,11 +198,14 @@ device can only be opened by one program at a time.
 - Coastlines, borders and shaded relief: [Natural Earth](https://www.naturalearthdata.com/) (public
   domain), via [world-atlas](https://github.com/topojson/world-atlas).
 - City lights: NASA Earth Observatory, Black Marble 2016 (public domain).
+- Station schedules: [EiBi](http://www.eibispace.de/dx/) by Eike Bierwirth, free to use and
+  redistribute; mirrored weekly from [radiomap](https://github.com/juantoledo/radiomap).
+- Flags: [flag-icons](https://github.com/lipis/flag-icons) (MIT).
 
 The globe rasters in `ui/src/assets/globe/` are built by `assets/make_globe_rasters.py`.
 
 ## Status
 This is the kickstart: phase 1 (skeleton) plus remote access, audio and i18n (English and Spanish).
-Next steps: EiBi import into SQLite (phase 2), map polish, real-rig validation, then
-notes/logs, the band scan, a shared rigctld port and packaging. See
-`reference/atlas-onda-corta-notas.md`.
+The EiBi schedule is in (phase 2), held in memory: SQLite only if notes and logs need it.
+Next steps: map polish, real-rig validation, then notes/logs, the band scan, a shared rigctld
+port and packaging.

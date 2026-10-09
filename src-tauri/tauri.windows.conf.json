@@ -3,7 +3,7 @@
   "app": {
     "windows": [
       {
-        "title": "SW Atlas", "width": 1400, "height": 900, "minWidth": 900, "minHeight": 600, "backgroundColor": "#070d15",
+        "title": "Shortwave Atlas", "width": 1400, "height": 900, "minWidth": 900, "minHeight": 600, "backgroundColor": "#070d15",
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --no-proxy-server"
       }
     ]

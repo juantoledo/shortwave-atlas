@@ -12,6 +12,12 @@ export default defineConfig({
     strictPort: true,
     proxy: { '/api': { target: 'http://127.0.0.1:8080', ws: true } },
   },
-  build: { outDir: 'dist', target: 'es2022', chunkSizeWarningLimit: 2500 },
+  build: {
+    outDir: 'dist',
+    target: 'es2022',
+    chunkSizeWarningLimit: 2500,
+    // flags stay separate files, fetched when shown (inlined, all 270 would land in the bundle)
+    assetsInlineLimit: (file: string) => (file.includes('flag-icons') ? false : undefined),
+  },
   test: { include: ['src/**/*.test.ts'] },
 });

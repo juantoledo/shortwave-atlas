@@ -4,3 +4,5 @@
 *.jpg binary
 *.ico binary
 *.icns binary
+# EiBi's files are kept byte for byte (CRLF, Latin-1), so their checksums match the source.
+/data/eibi/source/** -text

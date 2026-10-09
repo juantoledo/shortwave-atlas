@@ -46,7 +46,7 @@ pub fn router(atlas: Arc<Atlas>, cfg: &ServerConfig) -> Router {
             Router::new().fallback_service(ServeDir::new(dir).fallback(ServeFile::new(dir.join("index.html"))))
         }
         None => Router::new().fallback(|| async {
-            (StatusCode::NOT_FOUND, "SW Atlas: the UI is not built. Run `npm --prefix ui run build`.")
+            (StatusCode::NOT_FOUND, "Shortwave Atlas: the UI is not built. Run `npm --prefix ui run build`.")
         }),
     };
     Router::new()
@@ -80,7 +80,8 @@ async fn basic_auth(State(ctx): State<Ctx>, req: Request, next: Next) -> Respons
         Some(g) if bool::from(g.ct_eq(expected.as_bytes())) => next.run(req).await,
         _ => {
             let mut r = StatusCode::UNAUTHORIZED.into_response();
-            r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"SW Atlas\""));
+            r.headers_mut()
+                .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"Shortwave Atlas\""));
             r
         }
     }
@@ -124,7 +125,7 @@ async fn session(socket: WebSocket, atlas: Arc<Atlas>) {
             let result = match call {
                 Call::InstallUpdate => Err(ApiError {
                     kind: ErrorKind::Invalid,
-                    message: "Install updates from the SW Atlas window on the host.".into(),
+                    message: "Install updates from the Shortwave Atlas window on the host.".into(),
                 }),
                 call => atlas.call(call).await,
             };
@@ -164,7 +165,7 @@ pub async fn serve(atlas: Arc<Atlas>, cfg: ServerConfig) -> std::io::Result<()> 
         // audio blocks are small and latency matters more than packet count
         let _ = tcp.set_nodelay(true);
     });
-    tracing::info!("SW Atlas web at http://{}:{}", cfg.bind, cfg.port);
+    tracing::info!("Shortwave Atlas web at http://{}:{}", cfg.bind, cfg.port);
     axum::serve(listener, router(atlas, &cfg)).await
 }
 
@@ -215,13 +216,15 @@ mod tests {
         };
         assert!(matches!(first, ServerMsg::State { .. }));
 
-        let call = r#"{"id":7,"call":{"cmd":"lookup","args":{"freq_hz":5025000}}}"#;
+        let call = r#"{"id":7,"call":{"cmd":"search","args":{"limit":1}}}"#;
         ws.send(tungstenite::Message::Text(call.into())).await.unwrap();
         loop {
             let tungstenite::Message::Text(t) = ws.next().await.unwrap().unwrap() else { continue };
             if let ServerMsg::Reply { id, ok, err } = serde_json::from_str(&t).unwrap() {
                 assert_eq!((id, err), (7, None));
-                assert_eq!(ok.unwrap()[0]["station"]["id"], "rebelde-5025");
+                let page = ok.unwrap();
+                assert!(page["total"].as_u64().unwrap() > 1, "{page}");
+                assert_eq!(page["items"].as_array().unwrap().len(), 1);
                 break;
             }
         }

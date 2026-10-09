@@ -11,8 +11,7 @@ use atlas_core::api::{
 use atlas_core::audio::{diagnose_audio, validate_audio, AudioChoice};
 use atlas_core::platform::Os;
 use atlas_core::setup::{validate_choice, RigChoice, RigModel};
-use atlas_core::stations::{list, lookup, Catalog, StationSource, LOOKUP_TOLERANCE_HZ};
-use atlas_core::utc_minute;
+use atlas_core::stations::{Catalog, LOOKUP_TOLERANCE_HZ};
 use atlas_rig::{discover, Rig, RigConfig};
 use serde_json::Value;
 use tokio::sync::OnceCell;
@@ -20,8 +19,6 @@ use tokio::sync::OnceCell;
 use crate::audio::{ffmpeg_version, sound_cards, AudioHub};
 use crate::config::{save_audio, save_rig, save_update, AppConfig};
 use crate::update::{InstallRefused, UpdateService, Updater};
-
-const SAMPLE_STATIONS: &str = include_str!("../../../data/stations.sample.json");
 
 pub struct Atlas {
     pub rig: Rig,
@@ -33,7 +30,7 @@ pub struct Atlas {
     rig_config: RwLock<RigConfig>,
     /// `swatlas.toml`, where the settings page saves the rig choice.
     config_path: Option<PathBuf>,
-    stations: Arc<dyn StationSource>,
+    stations: Arc<Catalog>,
     qth: Arc<RwLock<Qth>>,
     /// Where a QTH picked in the UI is saved (kept apart from the hand-edited TOML).
     qth_file: Option<PathBuf>,
@@ -57,11 +54,13 @@ impl Atlas {
         qth_file: Option<PathBuf>,
         updater: Arc<dyn Updater>,
     ) -> Result<Arc<Self>, String> {
-        let json = match &config.stations {
-            Some(p) => std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?,
-            None => SAMPLE_STATIONS.to_string(),
+        if let Some(p) = &config.stations {
+            tracing::warn!("`stations = {}` is no longer used; see `eibi_dir`", p.display());
+        }
+        let stations = match &config.eibi_dir {
+            Some(dir) => crate::stations::load(dir)?,
+            None => crate::stations::bundled(),
         };
-        let stations: Arc<dyn StationSource> = Arc::new(Catalog::from_json(&json).map_err(|e| e.to_string())?);
         let saved = qth_file
             .as_ref()
             .and_then(|p| std::fs::read_to_string(p).ok())
@@ -160,7 +159,9 @@ impl Atlas {
     /// Start downloading and installing the offered update in the background.
     fn install_update(&self) -> Result<(), ApiError> {
         self.update.begin_install().map_err(|e| match e {
-            InstallRefused::Manual => invalid("This copy of SW Atlas is updated by hand: download the new version."),
+            InstallRefused::Manual => {
+                invalid("This copy of Shortwave Atlas is updated by hand: download the new version.")
+            }
             InstallRefused::NotNow(why) => ApiError { kind: ErrorKind::Conflict, message: why.into() },
         })?;
         let atlas = self.me.upgrade().ok_or_else(|| ApiError::internal("shutting down"))?;
@@ -223,7 +224,7 @@ impl Atlas {
 
     /// Run one UI call, from the desktop app or a browser (WebSocket).
     pub async fn call(&self, call: Call) -> Result<Value, ApiError> {
-        let utc_min = utc_minute(SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
         let json = |v: Result<Value, serde_json::Error>| v.map_err(|e| ApiError::internal(e.to_string()));
         match call {
             Call::Info => json(serde_json::to_value(self.info())),
@@ -233,10 +234,12 @@ impl Atlas {
                 Ok(Value::Null)
             }
             Call::Lookup { freq_hz } => {
-                let c = lookup(&*self.stations, freq_hz, utc_min, self.qth().pos(), LOOKUP_TOLERANCE_HZ);
+                let c = self.stations.lookup(freq_hz, now, self.qth().pos(), LOOKUP_TOLERANCE_HZ);
                 json(serde_json::to_value(c))
             }
-            Call::List => json(serde_json::to_value(list(&*self.stations, utc_min, self.qth().pos()))),
+            Call::Search(q) => json(serde_json::to_value(self.stations.search(&q, now))),
+            Call::Overview => json(serde_json::to_value(self.stations.overview(now))),
+            Call::StationsMeta => json(serde_json::to_value(self.stations.meta(now))),
             Call::SetQth(q) => {
                 self.set_qth(q)?;
                 Ok(Value::Null)
@@ -279,6 +282,7 @@ pub(crate) mod tests {
     use super::*;
     use atlas_core::audio::default_device;
     use atlas_core::rig::{Power, RigCommand};
+    use atlas_core::stations::StationQuery;
     use atlas_core::update::{Channel, Packaging, UpdateState};
 
     use crate::update::fake::FakeUpdater;
@@ -294,8 +298,11 @@ pub(crate) mod tests {
         let qth_file = dir.join("qth.json");
         let atlas = Atlas::start(AppConfig::default(), None, Some(qth_file.clone()), no_updates()).unwrap();
 
-        let c = atlas.call(Call::Lookup { freq_hz: 13_570_000 }).await.unwrap();
-        assert_eq!(c[0]["site"]["id"], "greenville");
+        // the first station in the list is found again by its frequency
+        let page = atlas.call(Call::Search(StationQuery { limit: 1, ..Default::default() })).await.unwrap();
+        let first = &page["items"][0];
+        let c = atlas.call(Call::Lookup { freq_hz: first["freq_hz"].as_u64().unwrap() as u32 }).await.unwrap();
+        assert!(c.as_array().unwrap().iter().any(|c| c["station"]["id"] == first["id"]), "{c}");
 
         let madrid = Qth { name: "Madrid".into(), lat: 40.4, lon: -3.7 };
         atlas.call(Call::SetQth(madrid.clone())).await.unwrap();

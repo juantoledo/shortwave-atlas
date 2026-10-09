@@ -7,8 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use atlas_core::api::Qth;
 use atlas_core::rig::{CommandError, Link, Mode, Power, RigState};
-use atlas_core::stations::{lookup, StationSource, LOOKUP_TOLERANCE_HZ};
-use atlas_core::utc_minute;
+use atlas_core::stations::{Catalog, LOOKUP_TOLERANCE_HZ};
 
 use crate::RigBackend;
 
@@ -21,12 +20,12 @@ struct SimRig {
 
 pub struct Sim {
     rig: Mutex<SimRig>,
-    stations: Arc<dyn StationSource>,
+    stations: Arc<Catalog>,
     qth: Arc<RwLock<Qth>>,
 }
 
 impl Sim {
-    pub fn new(stations: Arc<dyn StationSource>, qth: Arc<RwLock<Qth>>) -> Self {
+    pub fn new(stations: Arc<Catalog>, qth: Arc<RwLock<Qth>>) -> Self {
         Self {
             rig: Mutex::new(SimRig { freq_hz: 13_570_000, mode: Mode::AM, power: true, noise: 0x2545_F491_4F6C_DD1D }),
             stations,
@@ -37,13 +36,10 @@ impl Sim {
     /// Fake S-meter in S-units (0..=11, above 9 meaning S9+10 dB steps).
     fn s_units(&self, freq_hz: u32, now_ms: u64, noise: f64) -> f64 {
         let qth = self.qth.read().expect("qth lock").pos();
-        let best = lookup(&*self.stations, freq_hz, utc_minute(now_ms / 1000), qth, LOOKUP_TOLERANCE_HZ)
-            .into_iter()
-            .next()
-            .filter(|c| c.air.on);
+        let best = self.stations.strongest_on_air(freq_hz, (now_ms / 1000) as i64, qth, LOOKUP_TOLERANCE_HZ);
         let lvl = match best {
-            Some(c) => {
-                let base = (9.4 - c.route.km / 2400.0).clamp(2.5, 8.6);
+            Some(route) => {
+                let base = (9.4 - route.km / 2400.0).clamp(2.5, 8.6);
                 base + (now_ms as f64 / 1700.0).sin() * 0.7 + (noise - 0.5) * 0.8
             }
             None => 0.4 + noise * 1.2,
@@ -110,13 +106,30 @@ impl RigBackend for Sim {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use atlas_core::stations::Catalog;
+    use atlas_core::eibi::{parse, EibiFiles};
+
+    /// A one-station catalog: CFRX Toronto on 6070 kHz, 24 h a day.
+    pub(crate) fn catalog() -> Arc<Catalog> {
+        let readme = "   IV) Transmitter site codes.
+   CAN: Toronto 43N30-79W38
+";
+        let csv = "kHz;Time(UTC);ITU;Station;Remarks;P
+6070;0000-2400;CAN;CFRX Toronto;;1
+";
+        let files = EibiFiles {
+            csv: csv.as_bytes(),
+            csv_name: "sked-a26.csv",
+            readme: readme.as_bytes(),
+            overrides: "",
+            utility: "",
+        };
+        Arc::new(Catalog::from_eibi(parse(&files).unwrap()))
+    }
 
     fn sim() -> Sim {
-        let cat = Catalog::from_json(include_str!("../../../data/stations.sample.json")).unwrap();
-        Sim::new(Arc::new(cat), Arc::new(RwLock::new(Qth::default())))
+        Sim::new(catalog(), Arc::new(RwLock::new(Qth::default())))
     }
 
     #[test]
@@ -129,8 +142,8 @@ mod tests {
     #[test]
     fn on_air_station_is_stronger_than_empty_band() {
         let s = sim();
-        // WWV 10 MHz is on the air all day; 11.111 MHz has nothing in the sample
-        assert!(s.s_units(10_000_000, 0, 0.5) > s.s_units(11_111_000, 0, 1.0));
+        // CFRX 6070 kHz is on the air all day; 11.111 MHz has nothing
+        assert!(s.s_units(6_070_000, 0, 0.5) > s.s_units(11_111_000, 0, 1.0));
     }
 
     #[tokio::test]

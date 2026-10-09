@@ -17,7 +17,7 @@ Hamlib model **1042** (needs Hamlib 4.5+; this machine has 4.5.5).
 - Connect: **⚙ → My radio**, model **1042 · Yaesu FTDX-10**, the `...CP2105...-if00-port0` port,
   **9600**, then **Connect**. To set it by hand instead, see `docs/swatlas.example.toml` (backend `spawn`).
 
-## Known from the FTDX10 prototype (`reference/ftdx10_web.py`)
+## Known from the FTDX10 prototype
 | Feature | Status |
 |---|---|
 | `f` / `F` frequency | works |

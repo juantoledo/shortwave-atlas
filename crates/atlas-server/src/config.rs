@@ -23,7 +23,11 @@ pub struct AppConfig {
     pub qth: Qth,
     /// UI language (`en`, `es`); unset = follow the browser/OS.
     pub lang: Option<String>,
-    /// Station data JSON; unset = the bundled sample.
+    /// EiBi files laid out like `data/eibi` (`source/sked-*.csv`, `source/README.TXT`);
+    /// unset = the schedule bundled with this build.
+    pub eibi_dir: Option<PathBuf>,
+    /// No longer used (the old station JSON); a value only logs a warning.
+    #[serde(skip_serializing)]
     pub stations: Option<PathBuf>,
     /// `RigChoice` fields forced by environment variables (not part of the file).
     #[serde(skip)]
@@ -187,8 +191,8 @@ impl AppConfig {
         if let Some(v) = get("SWATLAS_LANG") {
             self.lang = Some(v);
         }
-        if let Some(v) = get("SWATLAS_STATIONS") {
-            self.stations = Some(v.into());
+        if let Some(v) = get("SWATLAS_EIBI_DIR") {
+            self.eibi_dir = Some(v.into()).filter(|p: &PathBuf| !p.as_os_str().is_empty());
         }
         if let Some(v) = get("SWATLAS_UI_DIR") {
             self.server.ui_dir = Some(v.into());

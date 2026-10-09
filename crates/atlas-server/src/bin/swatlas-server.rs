@@ -1,5 +1,5 @@
 //! Headless SW Atlas: rig + remote browser UI, no desktop window.
-//! The systemd-friendly successor of `reference/ftdx10_web.py`.
+//! The systemd-friendly successor of the original Python prototype.
 //!
 //! Config: `$SWATLAS_CONFIG`, else `~/.config/swatlas/swatlas.toml`, plus env overrides
 //! (`SWATLAS_RIG`, `RIGCTLD_HOST/PORT`, `WEB_BIND/PORT/AUTH`, `AUDIO_DEVICE/RATE`, ...).

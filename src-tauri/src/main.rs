@@ -142,6 +142,8 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // `target="_blank"` links open in the system browser (the webview would drop them)
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Same config as swatlas-server, so both can share one machine's settings.
             let dir = config_dir();
@@ -177,6 +179,9 @@ fn main() {
             }
             app.manage(atlas);
             app.manage(AudioStreams::default());
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_title(&format!("Shortwave Atlas v{}", app.package_info().version));
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![call, audio_open, audio_close])
