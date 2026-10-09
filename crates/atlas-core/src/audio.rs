@@ -2,6 +2,8 @@
 //! (ALSA, DirectShow, AVFoundation), sound card discovery parsing, choice validation, and
 //! plain-language diagnosis of capture problems.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -174,6 +176,31 @@ pub fn capture_input_args(os: Os, device: &str) -> Vec<String> {
         Os::Macos => (&["-f", "avfoundation", "-i"], format!(":{device}")),
     };
     fixed.iter().map(|s| s.to_string()).chain([input]).collect()
+}
+
+/// ffmpeg's filter options for capturing on `os`, between the input and the output side.
+/// AVFoundation can deliver fewer samples than its declared rate (the stream drains and
+/// cuts out about once a second); its timestamps are real time, so aresample stretches or
+/// pads to them (up to ~10 %; `first_pts=0` ignores the host-clock start). ALSA and
+/// DirectShow keep time.
+pub fn capture_filter_args(os: Os) -> Vec<String> {
+    match os {
+        Os::Linux | Os::Windows => vec![],
+        Os::Macos => vec!["-af".into(), "aresample=async=5000:first_pts=0".into()],
+    }
+}
+
+/// A line for the ffmpeg log when `bytes` of s16le mono over `elapsed` is more than 2 %
+/// off `rate` (e.g. "delivering 14700 Hz of 16000 Hz"): the listener's buffer would drain
+/// or overflow, so the audio cuts out.
+pub fn rate_drift(bytes: u64, elapsed: Duration, rate: u32) -> Option<String> {
+    let secs = elapsed.as_secs_f64();
+    if secs <= 0.0 || rate == 0 {
+        return None;
+    }
+    let delivered = bytes as f64 / 2.0 / secs;
+    ((delivered / rate as f64 - 1.0).abs() > 0.02)
+        .then(|| format!("delivering {} Hz of {rate} Hz", delivered.round() as u64))
 }
 
 /// Collapse runs of spaces ("USB AUDIO  CODEC" -> "USB AUDIO CODEC").
@@ -407,6 +434,19 @@ dummy: Immediate exit requested
             capture_input_args(Os::Macos, "USB AUDIO  CODEC"),
             ["-f", "avfoundation", "-i", ":USB AUDIO  CODEC"]
         );
+        assert!(capture_filter_args(Os::Linux).is_empty() && capture_filter_args(Os::Windows).is_empty());
+        assert_eq!(capture_filter_args(Os::Macos), ["-af", "aresample=async=5000:first_pts=0"]);
+    }
+
+    #[test]
+    fn delivered_rate_drift() {
+        let s = |n: u64| Duration::from_secs(n);
+        assert_eq!(rate_drift(320_000, s(10), 16_000), None);
+        assert_eq!(rate_drift(323_000, s(10), 16_000), None); // within 2 %
+                                                              // a 44.1 kHz device labelled 48 kHz: 8 % short
+        assert_eq!(rate_drift(294_000, s(10), 16_000).as_deref(), Some("delivering 14700 Hz of 16000 Hz"));
+        assert_eq!(rate_drift(336_000, s(10), 16_000).as_deref(), Some("delivering 16800 Hz of 16000 Hz"));
+        assert_eq!(rate_drift(1_000, Duration::ZERO, 16_000), None);
     }
 
     #[test]
