@@ -1,0 +1,74 @@
+# Weekly: copy the EiBi schedule from juantoledo/radiomap (data/shortwave/source, kept up to
+# date with eibispace.de) into data/eibi, test the import against radiomap's counts, and
+# open or update a PR on bot/eibi-sync. Merging it lets release-please cut the release that
+# ships the new schedule: feat for a new season, fix for a refresh within one.
+#
+# A PR opened with GITHUB_TOKEN does not trigger CI; the tests run here instead. Close and
+# reopen the PR to run the full CI on it.
+name: Sync EiBi
+on:
+  schedule:
+    - cron: "0 7 * * 2" # Tuesdays 07:00 UTC, after radiomap's Monday sync
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: sync-eibi
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: juantoledo/radiomap
+          path: .radiomap
+          persist-credentials: false
+          sparse-checkout: |
+            /data/shortwave/
+            /data/shortwave.js
+          sparse-checkout-cone-mode: false
+
+      - id: sync
+        run: python3 assets/sync_eibi.py .radiomap
+
+      - if: steps.sync.outputs.changed == 'true'
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
+      - if: steps.sync.outputs.changed == 'true'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # includes the parity test (data/eibi/parity.json) and the country-code check
+      - if: steps.sync.outputs.changed == 'true'
+        run: cargo test --locked -p atlas-core -p atlas-rig -p atlas-server
+
+      - if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FILE: ${{ steps.sync.outputs.file }}
+          SEASON_CHANGED: ${{ steps.sync.outputs.season_changed }}
+          RADIOMAP_SHA: ${{ steps.sync.outputs.radiomap_sha }}
+        run: |
+          branch=bot/eibi-sync
+          if [ "$SEASON_CHANGED" = true ]; then
+            title="feat(eibi): EiBi $FILE schedule"
+          else
+            title="fix(eibi): refresh the EiBi $FILE schedule"
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add data/eibi
+          git commit -m "$title" -m "From juantoledo/radiomap@$RADIOMAP_SHA."
+          git push --force origin "$branch"
+          if [ "$(gh pr view "$branch" --json state -q .state 2>/dev/null)" = OPEN ]; then
+            gh pr edit "$branch" --title "$title" --body-file report.md
+          else
+            gh pr create --base main --head "$branch" --title "$title" --body-file report.md
+          fi
