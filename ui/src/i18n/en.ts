@@ -147,6 +147,7 @@ export const en = {
 
   settings: 'Settings',
   help: 'Help',
+  kofi: 'Buy Me a Coffee at ko-fi.com',
   helpTopics: 'Topics',
   helpText: {
     start: ['Getting started', 'Step-by-step help is on its way. Meanwhile: turn the receiver on, move the dial or pick a station from the list, and the globe flies to its transmitter.'],

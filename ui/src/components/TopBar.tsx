@@ -1,5 +1,5 @@
-// The window's top bar: name and version, what the rig is doing, the UTC clock, and the
-// update, help, settings and power buttons.
+// The window's top bar: name and version, what the rig is doing, the Ko-fi link, the UTC
+// clock, and the update, help, settings and power buttons.
 
 import type { ReactNode } from 'react';
 import { useNow } from '../hooks/useCore';
@@ -52,6 +52,9 @@ export function TopBar({ info, status, on, powerBusy, powerDisabled, onPower, on
         </div>
       </div>
       <div className="top-actions">
+        <a className="kofi" href="https://ko-fi.com/J6F024AKJE" target="_blank" rel="noreferrer">
+          <img height="36" src="https://storage.ko-fi.com/cdn/kofi6.png?v=6" alt={t.kofi} />
+        </a>
         <Clock />
         {update}
         <button className="icon-btn" type="button" aria-label={t.help} title={`${t.help} (F1)`} onClick={onHelp}>?</button>

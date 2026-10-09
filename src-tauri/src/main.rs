@@ -142,6 +142,8 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // `target="_blank"` links open in the system browser (the webview would drop them)
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Same config as swatlas-server, so both can share one machine's settings.
             let dir = config_dir();

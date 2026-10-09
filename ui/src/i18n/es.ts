@@ -137,6 +137,7 @@ export const es: Messages = {
 
   settings: 'Ajustes',
   help: 'Ayuda',
+  kofi: 'Invítame a un café en ko-fi.com',
   helpTopics: 'Temas',
   helpText: {
     start: ['Primeros pasos', 'La ayuda paso a paso viene en camino. Mientras tanto: enciende el receptor, mueve la sintonía o elige una estación de la lista, y el globo vuela a su transmisor.'],
