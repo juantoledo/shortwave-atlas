@@ -1,19 +1,24 @@
-import { useNow } from '../hooks/useCore';
+// Over the globe: what the dots mean (top left) and how to use it (bottom left, fading
+// once you have touched the globe).
+
+import { COARSE, useMedia } from '../hooks/useMedia';
 import { useT } from '../i18n';
 
-const two = (n: number) => String(n).padStart(2, '0');
-
-export function Hud({ frame, onFrame }: { frame: boolean; onFrame: () => void }) {
+export function Hud({ faded }: { faded: boolean }) {
   const t = useT();
-  const d = useNow(1000);
+  const touch = useMedia(COARSE);
   return (
     <>
-      <div className="hud hud-tl">
-        UTC <b>{two(d.getUTCHours())}:{two(d.getUTCMinutes())}:{two(d.getUTCSeconds())}</b><br />{t.liveTerminator}
-      </div>
-      <div className="hud hud-bl">{t.dragToRotate}<br />{t.clickForQth}</div>
-      <div className="hud hud-br">
-        <button className="toggle" type="button" aria-pressed={frame} onClick={onFrame}>{t.frameRoute}</button>
+      <ul className="hud hud-tl legend">
+        <li><i className="lg on" />{t.legendOnAir}</li>
+        <li><i className="lg quiet" />{t.legendQuiet}</li>
+        <li><i className="lg qth" />{t.legendQth}</li>
+        <li className="lg-term">{t.liveTerminator}</li>
+      </ul>
+      <div className={'hud hud-bl' + (faded ? ' faded' : '')}>
+        {touch ? t.dragToRotateTouch : t.dragToRotate}<br />
+        {touch ? t.tapForQth : t.clickForQth}<br />
+        {touch ? t.tapSite : t.clickSite}
       </div>
     </>
   );

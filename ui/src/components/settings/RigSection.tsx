@@ -83,10 +83,11 @@ export function RigSection({ api, os, rig, onError, onApplied }: Props) {
   const [otherPort, setOtherPort] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // start from the saved choice
+  // start from the saved choice; the simulated rig (the unconfigured default) is not offered
   useEffect(() => {
     if (!settings) return;
-    setDraft(settings.choice);
+    const c = settings.choice;
+    setDraft(c.backend === 'sim' ? { ...c, backend: 'spawn' } : c);
     setOtherPort(false);
   }, [settings]);
   useEffect(() => {
@@ -125,7 +126,6 @@ export function RigSection({ api, os, rig, onError, onApplied }: Props) {
   };
 
   const kinds: [BackendKind, string, string][] = [
-    ['sim', t.backendSim, t.backendSimHelp],
     ['spawn', t.backendSpawn, t.backendSpawnHelp],
     ['external', t.backendExternal, t.backendExternalHelp],
   ];
@@ -140,6 +140,10 @@ export function RigSection({ api, os, rig, onError, onApplied }: Props) {
         ))}
       </div>
       <p className="note">{kinds.find(([k]) => k === draft.backend)![2]}</p>
+      <div className="hint">
+        <b><span aria-hidden="true">⚠ </span>{t.rigRiskTitle}</b>
+        <span>{t.rigRisk}</span>
+      </div>
       {settings.locked.length > 0 && <p className="note warn">{t.lockedByEnv(settings.locked.join(', '))}</p>}
       {draft.backend === 'spawn' && !settings.rigctld_version && <p className="note warn">{t.hamlibMissing}</p>}
 

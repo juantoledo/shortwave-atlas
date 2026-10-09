@@ -1,8 +1,9 @@
-// "Update available": a pill on the globe, opening a panel with the notes and what to do
+// "Update available": a pill in the top bar, opening a popover with the notes and what to do
 // (install here, download by hand, or install on the host).
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { TransportKind } from '../api/transport';
+import { useDismiss } from '../hooks/useDismiss';
 import { updateView, type UpdateApi } from '../hooks/useUpdate';
 import { useT } from '../i18n';
 
@@ -16,6 +17,8 @@ export function UpdateBanner({ update, transport, onError }: Props) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useDismiss(box, () => setOpen(false), open);
   const v = updateView(update.status, transport, update.skipped);
   if (!v) return null;
 
@@ -37,10 +40,11 @@ export function UpdateBanner({ update, transport, onError }: Props) {
   const working = v.phase === 'downloading' || v.phase === 'installing';
 
   return (
-    <div className="hud hud-tr update">
-      <button className={'toggle update-pill' + (v.phase === 'failed' ? ' warn' : '')} type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+    <div className="update" ref={box}>
+      <button className={'toggle update-pill' + (v.phase === 'failed' ? ' warn' : '')} type="button" aria-expanded={open} aria-label={pill} title={pill} onClick={() => setOpen((o) => !o)}>
         <span className="lamp" />
-        <span>{pill}</span>
+        <span className="pill-long">{pill}</span>
+        <span className="pill-short" aria-hidden="true">{v.version}</span>
       </button>
 
       {open && (

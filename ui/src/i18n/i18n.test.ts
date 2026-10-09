@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { en } from './en';
 import { es } from './es';
-import { audioHintText, compass, fmtDur, hintText, pickMessages, sLabel } from './index';
+import { audioHintText, compass, fmtDays, fmtDur, hintText, pickMessages, sLabel } from './index';
 
 /** Keys of nested plain objects (hints, per-OS hints), as sorted dotted paths. */
 function shape(o: object, at = ''): string[] {
@@ -20,7 +20,7 @@ describe('i18n', () => {
         if (typeof en[k] === 'function') expect((cat[k] as () => string).length, k).toBe((en[k] as () => string).length);
       }
       expect(cat.compass).toHaveLength(8);
-      for (const k of ['hints', 'audioHints', 'hintsByOs', 'audioHintsByOs'] as const) expect(shape(cat[k]), k).toEqual(shape(en[k]));
+      for (const k of ['hints', 'audioHints', 'hintsByOs', 'audioHintsByOs', 'regions', 'sun', 'helpText'] as const) expect(shape(cat[k]), k).toEqual(shape(en[k]));
     }
   });
 
@@ -43,9 +43,26 @@ describe('i18n', () => {
     expect(fmtDur(en, 45)).toBe('45 min');
     expect(fmtDur(en, 120)).toBe('2 h');
     expect(fmtDur(es, 135)).toBe('2 h 15 min');
+    expect(fmtDur(en, 4 * 1440 + 90)).toBe('4 d 1 h');
+    expect(fmtDur(en, 2 * 1440)).toBe('2 d');
     expect(compass(en, 225)).toBe('SW');
     expect(compass(es, 225)).toBe('SO');
     expect(compass(en, 359)).toBe('N');
+  });
+
+  it('formats EiBi day patterns', () => {
+    expect(fmtDays(en, { t: 'daily' })).toBe('Daily');
+    expect(fmtDays(en, { t: 'weekly', mask: 0b0011111 })).toBe('Mon–Fri');
+    expect(fmtDays(en, { t: 'weekly', mask: 0b0010010 })).toBe('Tue, Fri');
+    expect(fmtDays(en, { t: 'weekly', mask: 0b1100000 })).toBe('Sat, Sun');
+    expect(fmtDays(en, { t: 'weekly', mask: 0b1111101 })).toBe('Mon, Wed–Sun');
+    expect(fmtDays(en, { t: 'weekly', mask: 0x7f })).toBe('Daily');
+    expect(fmtDays(en, { t: 'nth', n: 1, wd: 5 })).toBe('1st Saturday of the month');
+    expect(fmtDays(en, { t: 'last', wd: 6 })).toBe('Last Sunday of the month');
+    expect(fmtDays(en, { t: 'date', d: 15, m: 9 })).toBe('Sep 15');
+    expect(fmtDays(es, { t: 'date', d: 15, m: 9 })).toBe('15 sept');
+    expect(fmtDays(es, { t: 'weekly', mask: 0b0011111 })).toBe('lun–vie');
+    expect(fmtDays(en, { t: 'irregular' })).toBe('Irregular');
   });
 
   it('S-meter labels', () => {
