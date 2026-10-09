@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/juantoledo/shortwave-atlas/compare/v0.2.1...v0.2.2) (2026-10-09)
+
+
+### Bug Fixes
+
+* **audio:** keep macOS capture in real time so Listen stops cutting out ([6cadf1f](https://github.com/juantoledo/shortwave-atlas/commit/6cadf1f88bdb9ea9410eaf963703a555d35093db))
+* **audio:** keep macOS capture in real time so Listen stops cutting out ([f8becda](https://github.com/juantoledo/shortwave-atlas/commit/f8becda1536147f772ddd0cd8cb730fd754fcd9e))
+
 ## [0.2.1](https://github.com/juantoledo/shortwave-atlas/compare/v0.2.0...v0.2.1) (2026-10-09)
 
 
