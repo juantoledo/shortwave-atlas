@@ -1,4 +1,4 @@
-# SW Atlas
+# Shortwave Atlas
 
 [![CI](https://github.com/juantoledo/shortwave-atlas/actions/workflows/ci.yml/badge.svg)](https://github.com/juantoledo/shortwave-atlas/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/juantoledo/shortwave-atlas?sort=semver)](https://github.com/juantoledo/shortwave-atlas/releases/latest)
@@ -14,14 +14,14 @@ Shortwave atlas for your rig. Tune a frequency and the globe flies to the transm
 great-circle path to your QTH over the live day/night terminator, and opens the station's card:
 on-air status, distance, bearing, the Sun at the transmitter, and the schedule.
 
-![SW Atlas tuned to WRMI on 5850 kHz: the station list, the globe with the transmitter sites and the QTH, the station card and the band scale](docs/images/screenshot.png)
+![Shortwave Atlas tuned to WRMI on 5850 kHz: the station list, the globe with the transmitter sites and the QTH, the station card and the band scale](docs/images/screenshot.png)
 
 The station data is the [EiBi](http://www.eibispace.de/dx/) shortwave schedule (about 2,000
 frequency and station pairs from 170 transmitter sites), bundled with each release. Search it by
 station, country, language or kHz, filter by band, language, target area and country, or click a
 transmitter on the globe to list what it broadcasts.
 
-The rig is a frequency sensor: SW Atlas only reads and sets frequency and mode, reads the
+The rig is a frequency sensor: Shortwave Atlas only reads and sets frequency and mode, reads the
 S-meter and switches power. **It never transmits.**
 
 It runs on Linux, Windows and macOS.
@@ -71,7 +71,7 @@ npm install && npm --prefix ui install
 On Windows or macOS, install Rust, Node 22 and the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 Then build the sidecars once: `python3 assets/sidecars/build.py universal-apple-darwin` on a Mac, or
 `x86_64-pc-windows-msvc` from Linux with `mingw-w64`. Without them, put Hamlib and ffmpeg on PATH:
-SW Atlas looks next to its executable, then on PATH, then in Homebrew (`/opt/homebrew/bin`,
+Shortwave Atlas looks next to its executable, then on PATH, then in Homebrew (`/opt/homebrew/bin`,
 `/usr/local/bin`) and in Hamlib's Windows install folder.
 
 ## Run
@@ -93,7 +93,7 @@ rigctl -m 2 -r 127.0.0.1:4532 F 5025000    # the globe flies to Cuba
 ## Configure
 The easiest way: press **⚙** in the app (or the "connect your radio" link on a first run). There you
 can:
-- pick **My radio** (SW Atlas starts and supervises Hamlib `rigctld`) or **Running rigctld**
+- pick **My radio** (Shortwave Atlas starts and supervises Hamlib `rigctld`) or **Running rigctld**
   (connect to one you already run);
 - choose the Hamlib model, serial port and baud rate;
 - press **Connect**.
@@ -120,7 +120,7 @@ Rig-specific notes live in `docs/rigs/` (start with `ftdx10.md`).
 ## Updates
 When a new version is out, a lamp on the globe says **Update x.y.z available**. Open it for the
 release notes and:
-- **Windows, macOS and the Linux AppImage:** press **Install and restart**. SW Atlas downloads the
+- **Windows, macOS and the Linux AppImage:** press **Install and restart**. Shortwave Atlas downloads the
   update, checks its signature, stops rigctld and ffmpeg, installs and starts again. Nothing is
   downloaded until you press it.
 - **Linux `.deb` and `swatlas-server`:** the panel links to the release; install it the way you
@@ -153,7 +153,7 @@ rigctld and ffmpeg side by side; run it from there.
 `/etc/systemd/system/swatlas.service`
 ```
 [Unit]
-Description=SW Atlas server
+Description=Shortwave Atlas server
 After=network.target
 
 [Service]
