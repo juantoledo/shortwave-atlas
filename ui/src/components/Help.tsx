@@ -39,8 +39,11 @@ function Extra({ topic, version, meta }: { topic: HelpTopic; version: string | n
     return (
       <>
         <p className="help-app">{t.appName} {version && <span className="ver">{t.versionTag(version)}</span>}</p>
+        <p className="help-by"><a className="link" href="https://cd3dxz.radio" target="_blank" rel="noreferrer">{t.byAuthor}</a></p>
+        <p>{t.aboutBlurb}</p>
         <p>{t.receiveOnly}</p>
         {meta && <p>{t.listFoot(season)}</p>}
+        <p><a className="link" href="https://github.com/juantoledo/shortwave-atlas" target="_blank" rel="noreferrer">{t.sourceCode}</a></p>
         <p className="note">{t.thirdParty}</p>
       </>
     );

@@ -5,6 +5,7 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
 import { useNames } from '../catalog/names';
 import { sLabel, useT } from '../i18n';
+import { altName, isMac } from '../keys/keymap';
 import type { Band } from '../types/generated/Band';
 import type { Mode } from '../types/generated/Mode';
 import {
@@ -14,6 +15,7 @@ import {
 
 const MODES: Mode[] = ['AM', 'USB', 'LSB', 'CW'];
 const STEPS_KHZ = [-5, -1, 1, 5];
+const ALT = altName(isMac(globalThis.navigator?.userAgent ?? ''));
 const METER_SEGS = 11;
 /** Where the band dial looks before the rig reports a frequency. */
 const IDLE_KHZ = 9500;
@@ -125,13 +127,13 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, e
           <span className="unit">Hz</span>
         </div>
         <div className="seg" role="radiogroup" aria-label={t.mode}>
-          {MODES.map((m) => (
-            <button key={m} type="button" role="radio" aria-checked={on && mode === m} disabled={!on} onClick={() => onMode(m)}>{m}</button>
+          {MODES.map((m, i) => (
+            <button key={m} type="button" role="radio" aria-checked={on && mode === m} disabled={!on} title={`${ALT}${i + 1}`} onClick={() => onMode(m)}>{m}</button>
           ))}
         </div>
         <div className="steps">
           {STEPS_KHZ.map((s) => (
-            <button key={s} type="button" className={Math.abs(s) > 1 ? 'rx-x' : undefined} disabled={!on || freqHz === null} onClick={() => nudge(s)}>
+            <button key={s} type="button" className={Math.abs(s) > 1 ? 'rx-x' : undefined} disabled={!on || freqHz === null} title={(Math.abs(s) > 1 ? 'Shift+' : '') + (s > 0 ? '→' : '←')} onClick={() => nudge(s)}>
               {s > 0 ? '+' + s : '−' + -s}
             </button>
           ))}
@@ -150,12 +152,12 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, e
 
       <div className="bdial">
         <div className="bdial-head">
-          <button className="icon-btn" type="button" disabled={!on || !prev} aria-label={t.prevBand} title={t.prevBand} onClick={() => prev && onTune(bandEntryHz(prev, onAirHz))}>‹</button>
+          <button className="icon-btn" type="button" disabled={!on || !prev} aria-label={t.prevBand} title={t.keyHint(t.prevBand, t.keyPgDn)} onClick={() => prev && onTune(bandEntryHz(prev, onAirHz))}>‹</button>
           <span className={'bdial-name' + (w.band ? ' in' : '')}>
             <b>{w.band ? names.band(w.band.id) : t.bandOob}</b>
             {w.band && <span className="bdial-range">{w.band.lo_khz}–{w.band.hi_khz}</span>}
           </span>
-          <button className="icon-btn" type="button" disabled={!on || !next} aria-label={t.nextBand} title={t.nextBand} onClick={() => next && onTune(bandEntryHz(next, onAirHz))}>›</button>
+          <button className="icon-btn" type="button" disabled={!on || !next} aria-label={t.nextBand} title={t.keyHint(t.nextBand, t.keyPgUp)} onClick={() => next && onTune(bandEntryHz(next, onAirHz))}>›</button>
         </div>
         <div className="bdial-scale">
           <Marks off={wMarks.off} on={wMarks.on} />

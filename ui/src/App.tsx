@@ -2,8 +2,8 @@
 // left and the tuned station on its right, and the faceplate (dial and audio) along the bottom.
 // Smaller screens fold the side panels into tabs (styles.css); `view` says which one shows.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AudioOff, AudioPanel } from './components/AudioPanel';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AudioOff, AudioPanel, type AudioKeys } from './components/AudioPanel';
 import { Dossier } from './components/Dossier';
 import { Globe } from './components/Globe';
 import { Help } from './components/Help';
@@ -13,6 +13,7 @@ import { Settings, type SettingsTab } from './components/settings/Settings';
 import { StationList } from './components/StationList';
 import { TopBar } from './components/TopBar';
 import { Tuner } from './components/Tuner';
+import { adjacentBand, bandEntryHz } from './components/dial';
 import { UpdateBanner } from './components/UpdateBanner';
 import { makeNames, NamesProvider } from './catalog/names';
 import { NO_FILTERS, useCandidates, useCore, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
@@ -20,6 +21,8 @@ import { PHONE, useMedia } from './hooks/useMedia';
 import { useUpdate } from './hooks/useUpdate';
 import { I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
+import { stepIndex, type Action } from './keys/keymap';
+import { useKeys } from './keys/useKeys';
 import type { Candidate } from './types/generated/Candidate';
 import type { Mode } from './types/generated/Mode';
 import type { Qth } from './types/generated/Qth';
@@ -30,10 +33,6 @@ const MSG_MS = 6000;
 const NO_HZ: number[] = [];
 
 type SheetState = { kind: 'settings'; tab: SettingsTab } | { kind: 'help'; topic: HelpTopic | null } | null;
-
-/** Typing somewhere, so "?" is text rather than a shortcut. */
-const typing = (el: EventTarget | null) =>
-  el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 export function App() {
   const { api, info, reloadInfo, rig, status } = useCore();
@@ -51,16 +50,6 @@ export function App() {
 
   const openHelp = useCallback((topic: HelpTopic | null = null) => setSheet({ kind: 'help', topic }), []);
   const openSettings = useCallback((tab: SettingsTab = 'rig') => setSheet({ kind: 'settings', tab }), []);
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'F1' || (e.key === '?' && !typing(e.target))) {
-        e.preventDefault();
-        openHelp();
-      }
-    };
-    document.addEventListener('keydown', key);
-    return () => document.removeEventListener('keydown', key);
-  }, [openHelp]);
 
   const [msg, setMsg] = useState('');
   useEffect(() => {
@@ -129,6 +118,53 @@ export function App() {
   };
   const onGlobeTouched = useCallback(() => setTouchedGlobe(true), []);
 
+  // the keyboard (keys/keymap.ts): typing anywhere starts a new search
+  const searchRef = useRef<HTMLInputElement>(null);
+  const audioKeys = useRef<AudioKeys>(null);
+  const focusSearch = (select: boolean) => {
+    if (phone) setView('browse');
+    const go = () => {
+      const el = searchRef.current;
+      el?.focus();
+      if (select) el?.select();
+    };
+    go();
+    // on phones the panel only shows after the view change renders
+    if (phone) requestAnimationFrame(go);
+  };
+  useKeys(sheet !== null, (a: Action) => {
+    switch (a.kind) {
+      case 'search':
+        setFilters((f) => ({ ...f, q: a.text }));
+        return focusSearch(false);
+      case 'focusSearch': return focusSearch(true);
+      case 'help': return openHelp();
+      case 'audio': return audioKeys.current?.toggle();
+      case 'mute': return audioKeys.current?.mute();
+      case 'volume': return audioKeys.current?.volume(a.d);
+    }
+    if (!on) return;
+    switch (a.kind) {
+      case 'freq': return document.getElementById('freq')?.focus();
+      case 'nudge': return freqHz !== null && tune(freqHz + a.khz * 1000);
+      case 'mode': return setMode(a.mode);
+      case 'band': {
+        const b = freqHz === null ? null : adjacentBand(freqHz / 1000, meta?.bands ?? [], a.dir);
+        return b && tune(bandEntryHz(b, overview?.on_hz ?? NO_HZ));
+      }
+      case 'station': {
+        const rows = search.rows, cur = wanted ?? sel?.station.id;
+        const i = stepIndex(rows.length, rows.findIndex((r) => r.id === cur), a.dir);
+        return i !== null && pick(rows[i]);
+      }
+      case 'cand': {
+        // wraps: there are only a few on one frequency
+        const i = cands.findIndex((c) => c.station.id === sel?.station.id);
+        return sel && cands.length > 1 && choose(cands[(i + a.dir + cands.length) % cands.length]);
+      }
+    }
+  });
+
   const statusLine =
     status === 'connecting' ? t.connecting
     : status === 'lost' ? t.connectionLost
@@ -190,7 +226,9 @@ export function App() {
             siteName={siteName}
             selId={sel?.station.id ?? null}
             onPick={pick}
+            onTuneHz={tune}
             onMore={search.more}
+            searchRef={searchRef}
           />
         </section>
 
@@ -223,7 +261,7 @@ export function App() {
           />
           {/* always mounted, so audio keeps playing whatever else opens */}
           {info?.audio && api ? (
-            <AudioPanel openAudio={api.transport.openAudio.bind(api.transport)} rate={info.audio_rate} mode={rig.mode} cwPitch={rig.cw_pitch_hz} freqHz={freqHz} onTune={tune} />
+            <AudioPanel openAudio={api.transport.openAudio.bind(api.transport)} rate={info.audio_rate} mode={rig.mode} cwPitch={rig.cw_pitch_hz} freqHz={freqHz} onTune={tune} keys={audioKeys} />
           ) : (
             info && <AudioOff onSetUp={() => openSettings('audio')} />
           )}

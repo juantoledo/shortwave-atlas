@@ -2,10 +2,11 @@
 // It fills its panel: the controls are fixed, the rows scroll in their own box and load the
 // next page when you reach the end.
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useNames } from '../catalog/names';
 import type { Filters } from '../hooks/useCore';
 import { useT } from '../i18n';
+import { queryHz } from '../keys/keymap';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
 import type { Facets } from '../types/generated/Facets';
 import type { Region } from '../types/generated/Region';
@@ -29,7 +30,10 @@ interface Props {
   siteName: string | null;
   selId: number | null;
   onPick: (r: StationRow) => void;
+  /** Shift+Enter on a kHz query: tune there exactly. */
+  onTuneHz: (hz: number) => void;
   onMore: () => void;
+  searchRef: RefObject<HTMLInputElement | null>;
 }
 
 /** A labelled filter dropdown; options that would give no rows are greyed out. */
@@ -99,15 +103,50 @@ export function StationList(p: Props) {
     if (rr.top < br.top || rr.bottom > br.bottom) b.scrollTop += rr.top - br.top - b.clientHeight / 3;
   }, [p.selId]);
 
+  const rowButtons = () => [...(box.current?.querySelectorAll<HTMLButtonElement>('.row:not(:disabled)') ?? [])];
+  const onSearchKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === 'ArrowDown') rowButtons()[0]?.focus();
+    else if (e.key === 'Enter') {
+      const hz = e.shiftKey ? queryHz(f.q) : null;
+      if (!p.on) return;
+      if (hz !== null) p.onTuneHz(hz);
+      else if (p.rows[0]) p.onPick(p.rows[0]);
+    } else if (e.key === 'Escape') {
+      if (f.q) set({ q: '' });
+      else e.currentTarget.blur();
+    } else return;
+    e.preventDefault();
+  };
+  // rows: arrows move the focus, Enter/Space tune (the button's own click), Esc back to search
+  const onRowsKey = (e: KeyboardEvent<HTMLElement>) => {
+    const rows = rowButtons(), i = rows.indexOf(document.activeElement as HTMLButtonElement);
+    if (i < 0 || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const to = e.key === 'ArrowDown' ? Math.min(i + 1, rows.length - 1)
+      : e.key === 'ArrowUp' ? i - 1
+      : e.key === 'Home' ? 0
+      : e.key === 'End' ? rows.length - 1
+      : e.key === 'Escape' ? -1
+      : null;
+    if (to === null) return;
+    if (to < 0) p.searchRef.current?.focus();
+    else rows[to].focus();
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   return (
     <>
       <div className="finder">
         <input
+          ref={p.searchRef}
           type="search"
           aria-label={t.search}
           placeholder={t.searchPlaceholder}
+          title={t.searchKeys}
           value={f.q}
           onChange={(e) => set({ q: e.currentTarget.value })}
+          onKeyDown={onSearchKey}
         />
         <label className="chk">
           <input type="checkbox" checked={f.on_air} onChange={(e) => set({ on_air: e.currentTarget.checked })} />
@@ -135,7 +174,7 @@ export function StationList(p: Props) {
         </div>
       )}
       <div className="rows" ref={box}>
-        <ul className="list">
+        <ul className="list" onKeyDown={onRowsKey}>
           {p.rows.map((r) => {
             const country = names.country(r.itu);
             const abroad = r.site_itu !== r.itu;

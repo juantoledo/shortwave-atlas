@@ -2,13 +2,20 @@
 // right-hand cell. The waterfall box is always there (empty until you listen), so the dock
 // does not jump; `audio-x` parts fold away on phones until the dock is expanded.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { OpenAudio } from '../api/transport';
 import { AudioPlayer, type PlayerStatus } from '../audio/player';
 import { cwDelta, SP_H, Waterfall, WF_H, WF_W } from '../audio/waterfall';
 import { useT, type Messages } from '../i18n';
 
 const ROW_MS = 50;
+
+/** What the keyboard can do to the audio (App's shortcuts). */
+export interface AudioKeys {
+  toggle: () => void;
+  mute: () => void;
+  volume: (d: number) => void;
+}
 
 function statusText(t: Messages, s: PlayerStatus | null): string {
   if (!s) return '';
@@ -27,9 +34,10 @@ interface Props {
   cwPitch: number | null;
   freqHz: number | null;
   onTune: (hz: number) => void;
+  keys?: RefObject<AudioKeys | null>;
 }
 
-export function AudioPanel({ openAudio, rate, mode, cwPitch, freqHz, onTune }: Props) {
+export function AudioPanel({ openAudio, rate, mode, cwPitch, freqHz, onTune, keys }: Props) {
   const t = useT();
   const spans = [...new Set([3000, 4000, rate / 2])].filter((s) => s <= rate / 2);
   const [span, setSpan] = useState(spans[0]);
@@ -62,6 +70,16 @@ export function AudioPanel({ openAudio, rate, mode, cwPitch, freqHz, onTune }: P
       setPlayer(new AudioPlayer(openAudio, volume, setStatus));
     }
   };
+  // mute remembers the level it left
+  const unmuted = useRef(volume);
+  const mute = () => {
+    if (volume > 0) {
+      unmuted.current = volume;
+      setVolume(0);
+    } else setVolume(unmuted.current || 0.8);
+  };
+  useEffect(() => () => { if (keys) keys.current = null; }, [keys]);
+  if (keys) keys.current = { toggle, mute, volume: (d) => setVolume((v) => Math.round(Math.min(1, Math.max(0, v + d)) * 100) / 100) };
 
   const isCW = (mode === 'CW' || mode === 'CWR') && !!cwPitch;
   const toneAt = (clientX: number) => {
@@ -77,7 +95,7 @@ export function AudioPanel({ openAudio, rate, mode, cwPitch, freqHz, onTune }: P
   return (
     <section className="audio" aria-label={t.audio}>
       <div className="audio-row">
-        <button className={'btn' + (player ? ' primary' : '')} type="button" aria-pressed={!!player} onClick={toggle}>
+        <button className={'btn' + (player ? ' primary' : '')} type="button" aria-pressed={!!player} title={t.keyHint(player ? t.stop : t.listen, t.keySpace)} onClick={toggle}>
           {player ? `■ ${t.stop}` : `▶ ${t.listen}`}
         </button>
         <label className="vol audio-x">{t.volume}

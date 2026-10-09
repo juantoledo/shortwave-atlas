@@ -487,6 +487,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .row:hover:not(:disabled) { background: rgba(140, 185, 230, 0.06); }
 .row:disabled { cursor: default; }
 .row[aria-current="true"] { background: var(--amber-soft); }
+.row:focus-visible { outline-offset: -2px; }
 .rf { font: 500 15px var(--font-mono); font-variant-numeric: tabular-nums; }
 .rn { min-width: 0; }
 .rn b { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -723,12 +724,13 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .help-page { animation: rise-in 0.2s ease-out both; }
 .help-page h2 { margin: 14px 0 8px; font: 800 24px/1 var(--font-display); letter-spacing: 0.03em; text-transform: uppercase; }
 .help-page p { margin: 0 0 10px; max-width: 60ch; }
-.help-page .link { font: 500 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; text-decoration: none; }
+.help-page > button.link { font: 500 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; text-decoration: none; }
 .help-list { margin: 0 0 14px; padding-left: 18px; color: var(--text); }
 .help-list li { margin: 4px 0; }
 .legend-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font: 400 12px var(--font-mono); color: var(--dim); }
 .help-app { font: 700 20px/1.2 var(--font-display); letter-spacing: 0.03em; text-transform: uppercase; }
 .help-app .ver { margin-left: 6px; }
+.help-page .help-by { margin-top: -4px; color: var(--dim); font-size: 13px; }
 
 /* ---------- Fingers ---------- */
 @media (pointer: coarse) {
