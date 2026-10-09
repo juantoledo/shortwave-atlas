@@ -159,7 +159,9 @@ impl Atlas {
     /// Start downloading and installing the offered update in the background.
     fn install_update(&self) -> Result<(), ApiError> {
         self.update.begin_install().map_err(|e| match e {
-            InstallRefused::Manual => invalid("This copy of Shortwave Atlas is updated by hand: download the new version."),
+            InstallRefused::Manual => {
+                invalid("This copy of Shortwave Atlas is updated by hand: download the new version.")
+            }
             InstallRefused::NotNow(why) => ApiError { kind: ErrorKind::Conflict, message: why.into() },
         })?;
         let atlas = self.me.upgrade().ok_or_else(|| ApiError::internal("shutting down"))?;

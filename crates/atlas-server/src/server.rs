@@ -80,7 +80,8 @@ async fn basic_auth(State(ctx): State<Ctx>, req: Request, next: Next) -> Respons
         Some(g) if bool::from(g.ct_eq(expected.as_bytes())) => next.run(req).await,
         _ => {
             let mut r = StatusCode::UNAUTHORIZED.into_response();
-            r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"Shortwave Atlas\""));
+            r.headers_mut()
+                .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"Shortwave Atlas\""));
             r
         }
     }
