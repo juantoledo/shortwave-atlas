@@ -167,6 +167,7 @@ export const en = {
   model: 'Model',
   modelPlaceholder: 'Search: FTDX-10, IC-7300, 1042…',
   modelPick: 'Pick a model from the list',
+  noModel: 'No model matches.',
   modelsMissing: 'Hamlib rigctl was not found: type the model number.',
   serialPort: 'Serial port',
   otherPort: 'Other…',

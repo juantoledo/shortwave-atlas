@@ -2,7 +2,7 @@
 // It fills its panel: the controls are fixed, the rows scroll in their own box and load the
 // next page when you reach the end.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useNames } from '../catalog/names';
 import type { Filters } from '../hooks/useCore';
 import { useT } from '../i18n';
@@ -32,9 +32,20 @@ interface Props {
   onMore: () => void;
 }
 
+/** A labelled filter dropdown; options that would give no rows are greyed out. */
+function Filter({ label, all, value, opts, onChange }: { label: string; all: string; value: string; opts: DropOpt[]; onChange: (v: string) => void }) {
+  const id = useId();
+  return (
+    <div className="flt">
+      <span className="flt-lab" id={id}>{label}</span>
+      <Dropdown labelledBy={id} all={all} lit={value !== ''} value={value} opts={opts.map((o) => ({ ...o, disabled: o.n === 0 }))} onChange={onChange} />
+    </div>
+  );
+}
+
 /** Most rows first for the top few, then the rest by name; selected values always included. */
 function ranked(opts: DropOpt[]): DropOpt[] {
-  const top = [...opts].sort((a, b) => b.n - a.n).slice(0, TOP);
+  const top = [...opts].sort((a, b) => (b.n ?? 0) - (a.n ?? 0)).slice(0, TOP);
   const rest = opts.filter((o) => !top.includes(o)).sort((a, b) => a.label.localeCompare(b.label));
   return [...top, ...rest];
 }
@@ -108,10 +119,10 @@ export function StationList(p: Props) {
         </button>
       </div>
       <div className={'filters' + (showFilters ? ' open' : '')} role="group" aria-label={t.filters}>
-        <Dropdown label={t.band} all={t.allBands} value={f.bands[0] ?? ''} opts={bands} onChange={(v) => set({ bands: v ? [v] : [] })} />
-        <Dropdown label={t.language} all={t.allLanguages} value={f.langs[0] ?? ''} opts={langs} onChange={(v) => set({ langs: v ? [v] : [] })} />
-        <Dropdown label={t.region} all={t.allRegions} value={f.regions[0] ?? ''} opts={regions} onChange={(v) => set({ regions: v ? [v as Region] : [] })} />
-        <Dropdown label={t.country} all={t.allCountries} value={f.countries[0] ?? ''} opts={countries} onChange={(v) => set({ countries: v ? [v] : [] })} />
+        <Filter label={t.band} all={t.allBands} value={f.bands[0] ?? ''} opts={bands} onChange={(v) => set({ bands: v ? [v] : [] })} />
+        <Filter label={t.language} all={t.allLanguages} value={f.langs[0] ?? ''} opts={langs} onChange={(v) => set({ langs: v ? [v] : [] })} />
+        <Filter label={t.region} all={t.allRegions} value={f.regions[0] ?? ''} opts={regions} onChange={(v) => set({ regions: v ? [v as Region] : [] })} />
+        <Filter label={t.country} all={t.allCountries} value={f.countries[0] ?? ''} opts={countries} onChange={(v) => set({ countries: v ? [v] : [] })} />
       </div>
       {(f.site !== null || filtered) && (
         <div className="active-filters">

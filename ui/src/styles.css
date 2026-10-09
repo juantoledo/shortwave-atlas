@@ -416,7 +416,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .filters { flex: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
 .flt { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .flt-lab { font: 500 10px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
-/* filter dropdowns (components/Dropdown.tsx) */
+/* dropdowns and the combobox (components/Dropdown.tsx); the list is portalled to <body> */
+.drop-box { position: relative; min-width: 0; }
 .drop {
   display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 32px; padding: 5px 9px 5px 10px; text-align: left;
   background: var(--panel); border: 1px solid var(--line-strong); border-radius: 6px; color: var(--text); font: 12.5px var(--font-body);
@@ -424,10 +425,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 }
 .drop:hover { background: #0f1a27; border-color: rgba(140, 185, 230, 0.45); }
 .drop[aria-expanded="true"] { border-color: rgba(255, 179, 63, 0.6); }
-.drop.set { border-color: rgba(255, 179, 63, 0.45); background: linear-gradient(var(--amber-soft), var(--amber-soft)), var(--panel); }
+.drop.lit { border-color: rgba(255, 179, 63, 0.45); background: linear-gradient(var(--amber-soft), var(--amber-soft)), var(--panel); }
 .drop-v { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 7px; overflow: hidden; white-space: nowrap; }
-.drop.set .drop-v { color: var(--amber); }
-.drop-v small { overflow: hidden; text-overflow: ellipsis; font: 400 10.5px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--dim); }
+.drop-v > span { flex: 0 1 auto; min-width: 2ch; overflow: hidden; text-overflow: ellipsis; }
+.drop.lit .drop-v { color: var(--amber); }
+.drop-v small { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 400 10.5px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--dim); }
 .drop-chev { flex: none; width: 10px; height: 6px; fill: none; stroke: var(--dim); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.15s; }
 .drop[aria-expanded="true"] .drop-chev { transform: rotate(180deg); stroke: var(--amber); }
 .drop-list {
@@ -459,6 +461,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 }
 .drop-o[aria-selected="true"] .drop-n { background: rgba(255, 179, 63, 0.18); color: var(--amber); }
 .drop-o[aria-disabled="true"] .drop-h, .drop-o[aria-disabled="true"] .drop-n { color: inherit; background: none; }
+.drop-empty { padding: 8px 10px; font: 12.5px var(--font-body); color: var(--dim); }
+/* the combobox: a text box with the chevron drawn over its right end */
+.combo .drop-chev { position: absolute; right: 11px; top: 50%; margin-top: -3px; pointer-events: none; }
+.combo input { padding-right: 30px; }
+.combo input[aria-expanded="true"] { border-color: rgba(255, 179, 63, 0.6); }
+.combo input[aria-expanded="true"] + .drop-chev { transform: rotate(180deg); stroke: var(--amber); }
 .flt-toggle { display: none; }
 @media (max-width: 599px) {
   .flt-toggle { display: inline-flex; align-items: center; }
@@ -677,12 +685,15 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .field > span:first-child, .field summary { font: 500 10.5px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
 .field summary { cursor: pointer; }
 .field small { color: var(--dim); font-size: 12px; }
-.field input, .field select {
+.field input {
   width: 100%; min-width: 0; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line-strong);
   border-radius: 6px; color: var(--text); font: 13px var(--font-mono);
 }
 .row-inline { display: flex; gap: 8px; }
-.row-inline select { flex: 1; }
+.row-inline .drop-box { flex: 1; }
+.field .drop { min-height: 37px; padding: 7px 10px; font: 13px var(--font-mono); }
+.field input:hover, .field .drop:hover { border-color: rgba(140, 185, 230, 0.45); }
+.field input:focus { border-color: rgba(255, 179, 63, 0.6); }
 .actions { display: flex; gap: 10px; margin-top: 18px; }
 .st-box { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 .st-line { margin: 0; font: 500 13px var(--font-mono); }

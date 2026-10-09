@@ -157,6 +157,7 @@ export const es: Messages = {
   model: 'Modelo',
   modelPlaceholder: 'Busca: FTDX-10, IC-7300, 1042…',
   modelPick: 'Elige un modelo de la lista',
+  noModel: 'Ningún modelo coincide.',
   modelsMissing: 'No se encontró rigctl de Hamlib: escribe el número de modelo.',
   serialPort: 'Puerto serie',
   otherPort: 'Otro…',
