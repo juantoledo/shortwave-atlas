@@ -1,51 +1,51 @@
 {
-  "version": "0.2.0",
-  "notes": "## [0.2.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.1.0...v0.2.0) (2026-10-08)\r\n\r\n\r\n### Features\r\n\r\n* update available banner, with install and restart on the desktop ([b667711](https://github.com/juantoledo/shortwave-atlas/commit/b667711b148fc9ed7b62105eabc8a0d798bf9b1b))\r\n\r\n## What's Changed\r\n* chore(deps): Bump the actions group with 4 updates by @dependabot[bot] in https://github.com/juantoledo/shortwave-atlas/pull/1\r\n* chore(main): release 0.2.0 by @github-actions[bot] in https://github.com/juantoledo/shortwave-atlas/pull/2\r\n\r\n## New Contributors\r\n* @dependabot[bot] made their first contribution in https://github.com/juantoledo/shortwave-atlas/pull/1\r\n* @github-actions[bot] made their first contribution in https://github.com/juantoledo/shortwave-atlas/pull/2\r\n\r\n**Full Changelog**: https://github.com/juantoledo/shortwave-atlas/compare/v0.1.0...v0.2.0\n",
-  "pub_date": "2026-10-09T00:06:01.517Z",
+  "version": "0.2.1",
+  "notes": "## [0.2.1](https://github.com/juantoledo/shortwave-atlas/compare/v0.2.0...v0.2.1) (2026-10-09)\r\n\r\n\r\n### Features\r\n\r\n* **desktop:** Ko-fi button in the top bar, opened in the system browser ([01dea35](https://github.com/juantoledo/shortwave-atlas/commit/01dea35f761a1900174f893d085bbefc226baa93))\r\n* **desktop:** name the window Shortwave Atlas and show the version ([f166316](https://github.com/juantoledo/shortwave-atlas/commit/f166316b56675df0814785a2dc9187f0190c6437))\r\n* **stations:** load the EiBi shortwave schedule in place of the sample data ([1bd8141](https://github.com/juantoledo/shortwave-atlas/commit/1bd8141583cc22dfa0f76447a533708ce815b6d9))\r\n* **ui:** browse the catalog by search, band, language, target and country, with flags ([8395d44](https://github.com/juantoledo/shortwave-atlas/commit/8395d44223c782329eb3289d9faf1e74b70e7c52))\r\n* **ui:** keyboard shortcuts ([23155ff](https://github.com/juantoledo/shortwave-atlas/commit/23155ff65f7b15264a253bcfc8c86da23080eb6f))\r\n* **ui:** styled dropdowns and a model combobox in Settings ([69e8445](https://github.com/juantoledo/shortwave-atlas/commit/69e8445081782a8eb4683ede41bba65bd3611acc))\r\n\r\n\r\n### Documentation\r\n\r\n* describe the EiBi data and credit EiBi and flag-icons ([c265753](https://github.com/juantoledo/shortwave-atlas/commit/c265753475da526c57271e4c7fa0f9b3e77d97b0))\r\n\r\n\r\n### Miscellaneous Chores\r\n\r\n* release 0.2.1 ([0d2cd42](https://github.com/juantoledo/shortwave-atlas/commit/0d2cd426df04de27c1477a91f8b175a471ee6cf2))\n",
+  "pub_date": "2026-10-09T22:23:52.423Z",
   "platforms": {
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1RJRTd6UU5kdHdVai91Z2JVUGdqRE16c0hJNzhtNFp1eUZTTi9NWUluZjdOTXByODRMaTEzMU1iMkJXKzI2YTA0L2dFbmczUzNNWEtYR0hXdDFPcFFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTA0MzU0CWZpbGU6U1cgQXRsYXNfMC4yLjBfYW1kNjQuQXBwSW1hZ2UJdmVyc2lvbjowLjIuMApvOTNsUXNWR2h5MlRWenFaQWU3RHp4Wk9lcGN0ancyUC94c1RLcVF2eFVrdUF5QTVOejlaRDBSSnlObWdrSFltYkpaajBZTldDcDFNRWx6dlFqdW5Ddz09Cg==",
-      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/623364644"
-    },
-    "linux-x86_64-appimage": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1RJRTd6UU5kdHdVai91Z2JVUGdqRE16c0hJNzhtNFp1eUZTTi9NWUluZjdOTXByODRMaTEzMU1iMkJXKzI2YTA0L2dFbmczUzNNWEtYR0hXdDFPcFFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTA0MzU0CWZpbGU6U1cgQXRsYXNfMC4yLjBfYW1kNjQuQXBwSW1hZ2UJdmVyc2lvbjowLjIuMApvOTNsUXNWR2h5MlRWenFaQWU3RHp4Wk9lcGN0ancyUC94c1RLcVF2eFVrdUF5QTVOejlaRDBSSnlObWdrSFltYkpaajBZTldDcDFNRWx6dlFqdW5Ddz09Cg==",
-      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/623364644"
-    },
-    "linux-x86_64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1lMWk5QVGcrK1YwUzBEZ0J0eUZPRE5tbUkwT1hhVWR5UUcyMitlRDI0T1E2NXFVR3REUE9EUSs2cHBaOG8zcklDbFdDNnRmUDFXZ0p0MDNhRStRY3dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTA0MzU0CWZpbGU6U1cgQXRsYXNfMC4yLjBfYW1kNjQuZGViCXZlcnNpb246MC4yLjAKeVNkTUJtZWdUVk1QRkRhUWRqZGFFaUFPbmQ5TnlqUUk5MUowVjNmNEpYUFRYaGhrNitqU2ZSRGtpbFFXSWJsZUVIYUlJVXJsUXpoNzZSUy9jemNkREE9PQo=",
-      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/623364586"
-    },
-    "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1kyOUNsSTJMRE5BM0g1a0YveEVneTU5YVVlb21ZRU5FK1ZrNmNURHhlb1dzdjVKTEU4RFMwY21keTQ1RThrUHhNS3hiSm5HdTBaMkVlUVc4VHJ0b3dZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTA0MzM5CWZpbGU6U1cgQXRsYXNfMC4yLjBfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMi4wCjgxdFM3QnhWcmZ5MU5KQ3pvR1Z1VnpiQ0hDaDNvQmtUSU1iMjFuaGJSZzVCYm5uL1R2N1ZMWnN1OGtnem9xVzdxWVlEWHBMTGxhU3QyY09pVVdPNUJBPT0K",
-      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/623364169"
-    },
-    "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1kyOUNsSTJMRE5BM0g1a0YveEVneTU5YVVlb21ZRU5FK1ZrNmNURHhlb1dzdjVKTEU4RFMwY21keTQ1RThrUHhNS3hiSm5HdTBaMkVlUVc4VHJ0b3dZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTA0MzM5CWZpbGU6U1cgQXRsYXNfMC4yLjBfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMi4wCjgxdFM3QnhWcmZ5MU5KQ3pvR1Z1VnpiQ0hDaDNvQmtUSU1iMjFuaGJSZzVCYm5uL1R2N1ZMWnN1OGtnem9xVzdxWVlEWHBMTGxhU3QyY09pVVdPNUJBPT0K",
-      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/623364169"
-    },
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a2Q4QTBIUldnQ29Vb0ZtZEFpZkpCNVZxMW1IQ2NCdEljNjBqWWJlWWZsL0gvbVhSRm1QbHNnQmtnUzY5M0RDWGNLQzltNU8wU2d2TXAvWEJWSVYvbGdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTA0MzQ1CWZpbGU6U1cgQXRsYXMuYXBwLnRhci5negl2ZXJzaW9uOjAuMi4wClZYYnBHVTR1SlIrUjQzYitZUW5RNXlRbmRtMCt2VHRlWVN1R25INjYvNjJCUGdiS3ludnhSeXh3RHcxaXROa0g1cWEzZTdubFhhNWRJam5PcmRQUEN3PT0K",
-      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/623364441"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1QxTTVwelJHbmxOVVZlSEVYVVJnL1lEZUVWNUJCR2V0eTNtTkxjN0FpeWY1QTJBT1RjeVJxL0MvVklmbC9TZkRtS0JkM3hqWVZEMjNnN0VoYlM5Z3dvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTg0NTAzCWZpbGU6U1cgQXRsYXMuYXBwLnRhci5negl2ZXJzaW9uOjAuMi4xClo4MDRhZHozdlE1d0MxRk44b3VHcmU4cGNFL3gyZU5WV3ZCT2F0Umg3NER4NjVpU0RsWEk5Y2ZjOXpyNndtak43ZDJtbzlrTDAxdzl6aEYzTG0wQUR3PT0K",
+      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/626333543"
     },
     "darwin-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a2Q4QTBIUldnQ29Vb0ZtZEFpZkpCNVZxMW1IQ2NCdEljNjBqWWJlWWZsL0gvbVhSRm1QbHNnQmtnUzY5M0RDWGNLQzltNU8wU2d2TXAvWEJWSVYvbGdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTA0MzQ1CWZpbGU6U1cgQXRsYXMuYXBwLnRhci5negl2ZXJzaW9uOjAuMi4wClZYYnBHVTR1SlIrUjQzYitZUW5RNXlRbmRtMCt2VHRlWVN1R25INjYvNjJCUGdiS3ludnhSeXh3RHcxaXROa0g1cWEzZTdubFhhNWRJam5PcmRQUEN3PT0K",
-      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/623364441"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1QxTTVwelJHbmxOVVZlSEVYVVJnL1lEZUVWNUJCR2V0eTNtTkxjN0FpeWY1QTJBT1RjeVJxL0MvVklmbC9TZkRtS0JkM3hqWVZEMjNnN0VoYlM5Z3dvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTg0NTAzCWZpbGU6U1cgQXRsYXMuYXBwLnRhci5negl2ZXJzaW9uOjAuMi4xClo4MDRhZHozdlE1d0MxRk44b3VHcmU4cGNFL3gyZU5WV3ZCT2F0Umg3NER4NjVpU0RsWEk5Y2ZjOXpyNndtak43ZDJtbzlrTDAxdzl6aEYzTG0wQUR3PT0K",
+      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/626333543"
     },
     "darwin-universal": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a2Q4QTBIUldnQ29Vb0ZtZEFpZkpCNVZxMW1IQ2NCdEljNjBqWWJlWWZsL0gvbVhSRm1QbHNnQmtnUzY5M0RDWGNLQzltNU8wU2d2TXAvWEJWSVYvbGdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTA0MzQ1CWZpbGU6U1cgQXRsYXMuYXBwLnRhci5negl2ZXJzaW9uOjAuMi4wClZYYnBHVTR1SlIrUjQzYitZUW5RNXlRbmRtMCt2VHRlWVN1R25INjYvNjJCUGdiS3ludnhSeXh3RHcxaXROa0g1cWEzZTdubFhhNWRJam5PcmRQUEN3PT0K",
-      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/623364441"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1QxTTVwelJHbmxOVVZlSEVYVVJnL1lEZUVWNUJCR2V0eTNtTkxjN0FpeWY1QTJBT1RjeVJxL0MvVklmbC9TZkRtS0JkM3hqWVZEMjNnN0VoYlM5Z3dvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTg0NTAzCWZpbGU6U1cgQXRsYXMuYXBwLnRhci5negl2ZXJzaW9uOjAuMi4xClo4MDRhZHozdlE1d0MxRk44b3VHcmU4cGNFL3gyZU5WV3ZCT2F0Umg3NER4NjVpU0RsWEk5Y2ZjOXpyNndtak43ZDJtbzlrTDAxdzl6aEYzTG0wQUR3PT0K",
+      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/626333543"
     },
     "darwin-aarch64-app": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a2Q4QTBIUldnQ29Vb0ZtZEFpZkpCNVZxMW1IQ2NCdEljNjBqWWJlWWZsL0gvbVhSRm1QbHNnQmtnUzY5M0RDWGNLQzltNU8wU2d2TXAvWEJWSVYvbGdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTA0MzQ1CWZpbGU6U1cgQXRsYXMuYXBwLnRhci5negl2ZXJzaW9uOjAuMi4wClZYYnBHVTR1SlIrUjQzYitZUW5RNXlRbmRtMCt2VHRlWVN1R25INjYvNjJCUGdiS3ludnhSeXh3RHcxaXROa0g1cWEzZTdubFhhNWRJam5PcmRQUEN3PT0K",
-      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/623364441"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1QxTTVwelJHbmxOVVZlSEVYVVJnL1lEZUVWNUJCR2V0eTNtTkxjN0FpeWY1QTJBT1RjeVJxL0MvVklmbC9TZkRtS0JkM3hqWVZEMjNnN0VoYlM5Z3dvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTg0NTAzCWZpbGU6U1cgQXRsYXMuYXBwLnRhci5negl2ZXJzaW9uOjAuMi4xClo4MDRhZHozdlE1d0MxRk44b3VHcmU4cGNFL3gyZU5WV3ZCT2F0Umg3NER4NjVpU0RsWEk5Y2ZjOXpyNndtak43ZDJtbzlrTDAxdzl6aEYzTG0wQUR3PT0K",
+      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/626333543"
     },
     "darwin-x86_64-app": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a2Q4QTBIUldnQ29Vb0ZtZEFpZkpCNVZxMW1IQ2NCdEljNjBqWWJlWWZsL0gvbVhSRm1QbHNnQmtnUzY5M0RDWGNLQzltNU8wU2d2TXAvWEJWSVYvbGdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTA0MzQ1CWZpbGU6U1cgQXRsYXMuYXBwLnRhci5negl2ZXJzaW9uOjAuMi4wClZYYnBHVTR1SlIrUjQzYitZUW5RNXlRbmRtMCt2VHRlWVN1R25INjYvNjJCUGdiS3ludnhSeXh3RHcxaXROa0g1cWEzZTdubFhhNWRJam5PcmRQUEN3PT0K",
-      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/623364441"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1QxTTVwelJHbmxOVVZlSEVYVVJnL1lEZUVWNUJCR2V0eTNtTkxjN0FpeWY1QTJBT1RjeVJxL0MvVklmbC9TZkRtS0JkM3hqWVZEMjNnN0VoYlM5Z3dvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTg0NTAzCWZpbGU6U1cgQXRsYXMuYXBwLnRhci5negl2ZXJzaW9uOjAuMi4xClo4MDRhZHozdlE1d0MxRk44b3VHcmU4cGNFL3gyZU5WV3ZCT2F0Umg3NER4NjVpU0RsWEk5Y2ZjOXpyNndtak43ZDJtbzlrTDAxdzl6aEYzTG0wQUR3PT0K",
+      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/626333543"
     },
     "darwin-universal-app": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a2Q4QTBIUldnQ29Vb0ZtZEFpZkpCNVZxMW1IQ2NCdEljNjBqWWJlWWZsL0gvbVhSRm1QbHNnQmtnUzY5M0RDWGNLQzltNU8wU2d2TXAvWEJWSVYvbGdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTA0MzQ1CWZpbGU6U1cgQXRsYXMuYXBwLnRhci5negl2ZXJzaW9uOjAuMi4wClZYYnBHVTR1SlIrUjQzYitZUW5RNXlRbmRtMCt2VHRlWVN1R25INjYvNjJCUGdiS3ludnhSeXh3RHcxaXROa0g1cWEzZTdubFhhNWRJam5PcmRQUEN3PT0K",
-      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/623364441"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1QxTTVwelJHbmxOVVZlSEVYVVJnL1lEZUVWNUJCR2V0eTNtTkxjN0FpeWY1QTJBT1RjeVJxL0MvVklmbC9TZkRtS0JkM3hqWVZEMjNnN0VoYlM5Z3dvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTg0NTAzCWZpbGU6U1cgQXRsYXMuYXBwLnRhci5negl2ZXJzaW9uOjAuMi4xClo4MDRhZHozdlE1d0MxRk44b3VHcmU4cGNFL3gyZU5WV3ZCT2F0Umg3NER4NjVpU0RsWEk5Y2ZjOXpyNndtak43ZDJtbzlrTDAxdzl6aEYzTG0wQUR3PT0K",
+      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/626333543"
+    },
+    "linux-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a2Rmd3dvYWhFczlqL3FtOXdkdk1PNzhneHJTYUpXeXpmQjlKZWVoZzE1Y0x0cE0rK1Rzdm9vMDFSemszMng4Y0hZUks0SVJNY0NKQml3T0RNNFdDWWdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTg0NTU2CWZpbGU6U1cgQXRsYXNfMC4yLjFfYW1kNjQuQXBwSW1hZ2UJdmVyc2lvbjowLjIuMQo2ZWVKQko5SVRrc3dRdzBIUjFTQVg2VjV4dk51djhHd3dLc1VDemxRTm5RSTZZWWh1blZTRTQ0eXkxZTdlUlN0eVV3bmNVeFBqd1gvSklVVWd2ekdDUT09Cg==",
+      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/626335234"
+    },
+    "linux-x86_64-appimage": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a2Rmd3dvYWhFczlqL3FtOXdkdk1PNzhneHJTYUpXeXpmQjlKZWVoZzE1Y0x0cE0rK1Rzdm9vMDFSemszMng4Y0hZUks0SVJNY0NKQml3T0RNNFdDWWdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTg0NTU2CWZpbGU6U1cgQXRsYXNfMC4yLjFfYW1kNjQuQXBwSW1hZ2UJdmVyc2lvbjowLjIuMQo2ZWVKQko5SVRrc3dRdzBIUjFTQVg2VjV4dk51djhHd3dLc1VDemxRTm5RSTZZWWh1blZTRTQ0eXkxZTdlUlN0eVV3bmNVeFBqd1gvSklVVWd2ekdDUT09Cg==",
+      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/626335234"
+    },
+    "linux-x86_64-deb": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1FhOUpPVmROVS8vTTRhZ0JEQVZoZmlPT0VoZjJkcWtzWjhFRmJaZjBKRU1UUzduZ3djR2ZTbFF5SDZzLzdZSVNjUGY5NGdGVTVOQVZUSW95L1NvN2dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTg0NTU2CWZpbGU6U1cgQXRsYXNfMC4yLjFfYW1kNjQuZGViCXZlcnNpb246MC4yLjEKd0k5MFNlRDN0RCtsdGQ3eHprU3psSjJrc2xZd2xRa2ZZc3UxbWNNbEswUW9JeXZxZkJMYXdjcU45SFp5TEVyemJRbFN5a0tLbzhzbVhCQlRQd3ZRQ1E9PQo=",
+      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/626335198"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1hmTlhhUW9TWUE3b1JzRE83Y3VZRE9WbUdWZjdvS25IYnpkcWgrMmxmMGRiYVRPcG1BdXdIY2s3bUdRRkMxdklrQ2djbVE2TFR6MkRtNHBRTHIvYXdvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTg0NjMwCWZpbGU6U1cgQXRsYXNfMC4yLjFfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMi4xCmQzNzRjTkVCbEFqdEtXeWg5VHNTVi9nRllLSWVpV1N2WjRGaUFiQmZZQkNJM0FHb0krQnZMUHF0eUNRVFNwL1pBZEJPZkY1bXg4TmJIU2dMUFhDVkFnPT0K",
+      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/626337437"
+    },
+    "windows-x86_64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEQ1NkFxdmh0a1hmTlhhUW9TWUE3b1JzRE83Y3VZRE9WbUdWZjdvS25IYnpkcWgrMmxmMGRiYVRPcG1BdXdIY2s3bUdRRkMxdklrQ2djbVE2TFR6MkRtNHBRTHIvYXdvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNTg0NjMwCWZpbGU6U1cgQXRsYXNfMC4yLjFfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMi4xCmQzNzRjTkVCbEFqdEtXeWg5VHNTVi9nRllLSWVpV1N2WjRGaUFiQmZZQkNJM0FHb0krQnZMUHF0eUNRVFNwL1pBZEJPZkY1bXg4TmJIU2dMUFhDVkFnPT0K",
+      "url": "https://api.github.com/repos/juantoledo/shortwave-atlas/releases/assets/626337437"
     }
   }
 }
