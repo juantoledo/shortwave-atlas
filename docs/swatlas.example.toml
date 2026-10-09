@@ -2,10 +2,10 @@
 # Shared by the desktop app and swatlas-server. Every key is optional.
 # Environment overrides: SWATLAS_RIG, RIGCTLD_HOST, RIGCTLD_PORT, SWATLAS_RIG_MODEL,
 # SWATLAS_RIG_DEVICE, SWATLAS_RIG_BAUD, WEB_BIND, WEB_PORT, WEB_AUTH, AUDIO_DEVICE,
-# AUDIO_RATE, SWATLAS_LANG, SWATLAS_STATIONS, SWATLAS_UI_DIR.
+# AUDIO_RATE, SWATLAS_LANG, SWATLAS_EIBI_DIR, SWATLAS_UI_DIR.
 
 # lang = "es"                 # UI language; default follows the browser/OS
-# stations = "/path/to.json"  # default: the bundled sample (10 stations, not verified)
+# eibi_dir = "/path/to/eibi"  # EiBi files laid out like data/eibi; default: the bundled schedule
 
 [rig]
 # "sim" (no hardware, default) | "external" (a rigctld already running) | "spawn" (start our own)

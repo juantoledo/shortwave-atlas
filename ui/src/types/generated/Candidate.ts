@@ -3,12 +3,21 @@ import type { AirStatus } from "./AirStatus";
 import type { Route } from "./Route";
 import type { Site } from "./Site";
 import type { Station } from "./Station";
+import type { SunAt } from "./SunAt";
 
 /**
- * A station as seen from a QTH at a given UTC minute.
+ * A station as seen from a QTH at a given time.
  */
 export type Candidate = { station: Station, site: Site, route: Route, air: AirStatus, 
 /**
- * `station.sched` split at midnight, ready to draw on a 24 h bar.
+ * Index in `station.slots` of the slot on the air now, else of the next one to start.
  */
-windows: Array<[number, number]>, };
+slot: number | null, 
+/**
+ * Today's (UTC) windows, for the 24 h bar.
+ */
+today: Array<[number, number]>, 
+/**
+ * The Sun at the transmitter.
+ */
+sun: SunAt, };

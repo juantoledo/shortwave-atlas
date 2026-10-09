@@ -9,7 +9,7 @@ use atlas_core::api::{Qth, RigDiagnostics};
 use atlas_core::rig::{CommandError, Link, Mode, Power, RigCommand, RigState};
 use atlas_core::setup::diagnose;
 pub use atlas_core::setup::{BackendKind, RigConfig};
-use atlas_core::stations::StationSource;
+use atlas_core::stations::Catalog;
 use tokio::sync::{watch, Notify};
 use tokio::task::JoinHandle;
 
@@ -72,13 +72,13 @@ pub struct Rig {
     running: Mutex<Option<Running>>,
     /// Serialises reconfigure/disconnect.
     switching: tokio::sync::Mutex<()>,
-    stations: Option<Arc<dyn StationSource>>,
+    stations: Option<Arc<Catalog>>,
     qth: Option<Arc<RwLock<Qth>>>,
 }
 
 impl Rig {
     /// Build the backend from config and start it. Needs a tokio runtime.
-    pub fn from_config(cfg: &RigConfig, stations: Arc<dyn StationSource>, qth: Arc<RwLock<Qth>>) -> Self {
+    pub fn from_config(cfg: &RigConfig, stations: Arc<Catalog>, qth: Arc<RwLock<Qth>>) -> Self {
         let rig = Self::empty(Some(stations), Some(qth));
         let r = rig.launch(cfg);
         *rig.running.lock().expect("rig lock") = Some(r);
@@ -93,7 +93,7 @@ impl Rig {
         rig
     }
 
-    fn empty(stations: Option<Arc<dyn StationSource>>, qth: Option<Arc<RwLock<Qth>>>) -> Self {
+    fn empty(stations: Option<Arc<Catalog>>, qth: Option<Arc<RwLock<Qth>>>) -> Self {
         Self {
             state: Arc::new(watch::channel(RigState::down()).0),
             running: Mutex::new(None),
@@ -249,7 +249,6 @@ async fn tune(backend: Arc<dyn RigBackend>, mut rx: watch::Receiver<Option<u32>>
 mod tests {
     use super::*;
     use crate::fake::FakeRigctld;
-    use atlas_core::stations::Catalog;
 
     async fn changed(rx: &mut watch::Receiver<RigState>) -> RigState {
         tokio::time::timeout(Duration::from_secs(5), rx.changed()).await.unwrap().unwrap();
@@ -309,8 +308,7 @@ mod tests {
 
     #[tokio::test]
     async fn switching_backends_keeps_subscribers() {
-        let cat = Catalog::from_json(include_str!("../../../data/stations.sample.json")).unwrap();
-        let rig = Rig::from_config(&RigConfig::default(), Arc::new(cat), Arc::new(RwLock::new(Qth::default())));
+        let rig = Rig::from_config(&RigConfig::default(), sim::tests::catalog(), Arc::new(RwLock::new(Qth::default())));
         let mut rx = rig.subscribe();
         until(&mut rx, |s| s.link == Link::Sim).await;
 

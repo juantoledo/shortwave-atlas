@@ -1,0 +1,50 @@
+# Utility (non-broadcast) stations, matched against the EiBi station name.
+# One regular expression per line (Rust `regex` syntax, case-insensitive); `#` starts a comment.
+# Rows with P >= 90 or a utility language code (-CW, -EC, -HF, -TS, -TY) are dropped without these.
+
+# Aviation: weather broadcasts, air traffic control (HF), military air
+volmet
+aeradio
+\bchannel marker\b
+^AF Transport\b
+^(gander|new york|piarco|san francisco|santa maria|tokyo|naha|nadi|auckland|brisbane|mumbai|kolkata|chennai|delhi|colombo|dakar|mogadishu|tahiti|iceland|reykjavik) (radio\b|r\.)
+^seychelles control$
+\b(air force|raf|military)\b
+^ejercito del aire$
+^trenton\b
+
+# Maritime: coast stations, coastguards, navies, rescue
+coast ?gu?a?r?d
+\bcoastgd\b
+\bUSCG\b
+\bNAVTEX\b
+\bnavy\b|\bfrench ny\b
+^CROSS\b
+search and rescue
+\bmarine r\.|\bmaritime r\.
+\bkystradio\b
+\bharbor\b
+^(arrecife|bodo|bj.rn.ya|cabo la nao|cora.a|coru.a|las palmas|lyngby|stockholm|valentia|olimpia|wlo mobile|kln riverhead) radio\b
+^(EAO|LZW|OSU|SVO|TAH|ZSC|XSG|XSQ|XSV|VAJ|VCF|VCO|VCP|VCS|VFF|VMC|VMW|VOJ|VOK|ZLM|CBA|CBM|CBP|CBV|KFS|KLB|KPH) 
+^romaradio\b
+^(ben thuy|ca mau|can tho|da nang|hai phong|ho chi minh city|hon gai|hue|kien giang|mong cai|nha trang|phan rang|phan tiet|phu yen|quy nhon|vung tau) (radio|r\.)
+^duyen hai information$
+
+# Weather and data: fax, RTTY, meteorological services
+\bfax\b
+\bRTTY\b
+\bmeteo\b|\bmeterolog
+\bwx\b
+\bweather\b
+^DWD\b
+^HLL\b
+^hopen island\b
+^central weather bureau$
+^WO2XPY\b
+^RFID devices$
+
+# Numbers stations, markers and jammers
+\bspy numbers\b
+\bjammer\b
+^the buzzer$
+^the squeaky wheel$

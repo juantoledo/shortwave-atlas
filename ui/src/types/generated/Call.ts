@@ -3,9 +3,10 @@ import type { AudioChoice } from "./AudioChoice";
 import type { Qth } from "./Qth";
 import type { RigChoice } from "./RigChoice";
 import type { RigCommand } from "./RigCommand";
+import type { StationQuery } from "./StationQuery";
 import type { UpdatePrefs } from "./UpdatePrefs";
 
 /**
  * One request from the UI. JSON: `{"cmd": "lookup", "args": {"freq_hz": 13570000}}`.
  */
-export type Call = { "cmd": "info" } | { "cmd": "state" } | { "cmd": "rig", "args": RigCommand } | { "cmd": "lookup", "args": { freq_hz: number, } } | { "cmd": "list" } | { "cmd": "set_qth", "args": Qth } | { "cmd": "rig_settings" } | { "cmd": "rig_models" } | { "cmd": "serial_ports" } | { "cmd": "apply_rig", "args": RigChoice } | { "cmd": "disconnect_rig" } | { "cmd": "rig_diagnostics" } | { "cmd": "audio_settings" } | { "cmd": "sound_cards" } | { "cmd": "apply_audio", "args": AudioChoice } | { "cmd": "audio_diagnostics" } | { "cmd": "update_status" } | { "cmd": "check_update" } | { "cmd": "install_update" } | { "cmd": "set_update_prefs", "args": UpdatePrefs };
+export type Call = { "cmd": "info" } | { "cmd": "state" } | { "cmd": "rig", "args": RigCommand } | { "cmd": "lookup", "args": { freq_hz: number, } } | { "cmd": "search", "args": StationQuery } | { "cmd": "overview" } | { "cmd": "stations_meta" } | { "cmd": "set_qth", "args": Qth } | { "cmd": "rig_settings" } | { "cmd": "rig_models" } | { "cmd": "serial_ports" } | { "cmd": "apply_rig", "args": RigChoice } | { "cmd": "disconnect_rig" } | { "cmd": "rig_diagnostics" } | { "cmd": "audio_settings" } | { "cmd": "sound_cards" } | { "cmd": "apply_audio", "args": AudioChoice } | { "cmd": "audio_diagnostics" } | { "cmd": "update_status" } | { "cmd": "check_update" } | { "cmd": "install_update" } | { "cmd": "set_update_prefs", "args": UpdatePrefs };
