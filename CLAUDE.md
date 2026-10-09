@@ -33,7 +33,6 @@ See README.md for layout and commands.
 - UI strings go in `ui/src/i18n/en.ts` and `es.ts` (same keys; a test enforces it).
 - The globe texture is drawn at runtime (`ui/src/geo/texture.ts`). Its two rasters are generated
   by `assets/make_globe_rasters.py`; regenerate them rather than editing the JPEGs.
-- `reference/` holds the prototypes, kept unchanged as a reference.
 
 ## Commands
 - `cargo test` (core, rig and server; the real-rigctld test skips without `rigctld`)

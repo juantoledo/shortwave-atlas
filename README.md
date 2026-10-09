@@ -1,8 +1,20 @@
 # SW Atlas
 
+[![CI](https://github.com/juantoledo/shortwave-atlas/actions/workflows/ci.yml/badge.svg)](https://github.com/juantoledo/shortwave-atlas/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/juantoledo/shortwave-atlas?sort=semver)](https://github.com/juantoledo/shortwave-atlas/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/juantoledo/shortwave-atlas/total)](https://github.com/juantoledo/shortwave-atlas/releases)
+[![License: MIT](https://img.shields.io/github/license/juantoledo/shortwave-atlas)](LICENSE)
+![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-informational)
+![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
+![Tauri v2](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)
+![Receive only](https://img.shields.io/badge/receive--only-never%20transmits-success)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-support-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/J6F024AKJE)
+
 Shortwave atlas for your rig. Tune a frequency and the globe flies to the transmitter, draws the
 great-circle path to your QTH over the live day/night terminator, and opens the station's card:
 on-air status, distance, bearing, the Sun at the transmitter, and the schedule.
+
+![SW Atlas tuned to WRMI on 5850 kHz: the station list, the globe with the transmitter sites and the QTH, the station card and the band scale](docs/images/screenshot.png)
 
 The station data is the [EiBi](http://www.eibispace.de/dx/) shortwave schedule (about 2,000
 frequency and station pairs from 170 transmitter sites), bundled with each release. Search it by
@@ -29,7 +41,6 @@ src-tauri             desktop shell (per-OS bundle settings in tauri.{linux,wind
 ui                    React + TypeScript + Vite (react-globe.gl)
 assets/sidecars       builds the rigctld and ffmpeg that the Windows and macOS installers ship
 data/eibi             the EiBi schedule bundled into the binary (see data/eibi/README.md)
-reference             the prototypes this grew from
 ```
 
 ## Install
@@ -176,5 +187,4 @@ The globe rasters in `ui/src/assets/globe/` are built by `assets/make_globe_rast
 This is the kickstart: phase 1 (skeleton) plus remote access, audio and i18n (English and Spanish).
 The EiBi schedule is in (phase 2), held in memory: SQLite only if notes and logs need it.
 Next steps: map polish, real-rig validation, then notes/logs, the band scan, a shared rigctld
-port and packaging. See
-`reference/atlas-onda-corta-notas.md`.
+port and packaging.

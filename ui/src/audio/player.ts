@@ -1,5 +1,5 @@
 // Low-latency rig audio: raw PCM from the transport (HTTP in the browser, a Tauri channel
-// on the desktop) played through Web Audio (port of the player in reference/ftdx10_web.py).
+// on the desktop) played through Web Audio (port of the original prototype's player).
 //
 // Blocks are scheduled back to back on the AudioContext clock. The queue ahead of the
 // playhead is kept between CUSHION (rebuilt after an underrun) and MAX_AHEAD (blocks

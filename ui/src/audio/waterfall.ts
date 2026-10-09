@@ -1,4 +1,4 @@
-// Audio waterfall (port from reference/ftdx10_web.py).
+// Audio waterfall (port from the original prototype).
 //
 // Every row the analyser spectrum (0..span Hz) is mapped to W columns (max of the FFT
 // bins under each column, so narrow CW carriers aren't lost), coloured relative to a

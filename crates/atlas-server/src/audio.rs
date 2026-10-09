@@ -1,4 +1,4 @@
-//! Rig audio for listeners (port of `AudioHub` from `reference/ftdx10_web.py`).
+//! Rig audio for listeners (port of `AudioHub` from the original Python prototype).
 //!
 //! One ffmpeg reads the sound card as raw 16-bit mono PCM and its blocks are fanned out
 //! to every listener: browsers on `GET /api/audio`, the desktop app over a Tauri channel.
