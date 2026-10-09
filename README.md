@@ -2,7 +2,12 @@
 
 Shortwave atlas for your rig. Tune a frequency and the globe flies to the transmitter, draws the
 great-circle path to your QTH over the live day/night terminator, and opens the station's card:
-on-air status, distance, bearing, local time and schedule.
+on-air status, distance, bearing, the Sun at the transmitter, and the schedule.
+
+The station data is the [EiBi](http://www.eibispace.de/dx/) shortwave schedule (about 2,000
+frequency and station pairs from 170 transmitter sites), bundled with each release. Search it by
+station, country, language or kHz, filter by band, language, target area and country, or click a
+transmitter on the globe to list what it broadcasts.
 
 The rig is a frequency sensor: SW Atlas only reads and sets frequency and mode, reads the
 S-meter and switches power. **It never transmits.**
@@ -23,7 +28,7 @@ crates/atlas-server   config, the Atlas dispatcher, audio hub, HTTP/WebSocket se
 src-tauri             desktop shell (per-OS bundle settings in tauri.{linux,windows,macos}.conf.json)
 ui                    React + TypeScript + Vite (react-globe.gl)
 assets/sidecars       builds the rigctld and ffmpeg that the Windows and macOS installers ship
-data                  sample station data (10 stations, NOT verified)
+data/eibi             the EiBi schedule bundled into the binary (see data/eibi/README.md)
 reference             the prototypes this grew from
 ```
 
@@ -77,8 +82,8 @@ rigctl -m 2 -r 127.0.0.1:4532 F 5025000    # the globe flies to Cuba
 ## Configure
 The easiest way: press **⚙** in the app (or the "connect your radio" link on a first run). There you
 can:
-- pick **Simulated**, **My radio** (SW Atlas starts and supervises Hamlib `rigctld`) or **Running
-  rigctld** (connect to one you already run);
+- pick **My radio** (SW Atlas starts and supervises Hamlib `rigctld`) or **Running rigctld**
+  (connect to one you already run);
 - choose the Hamlib model, serial port and baud rate;
 - press **Connect**.
 
@@ -161,11 +166,15 @@ device can only be opened by one program at a time.
 - Coastlines, borders and shaded relief: [Natural Earth](https://www.naturalearthdata.com/) (public
   domain), via [world-atlas](https://github.com/topojson/world-atlas).
 - City lights: NASA Earth Observatory, Black Marble 2016 (public domain).
+- Station schedules: [EiBi](http://www.eibispace.de/dx/) by Eike Bierwirth, free to use and
+  redistribute; mirrored weekly from [radiomap](https://github.com/juantoledo/radiomap).
+- Flags: [flag-icons](https://github.com/lipis/flag-icons) (MIT).
 
 The globe rasters in `ui/src/assets/globe/` are built by `assets/make_globe_rasters.py`.
 
 ## Status
 This is the kickstart: phase 1 (skeleton) plus remote access, audio and i18n (English and Spanish).
-Next steps: EiBi import into SQLite (phase 2), map polish, real-rig validation, then
-notes/logs, the band scan, a shared rigctld port and packaging. See
+The EiBi schedule is in (phase 2), held in memory: SQLite only if notes and logs need it.
+Next steps: map polish, real-rig validation, then notes/logs, the band scan, a shared rigctld
+port and packaging. See
 `reference/atlas-onda-corta-notas.md`.

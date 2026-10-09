@@ -16,6 +16,10 @@ See README.md for layout and commands.
   `atlas-server/src/update.rs` (`UpdateService`, checks). The desktop installs through Tauri's
   updater (`TauriUpdater` in `src-tauri`), verified with the `pubkey` in `tauri.conf.json`.
   Releases, channels and the signing key: `docs/releasing.md`.
+- Station data is EiBi, vendored in `data/eibi/source` byte for byte and refreshed from radiomap by
+  `assets/sync_eibi.py` (weekly workflow). Never edit those files: fixes go in `site_overrides.csv`
+  or `utility_patterns.txt`. Parsing is `atlas_core::eibi`; `cargo test` checks it against
+  `data/eibi/parity.json`. New EiBi country codes need a row in `atlas_core::country`.
 - Shared types are generated: `cargo test` writes `ui/src/types/generated/` (ts-rs). Commit them
   and never edit them by hand.
 - Logic that doesn't touch IO goes in `atlas-core`, with unit tests. The UI only keeps animation
