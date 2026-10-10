@@ -1,67 +1,79 @@
 //! Rig audio for listeners (port of `AudioHub` from the original Python prototype).
 //!
-//! One ffmpeg reads the sound card as raw 16-bit mono PCM and its blocks are fanned out
-//! to every listener: browsers on `GET /api/audio`, the desktop app over a Tauri channel.
-//! ffmpeg runs only while someone listens. A slow listener loses blocks instead of
-//! growing a backlog, so latency cannot creep up.
+//! One capture (cpal: ALSA, WASAPI or CoreAudio) reads the sound card; its samples become
+//! 16-bit mono PCM blocks (`atlas_core::audio::Converter`) fanned out to every listener:
+//! browsers on `GET /api/audio`, the desktop app over a Tauri channel. The capture runs only
+//! while someone listens. A slow listener loses blocks instead of growing a backlog, so
+//! latency cannot creep up.
 
 use std::collections::VecDeque;
 use std::path::Path;
-use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex, Weak};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use atlas_core::audio::{
-    capture_filter_args, capture_input_args, parse_asound, parse_avfoundation_devices, parse_dshow_devices, rate_drift,
-    AudioChoice, AudioStatus, AudioTuning, SoundCard,
+    cards_from_names, find_device, parse_asound, pick_capture_format, rate_drift, AudioChoice, AudioStatus,
+    AudioTuning, CaptureFailure, CaptureFormat, CaptureOffer, Converter, SampleKind, SoundCard,
 };
 use atlas_core::platform::Os;
-use atlas_rig::process::{command, tie_to_app};
-use bytes::{Bytes, BytesMut};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
-use tokio::process::{Child, ChildStderr};
+use bytes::Bytes;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{FromSample, SampleFormat, SizedSample};
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 
 /// A listener gets nothing for this long: assume the device is stuck and end the stream.
 pub const AUDIO_STALL: Duration = Duration::from_secs(5);
-/// ffmpeg stderr lines kept for the settings page.
+/// Capture log lines kept for the settings page.
 const LOG_LINES: usize = 30;
 /// How long after the first block the delivered rate is checked against the declared one.
 const DRIFT_CHECK: Duration = Duration::from_secs(10);
+/// Only exact zeros for this long: flagged as silent (macOS gives a denied app silence).
+const SILENCE: Duration = Duration::from_secs(3);
+/// How often the capture thread looks at its stop flag.
+const POLL: Duration = Duration::from_millis(100);
+
+/// A running capture thread; it owns the cpal stream and stops it when `stop` is set.
+struct Capture {
+    stop: Arc<AtomicBool>,
+    thread: JoinHandle<()>,
+}
 
 struct Inner {
     choice: AudioChoice,
     subs: Vec<(u64, mpsc::Sender<Bytes>)>,
     next_id: u64,
-    /// Reads ffmpeg; aborting it drops (and so kills) the child.
-    pump: Option<JoinHandle<()>>,
-    /// Bumped on every start and reconfigure, so a stale pump cannot touch the state.
+    capture: Option<Capture>,
+    /// Bumped on every start and reconfigure, so a stale capture cannot touch the state.
     generation: u64,
     running: bool,
+    silent: bool,
     last_error: Option<String>,
-    spawn_error: Option<String>,
+    failure: Option<CaptureFailure>,
     log: VecDeque<String>,
 }
 
 impl Inner {
-    fn stop(&mut self) {
-        if let Some(p) = self.pump.take() {
-            p.abort();
-        }
+    /// Tell the capture thread to stop (it exits within `POLL`); the thread, to wait for.
+    fn stop(&mut self) -> Option<JoinHandle<()>> {
         self.running = false;
+        self.silent = false;
+        let c = self.capture.take()?;
+        c.stop.store(true, Ordering::Relaxed);
+        Some(c.thread)
     }
 }
 
 pub struct AudioHub {
-    ffmpeg: String,
     inner: Mutex<Inner>,
 }
 
 #[derive(Debug)]
 pub enum OpenError {
     Disabled,
-    /// ffmpeg could not be started.
+    /// The capture thread could not be started.
     Spawn(std::io::Error),
 }
 
@@ -69,7 +81,7 @@ impl std::fmt::Display for OpenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Disabled => write!(f, "audio is disabled"),
-            Self::Spawn(e) => write!(f, "could not start ffmpeg: {e}"),
+            Self::Spawn(e) => write!(f, "could not start the audio capture: {e}"),
         }
     }
 }
@@ -84,7 +96,7 @@ pub struct Subscription {
 }
 
 impl Subscription {
-    /// The next block, or `None` when the stream ended (ffmpeg stopped, the audio was
+    /// The next block, or `None` when the stream ended (the capture stopped, the audio was
     /// reconfigured, or nothing arrived for `AUDIO_STALL`).
     pub async fn next_block(&mut self) -> Option<Bytes> {
         tokio::time::timeout(AUDIO_STALL, self.rx.recv()).await.ok().flatten()
@@ -100,18 +112,18 @@ impl Drop for Subscription {
 }
 
 impl AudioHub {
-    pub fn new(ffmpeg: &str, choice: AudioChoice) -> Arc<Self> {
+    pub fn new(choice: AudioChoice) -> Arc<Self> {
         Arc::new(Self {
-            ffmpeg: ffmpeg.into(),
             inner: Mutex::new(Inner {
                 choice,
                 subs: vec![],
                 next_id: 0,
-                pump: None,
+                capture: None,
                 generation: 0,
                 running: false,
+                silent: false,
                 last_error: None,
-                spawn_error: None,
+                failure: None,
                 log: VecDeque::new(),
             }),
         })
@@ -127,46 +139,24 @@ impl AudioHub {
         (t.queue_ms.div_ceil(t.block_ms.max(1)) as usize).max(2)
     }
 
-    fn ffmpeg_args(os: Os, choice: &AudioChoice) -> Vec<String> {
-        let head = ["-hide_banner", "-loglevel", "error", "-nostdin", "-fflags", "nobuffer"];
-        let rate = choice.rate.to_string();
-        let tail = ["-ac", "1", "-ar", rate.as_str(), "-f", "s16le", "-flush_packets", "1", "pipe:1"];
-        head.iter()
-            .map(|s| s.to_string())
-            .chain(capture_input_args(os, &choice.device, &choice.tuning))
-            .chain(capture_filter_args(&choice.tuning))
-            .chain(tail.iter().map(|s| s.to_string()))
-            .collect()
-    }
-
     pub fn subscribe(self: &Arc<Self>) -> Result<Subscription, OpenError> {
         let mut inner = self.inner.lock().expect("audio lock");
         if !inner.choice.enabled {
             return Err(OpenError::Disabled);
         }
-        if inner.pump.is_none() {
-            let spawned = command(&self.ffmpeg)
-                .args(Self::ffmpeg_args(Os::CURRENT, &inner.choice))
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn();
-            let child = match spawned {
-                Ok(c) => {
-                    tie_to_app(&c);
-                    c
-                }
-                Err(e) => {
-                    inner.spawn_error = Some(e.to_string());
-                    return Err(OpenError::Spawn(e));
-                }
-            };
+        if inner.capture.is_none() {
             inner.generation += 1;
-            inner.spawn_error = None;
+            let (hub, generation, choice) = (Arc::downgrade(self), inner.generation, inner.choice.clone());
+            let stop = Arc::new(AtomicBool::new(false));
+            let flag = stop.clone();
+            let thread = std::thread::Builder::new()
+                .name("audio-capture".into())
+                .spawn(move || run_capture(hub, generation, choice, flag))
+                .map_err(OpenError::Spawn)?;
+            inner.capture = Some(Capture { stop, thread });
+            inner.last_error = None;
+            inner.failure = None;
             inner.log.clear();
-            let (rate, chunk) = (inner.choice.rate, Self::chunk(inner.choice.rate, &inner.choice.tuning));
-            inner.pump = Some(tokio::spawn(pump(Arc::downgrade(self), child, inner.generation, rate, chunk)));
         }
         let (tx, rx) = mpsc::channel(Self::queue_blocks(&inner.choice.tuning));
         let id = inner.next_id;
@@ -183,8 +173,8 @@ impl AudioHub {
         }
     }
 
-    /// Switch to a new choice: stop ffmpeg and end every stream. Listeners reconnect and
-    /// get the new device and rate (or a refusal, if audio is now disabled).
+    /// Switch to a new choice: stop the capture and end every stream. Listeners reconnect
+    /// and get the new device and rate (or a refusal, if audio is now disabled).
     pub fn reconfigure(&self, choice: AudioChoice) {
         let mut inner = self.inner.lock().expect("audio lock");
         inner.stop();
@@ -192,22 +182,20 @@ impl AudioHub {
         inner.generation += 1;
         inner.choice = choice;
         inner.last_error = None;
-        inner.spawn_error = None;
+        inner.failure = None;
         inner.log.clear();
     }
 
-    /// Stop ffmpeg and end every stream, waiting until ffmpeg is gone (app exit).
+    /// Stop the capture and end every stream, waiting until the device is closed (app exit).
     pub async fn shutdown(&self) {
-        let pump = {
+        let thread = {
             let mut inner = self.inner.lock().expect("audio lock");
             inner.subs.clear();
             inner.generation += 1;
-            inner.running = false;
-            inner.pump.take()
+            inner.stop()
         };
-        if let Some(p) = pump {
-            p.abort();
-            let _ = p.await; // the pump's child is dropped, so killed, by now
+        if let Some(t) = thread {
+            let _ = tokio::task::spawn_blocking(move || t.join()).await;
         }
     }
 
@@ -222,7 +210,8 @@ impl AudioHub {
             running: inner.running,
             listeners: inner.subs.len() as u32,
             last_error: inner.last_error.clone(),
-            spawn_error: inner.spawn_error.clone(),
+            failure: inner.failure,
+            silent: inner.silent,
             log: inner.log.iter().cloned().collect(),
         }
     }
@@ -235,10 +224,18 @@ impl AudioHub {
         if !inner.running {
             inner.running = true;
             inner.last_error = None;
+            inner.failure = None;
         }
         for (_, tx) in &inner.subs {
             // full = slow listener: drop the block, the page resyncs
             let _ = tx.try_send(block.clone());
+        }
+    }
+
+    fn set_silent(&self, generation: u64, silent: bool) {
+        let mut inner = self.inner.lock().expect("audio lock");
+        if inner.generation == generation {
+            inner.silent = silent;
         }
     }
 
@@ -252,102 +249,215 @@ impl AudioHub {
         }
     }
 
-    /// ffmpeg exited on its own (device busy/unplugged): record why and end every stream.
-    fn ended(&self, generation: u64, exit: String) {
+    /// The capture stopped on its own (device busy, unplugged, silent for too long): record
+    /// why and end every stream.
+    fn ended(&self, generation: u64, why: String, failure: CaptureFailure) {
         let mut inner = self.inner.lock().expect("audio lock");
         if inner.generation != generation {
             return;
         }
-        // the ALSA line says why ("cannot open audio device ... (Device or resource busy)")
-        let why = inner
-            .log
-            .iter()
-            .rev()
-            .find(|l| l.contains("cannot open audio device"))
-            .or(inner.log.back())
-            .cloned()
-            .unwrap_or(exit);
-        tracing::warn!("ffmpeg stopped: {why}");
+        tracing::warn!("audio capture stopped: {why}");
         inner.last_error = Some(why);
-        inner.pump = None;
+        inner.failure = Some(failure);
+        inner.capture = None; // the thread is returning
         inner.running = false;
+        inner.silent = false;
         inner.subs.clear();
     }
 }
 
-async fn read_stderr(hub: Weak<AudioHub>, err: ChildStderr, generation: u64) {
-    let mut lines = BufReader::new(err).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        let Some(h) = hub.upgrade() else { return };
-        h.log_line(generation, line);
-    }
+/// What the cpal callbacks send the capture thread.
+enum Event {
+    /// Interleaved samples, as f32.
+    Data(Vec<f32>),
+    Error(cpal::Error),
 }
 
-async fn pump(hub: Weak<AudioHub>, mut child: Child, generation: u64, rate: u32, chunk: usize) {
-    let mut out = child.stdout.take().expect("piped stdout");
-    let stderr = tokio::spawn(read_stderr(hub.clone(), child.stderr.take().expect("piped stderr"), generation));
-    let mut buf = BytesMut::with_capacity(chunk * 2);
-    let mut read = vec![0u8; 4096];
-    // bytes after the first read, checked once against `rate` (a short stream cuts out)
+/// The capture thread: open the device, convert what it delivers and fan it out, until
+/// `stop` is set (dropping the stream closes the device) or the capture fails.
+fn run_capture(hub: Weak<AudioHub>, generation: u64, choice: AudioChoice, stop: Arc<AtomicBool>) {
+    let with_hub = |f: &dyn Fn(&AudioHub)| {
+        if let Some(h) = hub.upgrade() {
+            f(&h);
+        }
+    };
+    let end = |why: String, failure| with_hub(&|h| h.ended(generation, why.clone(), failure));
+    let (tx, rx) = sync_channel::<Event>(64);
+    let (_stream, name, fmt) = match open(&choice, tx) {
+        Ok(opened) => opened,
+        Err((why, failure)) => return end(why, failure),
+    };
+    let mut converter = match Converter::new(fmt.channels, fmt.rate, choice.rate) {
+        Ok(c) => c,
+        Err(why) => return end(why, CaptureFailure::Other),
+    };
+    let line = format!("{name}: {} ch, {} Hz, {:?} -> {} Hz mono", fmt.channels, fmt.rate, fmt.format, choice.rate);
+    tracing::info!("audio capture: {line}");
+    with_hub(&|h| h.log_line(generation, line.clone()));
+
+    let chunk = AudioHub::chunk(choice.rate, &choice.tuning);
+    let mut pcm: Vec<u8> = Vec::with_capacity(chunk * 2);
+    let mut last_data = Instant::now();
+    // bytes after the first block, checked once against the rate (a short stream cuts out)
     let (mut first, mut since_first, mut drift_checked) = (None::<Instant>, 0u64, false);
-    loop {
-        let n = match out.read(&mut read).await {
-            Ok(0) | Err(_) => break,
-            Ok(n) => n,
-        };
-        buf.extend_from_slice(&read[..n]);
-        match first {
-            None => first = Some(Instant::now()),
-            Some(start) if !drift_checked => {
-                since_first += n as u64;
-                if start.elapsed() >= DRIFT_CHECK {
-                    drift_checked = true;
-                    if let Some(line) = rate_drift(since_first, start.elapsed(), rate) {
-                        tracing::warn!("ffmpeg {line}");
-                        let Some(h) = hub.upgrade() else { return };
-                        h.log_line(generation, line);
+    let (mut heard, mut flagged_silent) = (false, false);
+    while !stop.load(Ordering::Relaxed) {
+        match rx.recv_timeout(POLL) {
+            Ok(Event::Data(samples)) => {
+                last_data = Instant::now();
+                let start = *first.get_or_insert(last_data);
+                if !heard && samples.iter().any(|s| *s != 0.0) {
+                    heard = true;
+                    if flagged_silent {
+                        with_hub(&|h| h.set_silent(generation, false));
+                    }
+                } else if !heard && !flagged_silent && start.elapsed() >= SILENCE {
+                    flagged_silent = true;
+                    with_hub(&|h| h.set_silent(generation, true));
+                }
+                let before = pcm.len();
+                converter.push(&samples, &mut pcm);
+                if !drift_checked {
+                    since_first += (pcm.len() - before) as u64;
+                    if start.elapsed() >= DRIFT_CHECK {
+                        drift_checked = true;
+                        if let Some(line) = rate_drift(since_first, start.elapsed(), choice.rate) {
+                            tracing::warn!("audio capture {line}");
+                            with_hub(&|h| h.log_line(generation, line.clone()));
+                        }
                     }
                 }
+                if pcm.len() >= chunk {
+                    let block = Bytes::from(std::mem::replace(&mut pcm, Vec::with_capacity(chunk * 2)));
+                    with_hub(&|h| h.fan_out(generation, block.clone()));
+                }
             }
-            Some(_) => {}
+            Ok(Event::Error(e)) => match e.kind() {
+                // the stream goes on
+                cpal::ErrorKind::Xrun | cpal::ErrorKind::DeviceChanged | cpal::ErrorKind::RealtimeDenied => {
+                    with_hub(&|h| h.log_line(generation, e.to_string()));
+                }
+                _ => return end(format!("{name}: {e}"), failure_of(&e)),
+            },
+            Err(RecvTimeoutError::Timeout) if last_data.elapsed() >= AUDIO_STALL => {
+                return end(format!("{name}: no audio for {} s", AUDIO_STALL.as_secs()), CaptureFailure::Other);
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return end(format!("{name}: the stream closed"), CaptureFailure::Other),
         }
-        if buf.len() < chunk {
-            continue;
-        }
-        let Some(h) = hub.upgrade() else { return };
-        h.fan_out(generation, buf.split().freeze());
-    }
-    let exit = match child.wait().await {
-        Ok(s) => format!("ffmpeg exited: {s}"),
-        Err(e) => format!("ffmpeg: {e}"),
-    };
-    let _ = stderr.await; // so the reason is in the log before we look for it
-    if let Some(h) = hub.upgrade() {
-        h.ended(generation, exit);
     }
 }
 
-/// Capture-capable sound cards on this machine: `/proc/asound` on Linux; on Windows and
-/// macOS, what ffmpeg's DirectShow / AVFoundation input lists (empty without ffmpeg).
-pub async fn sound_cards(ffmpeg: &str) -> Vec<SoundCard> {
-    let list = |args: &'static [&'static str]| async move {
-        match command(ffmpeg).args(args).output().await {
-            // the list goes to stderr, and ffmpeg exits with an error after printing it
-            Ok(out) => String::from_utf8_lossy(&out.stderr).into_owned(),
-            Err(e) => {
-                tracing::warn!("ffmpeg -list_devices: {e}");
-                String::new()
-            }
-        }
+/// Open and start the configured device: the stream (capturing while it lives), the
+/// device's name and the format it runs in.
+fn open(
+    choice: &AudioChoice,
+    tx: SyncSender<Event>,
+) -> Result<(cpal::Stream, String, CaptureFormat), (String, CaptureFailure)> {
+    let fail = |what: &str, e: cpal::Error| (format!("{}: {what}: {e}", choice.device), failure_of(&e));
+    let host = cpal::default_host();
+    let devices: Vec<cpal::Device> = host.input_devices().map_err(|e| fail("listing devices", e))?.collect();
+    let keys: Vec<String> = devices.iter().map(|d| device_key(Os::CURRENT, d)).collect();
+    let Some(i) = find_device(Os::CURRENT, &choice.device, &keys) else {
+        return Err((format!("{}: no such capture device", choice.device), CaptureFailure::DeviceMissing));
     };
+    let (dev, name) = (&devices[i], keys[i].clone());
+    let offers: Vec<CaptureOffer> = dev
+        .supported_input_configs()
+        .map_err(|e| fail("reading its formats", e))?
+        .map(|c| CaptureOffer {
+            channels: c.channels(),
+            min_rate: c.min_sample_rate(),
+            max_rate: c.max_sample_rate(),
+            format: sample_kind(c.sample_format()),
+        })
+        .collect();
+    let default = dev.default_input_config().ok().map(|c| CaptureFormat {
+        channels: c.channels(),
+        rate: c.sample_rate(),
+        format: sample_kind(c.sample_format()),
+    });
+    let Some(fmt) = pick_capture_format(&offers, choice.tuning.capture_rate, default) else {
+        return Err((format!("{name}: no sample format this program can read"), CaptureFailure::Other));
+    };
+    let config = cpal::StreamConfig { channels: fmt.channels, sample_rate: fmt.rate, buffer_size: cpal::BufferSize::Default };
+    let stream = match fmt.format {
+        SampleKind::F32 => build::<f32>(dev, config, tx),
+        SampleKind::I16 => build::<i16>(dev, config, tx),
+        SampleKind::I32 => build::<i32>(dev, config, tx),
+        SampleKind::U16 => build::<u16>(dev, config, tx),
+        SampleKind::Other => unreachable!("pick_capture_format never picks it"),
+    }
+    .map_err(|e| fail("opening it", e))?;
+    stream.play().map_err(|e| fail("starting it", e))?;
+    Ok((stream, name, fmt))
+}
+
+/// An input stream that sends its samples, as f32, and its errors to `tx`. A full channel
+/// (the capture thread is behind) drops the samples rather than blocking the audio thread.
+fn build<T>(dev: &cpal::Device, config: cpal::StreamConfig, tx: SyncSender<Event>) -> Result<cpal::Stream, cpal::Error>
+where
+    T: SizedSample + Send + 'static,
+    f32: FromSample<T>,
+{
+    let errors = tx.clone();
+    dev.build_input_stream::<T, _, _>(
+        config,
+        move |data: &[T], _: &cpal::InputCallbackInfo| {
+            let _ = tx.try_send(Event::Data(data.iter().map(|&s| s.to_sample::<f32>()).collect()));
+        },
+        move |e| {
+            let _ = errors.try_send(Event::Error(e));
+        },
+        None,
+    )
+}
+
+fn sample_kind(f: SampleFormat) -> SampleKind {
+    match f {
+        SampleFormat::F32 => SampleKind::F32,
+        SampleFormat::I16 => SampleKind::I16,
+        SampleFormat::I32 => SampleKind::I32,
+        SampleFormat::U16 => SampleKind::U16,
+        _ => SampleKind::Other,
+    }
+}
+
+fn failure_of(e: &cpal::Error) -> CaptureFailure {
+    match e.kind() {
+        cpal::ErrorKind::DeviceBusy => CaptureFailure::DeviceBusy,
+        cpal::ErrorKind::DeviceNotAvailable => CaptureFailure::DeviceMissing,
+        cpal::ErrorKind::PermissionDenied => CaptureFailure::PermissionDenied,
+        _ => CaptureFailure::Other,
+    }
+}
+
+/// How the config names a device: its ALSA PCM name on Linux, its name elsewhere.
+fn device_key(os: Os, d: &cpal::Device) -> String {
+    match os {
+        Os::Linux => d.id().map(|id| id.id().to_string()),
+        Os::Windows | Os::Macos => d.description().map(|desc| desc.name().to_string()),
+    }
+    .unwrap_or_default()
+}
+
+/// Capture-capable sound cards on this machine: `/proc/asound` on Linux (plughw names by
+/// card id, which survive re-plugging); on Windows and macOS, the input devices the OS lists.
+pub async fn sound_cards() -> Vec<SoundCard> {
     match Os::CURRENT {
         Os::Linux => alsa_cards(Path::new("/")),
-        Os::Windows => {
-            parse_dshow_devices(&list(&["-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"]).await)
-        }
-        Os::Macos => parse_avfoundation_devices(
-            &list(&["-hide_banner", "-f", "avfoundation", "-list_devices", "true", "-i", ""]).await,
-        ),
+        os => tokio::task::spawn_blocking(move || {
+            let names = match cpal::default_host().input_devices() {
+                Ok(devices) => devices.map(|d| device_key(os, &d)).collect(),
+                Err(e) => {
+                    tracing::warn!("listing sound cards: {e}");
+                    vec![]
+                }
+            };
+            cards_from_names(os, names)
+        })
+        .await
+        .unwrap_or_default(),
     }
 }
 
@@ -357,11 +467,9 @@ pub fn alsa_cards(root: &Path) -> Vec<SoundCard> {
     parse_asound(&read("cards"), &read("pcm"))
 }
 
-/// `ffmpeg -version` (e.g. "ffmpeg version 6.1.1-3ubuntu5 ..."), or `None` if it cannot run.
-pub async fn ffmpeg_version(ffmpeg: &str) -> Option<String> {
-    let out = command(ffmpeg).arg("-version").output().await.ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    text.lines().next().map(|l| l.trim().to_string()).filter(|l| !l.is_empty())
+/// The OS audio API the capture uses ("ALSA", "WASAPI", "CoreAudio").
+pub fn backend() -> String {
+    cpal::default_host().id().name().to_string()
 }
 
 #[cfg(test)]
@@ -374,48 +482,37 @@ mod tests {
     }
 
     #[test]
-    fn ffmpeg_command_matches_the_prototype() {
-        let a = AudioHub::ffmpeg_args(Os::Linux, &codec(16_000)).join(" ");
-        assert!(a.contains("-f alsa -ac 2 -ar 48000 -i plughw:CARD=CODEC,DEV=0"));
-        assert!(a.ends_with("-ac 1 -ar 16000 -f s16le -flush_packets 1 pipe:1"));
+    fn blocks_and_queue_follow_the_tuning() {
         let t = default_tuning(Os::Linux);
         assert_eq!(AudioHub::chunk(16_000, &t), 640);
         assert_eq!(AudioHub::queue_blocks(&t), 50);
-        let mac = AudioChoice { device: "USB AUDIO  CODEC".into(), tuning: default_tuning(Os::Macos), ..codec(16_000) };
-        let m = AudioHub::ffmpeg_args(Os::Macos, &mac).join(" ");
-        assert!(
-            m.contains("-i :USB AUDIO  CODEC -af aresample=async=5000:first_pts=0 -ac 1 -ar 16000 -f s16le"),
-            "{m}"
-        );
-        assert!(!a.contains("-af"));
-    }
-
-    #[test]
-    fn blocks_and_queue_follow_the_tuning() {
         let t = AudioTuning { block_ms: 40, queue_ms: 500, ..default_tuning(Os::Macos) };
         assert_eq!(AudioHub::chunk(16_000, &t), 1_280);
         assert_eq!(AudioHub::queue_blocks(&t), 13); // rounded up
         assert_eq!(AudioHub::queue_blocks(&AudioTuning { block_ms: 100, queue_ms: 100, ..t }), 2);
-        let m = AudioHub::ffmpeg_args(
-            Os::Macos,
-            &AudioChoice { tuning: AudioTuning { input_queue: 512, ..t }, ..codec(8_000) },
-        );
-        assert!(m.join(" ").contains("-f avfoundation -thread_queue_size 512 -i"));
     }
 
     #[tokio::test]
     async fn disabled_audio_refuses_listeners() {
-        let hub = AudioHub::new("ffmpeg", AudioChoice { enabled: false, ..codec(16_000) });
+        let hub = AudioHub::new(AudioChoice { enabled: false, ..codec(16_000) });
         assert!(matches!(hub.subscribe(), Err(OpenError::Disabled)));
     }
 
+    /// Any machine, sound cards or not: a device that is not there ends the stream and
+    /// says why; a new choice clears it.
     #[tokio::test]
-    async fn missing_ffmpeg_is_reported() {
-        let hub = AudioHub::new("/nonexistent/ffmpeg-swatlas", codec(16_000));
-        assert!(matches!(hub.subscribe(), Err(OpenError::Spawn(_))));
-        assert!(hub.status().spawn_error.is_some());
+    async fn missing_device_is_reported() {
+        let hub = AudioHub::new(AudioChoice { device: "No Such Card 7".into(), ..codec(16_000) });
+        let mut sub = hub.subscribe().unwrap();
+        assert!(sub.next_block().await.is_none());
+        let st = hub.status();
+        assert!(!st.running && st.listeners == 0);
+        assert!(st.last_error.unwrap().starts_with("No Such Card 7: "));
+        assert!(st.failure.is_some());
         hub.reconfigure(codec(8_000));
-        assert_eq!(hub.status().spawn_error, None);
+        assert_eq!((hub.status().last_error, hub.status().failure), (None, None));
+        drop(sub);
+        hub.shutdown().await;
     }
 
     #[cfg(unix)]
@@ -434,20 +531,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
-    /// Real ffmpeg on ALSA's `null` device (endless silence); skipped without ffmpeg.
-    /// Linux only: the device names are ALSA's.
+    /// A real capture from ALSA's `null` device (endless silence); skipped where ALSA does
+    /// not list it. Linux only: the device names are ALSA's.
     #[cfg(target_os = "linux")]
     #[tokio::test]
-    async fn real_ffmpeg_streams_and_reconfigures() {
-        if ffmpeg_version("ffmpeg").await.is_none() {
-            eprintln!("ffmpeg not installed: skipping");
+    async fn real_capture_streams_and_reconfigures() {
+        let listed = cpal::default_host()
+            .input_devices()
+            .map(|mut d| d.any(|d| device_key(Os::Linux, &d) == "null"))
+            .unwrap_or(false);
+        if !listed {
+            eprintln!("ALSA lists no null device: skipping");
             return;
         }
-        let hub = AudioHub::new("ffmpeg", AudioChoice { device: "null".into(), ..codec(8_000) });
+        let hub = AudioHub::new(AudioChoice { device: "null".into(), ..codec(8_000) });
         let mut a = hub.subscribe().unwrap();
         let mut b = hub.subscribe().unwrap();
         assert_eq!(a.rate, 8_000);
-        let block = a.next_block().await.expect("PCM from ffmpeg");
+        let block = a.next_block().await.expect("PCM from the capture");
         assert!(block.len() >= AudioHub::chunk(8_000, &default_tuning(Os::Linux)));
         assert!(b.next_block().await.is_some());
         let st = hub.status();
@@ -460,20 +561,10 @@ mod tests {
         assert_eq!(hub.status().listeners, 0);
         drop((a, b));
         let mut c = hub.subscribe().unwrap();
+        assert_eq!(c.rate, 16_000);
         assert!(c.next_block().await.is_some());
         drop(c);
         assert!(!hub.status().running);
-
-        // a card that is not there: ffmpeg stops and says why
-        hub.reconfigure(AudioChoice { device: "plughw:CARD=NoSuchCard,DEV=0".into(), ..codec(16_000) });
-        let mut d = hub.subscribe().unwrap();
-        assert!(d.next_block().await.is_none());
-        let st = hub.status();
-        let err = st.last_error.unwrap();
-        assert!(err.contains("cannot open audio device"), "{err}");
-        assert_eq!(
-            atlas_core::audio::diagnose_audio(Os::Linux, &hub.status()),
-            [atlas_core::audio::AudioHint::DeviceMissing]
-        );
+        hub.shutdown().await;
     }
 }

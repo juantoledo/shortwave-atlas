@@ -14,7 +14,7 @@ import type { SoundCard } from '../../types/generated/SoundCard';
 
 const RATES = [8000, 12000, 16000, 24000, 48000];
 const OTHER = '__other';
-/** How a capture device is called on each OS (ALSA name, DirectShow / AVFoundation name). */
+/** How a capture device is called on each OS (ALSA name, WASAPI / CoreAudio name). */
 const DEVICE_EXAMPLE: Record<Os, string> = {
   linux: 'plughw:CARD=CODEC,DEV=0',
   windows: 'Microphone (USB AUDIO  CODEC)',
@@ -28,14 +28,8 @@ export const TUNING: { key: keyof AudioTuning; min: number; max: number; step: n
   { key: 'max_ahead_ms', min: 50, max: 5000, step: 10 },
   { key: 'block_ms', min: 10, max: 100, step: 5 },
   { key: 'queue_ms', min: 20, max: 5000, step: 10 },
-  { key: 'input_queue', min: 0, max: 4096, step: 8 },
-  { key: 'drift_correction', min: 0, max: 20000, step: 500 },
-  { key: 'capture_buffer_ms', min: 10, max: 1000, step: 10, os: 'windows' },
-  { key: 'capture_rate', min: 8000, max: 192000, step: 100, os: 'linux' },
+  { key: 'capture_rate', min: 8000, max: 192000, step: 100 },
 ];
-
-/** "ffmpeg version 6.1.1-3ubuntu5 Copyright ..." -> "6.1.1-3ubuntu5" */
-export const ffmpegVersion = (line: string) => /version\s+(\S+)/.exec(line)?.[1] ?? line;
 
 /** The rig codec marker goes first, so a narrow select doesn't cut it off. */
 export const cardLabel = (c: SoundCard, rigCodec: string) => (c.rig_codec ? `${rigCodec} · ${c.label}` : c.label);
@@ -47,8 +41,8 @@ function Status({ t, os, diag }: { t: Messages; os: Os; diag: AudioDiagnostics |
   return (
     <div className="st-box" aria-live="polite">
       <h3 className="h"><span>{t.status}</span></h3>
-      <p className={'st-line' + (s.running ? ' st-ok' : s.last_error || s.spawn_error ? ' st-warn' : '')}>{line}</p>
-      {(s.last_error || s.spawn_error) && <p className="note">{t.lastError(s.last_error ?? s.spawn_error ?? '')}</p>}
+      <p className={'st-line' + (s.running ? ' st-ok' : s.last_error ? ' st-warn' : '')}>{line}</p>
+      {s.last_error && <p className="note">{t.lastError(s.last_error)}</p>}
       {diag.hints.map((h) => (
         <div className="hint" key={h} role="alert">
           <b>{audioHintText(t, os, h)[0]}</b>
@@ -57,7 +51,7 @@ function Status({ t, os, diag }: { t: Messages; os: Os; diag: AudioDiagnostics |
       ))}
       {s.log.length > 0 && (
         <details className="log">
-          <summary>{t.ffmpegLog}</summary>
+          <summary>{t.captureLog}</summary>
           <pre>{s.log.join('\n')}</pre>
         </details>
       )}
@@ -109,7 +103,7 @@ export function AudioSection({ api, os, onError, onApplied }: Props) {
 
   return (
     <section className="sec form" aria-label={t.audioSection}>
-      <h2 className="h"><span>{t.audioSection}</span>{settings.ffmpeg_version && <span>{t.ffmpegVersion(ffmpegVersion(settings.ffmpeg_version))}</span>}</h2>
+      <h2 className="h"><span>{t.audioSection}</span><span>{settings.backend}</span></h2>
 
       <div className="seg" role="radiogroup" aria-label={t.audioSection}>
         {[false, true].map((on) => (
@@ -120,7 +114,6 @@ export function AudioSection({ api, os, onError, onApplied }: Props) {
       </div>
       <p className="note">{t.audioHelp}</p>
       {settings.locked.length > 0 && <p className="note warn">{t.lockedByEnv(settings.locked.join(', '))}</p>}
-      {!settings.ffmpeg_version && <p className="note warn">{t.ffmpegMissing}</p>}
 
       {draft.enabled && (
         <>

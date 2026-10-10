@@ -7,7 +7,7 @@ export type SoundCard = {
 /**
  * Name to use in the config. Linux: an ALSA `plughw` name by card id (converts any
  * rate and channel count, survives re-plugging in another order). Windows and macOS:
- * the device's name as DirectShow / AVFoundation list it.
+ * the device's name as the OS lists it.
  */
 device: string, 
 /**
@@ -20,6 +20,6 @@ label: string, card_id: string,
  */
 rig_codec: boolean, 
 /**
- * ffmpeg can open it by this name (see `device_name_ok`).
+ * The name can be saved as `[audio] device` (see `device_name_ok`).
  */
 usable: boolean, };

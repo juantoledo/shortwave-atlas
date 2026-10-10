@@ -46,7 +46,7 @@ struct AudioStream {
 }
 
 /// Start sending rig audio (raw s16le mono PCM blocks) on `on_block`. One empty block
-/// marks the end of the stream (ffmpeg stopped, audio reconfigured, or stalled); the UI
+/// marks the end of the stream (capture stopped, audio reconfigured, or stalled); the UI
 /// then closes it and opens a new one, like a browser reconnecting to `/api/audio`.
 #[tauri::command]
 async fn audio_open(
@@ -69,7 +69,7 @@ async fn audio_open(
     Ok(AudioStream { id, rate })
 }
 
-/// Stop an audio stream (dropping its subscription stops ffmpeg if nobody else listens).
+/// Stop an audio stream (dropping its subscription stops the capture if nobody else listens).
 #[tauri::command]
 fn audio_close(streams: State<'_, AudioStreams>, id: u32) {
     if let Some(task) = streams.tasks.lock().expect("audio streams lock").remove(&id) {
@@ -188,7 +188,7 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while running SW Atlas")
         .run(|app, event| {
-            // Tauri exits the process without dropping state, so stop rigctld and ffmpeg here
+            // Tauri exits the process without dropping state, so stop rigctld and the audio capture here
             if let RunEvent::Exit = event {
                 if let Some(atlas) = app.try_state::<Arc<Atlas>>() {
                     tauri::async_runtime::block_on(atlas.shutdown());

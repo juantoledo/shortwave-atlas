@@ -125,8 +125,8 @@ pub struct AudioSettings {
     /// `AudioChoice` fields forced by environment variables: a change lasts until restart.
     pub locked: Vec<String>,
     pub config_path: String,
-    /// `ffmpeg -version`, or `None` if it is not installed.
-    pub ffmpeg_version: Option<String>,
+    /// The OS audio API the capture uses ("ALSA", "WASAPI", "CoreAudio").
+    pub backend: String,
     /// The tuning's defaults on this OS ("Reset to defaults").
     pub defaults: AudioTuning,
 }
@@ -239,12 +239,19 @@ mod tests {
         assert_eq!(c, Call::Rig(RigCommand::SetPower { on: false }));
         let c: Call = serde_json::from_str(
             r#"{"cmd":"apply_audio","args":{"enabled":true,"device":"default","rate":16000,"tuning":{
-                "block_ms":20,"queue_ms":1000,"input_queue":0,"drift_correction":0,"capture_buffer_ms":50,
-                "capture_rate":48000,"cushion_ms":120,"max_ahead_ms":500}}}"#,
+                "block_ms":20,"queue_ms":1000,"capture_rate":48000,"cushion_ms":120,"max_ahead_ms":500}}}"#,
         )
         .unwrap();
         let tuning = crate::audio::default_tuning(Os::Linux);
         assert_eq!(c, Call::ApplyAudio(AudioChoice { enabled: true, device: "default".into(), rate: 16_000, tuning }));
+        // a page from before the ffmpeg capture was replaced still sends its ffmpeg fields
+        let old: Call = serde_json::from_str(
+            r#"{"cmd":"apply_audio","args":{"enabled":true,"device":"default","rate":16000,"tuning":{
+                "block_ms":20,"queue_ms":1000,"input_queue":0,"drift_correction":0,"capture_buffer_ms":50,
+                "capture_rate":48000,"cushion_ms":120,"max_ahead_ms":500}}}"#,
+        )
+        .unwrap();
+        assert_eq!(old, c);
     }
 
     #[test]

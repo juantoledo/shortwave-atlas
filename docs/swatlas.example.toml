@@ -28,20 +28,16 @@ bind = "127.0.0.1"            # anything beyond loopback requires auth
 port = 8080
 # auth = "user:A_LONG_PASSWORD"
 
-[audio]                       # rig audio (ffmpeg), for the desktop app and remote browsers
+[audio]                       # rig audio, for the desktop app and remote browsers
 enabled = false               # or pick the sound card in Settings → Audio
-device = "plughw:CARD=CODEC,DEV=0"
+device = "plughw:CARD=CODEC,DEV=0"  # Linux (ALSA); Windows "Microphone (USB AUDIO  CODEC)", macOS "USB AUDIO  CODEC"
 rate = 16000                  # 16-bit mono PCM: 16 kHz = 256 kbit/s per listener
 # buffers and timing (Settings → Audio → Advanced); unset = these defaults
 # cushion_ms = 120            # listener's cushion, rebuilt after a gap: raise it if Listen cuts out
 # max_ahead_ms = 500          # most audio queued ahead of the listener; later blocks are dropped
 # block_ms = 20               # audio per block sent to listeners
 # queue_ms = 1000             # kept for a slow listener before the server drops blocks
-# input_queue = 0             # ffmpeg -thread_queue_size (0 = ffmpeg's default)
-# drift_correction = 0        # aresample async, samples/s (0 = off; macOS defaults to 5000)
-# capture_buffer_ms = 50      # Windows: DirectShow -audio_buffer_size
-# capture_rate = 48000        # Linux: rate asked of the card
-# ffmpeg = "ffmpeg"           # executable
+# capture_rate = 48000        # rate asked of the card, before conversion to `rate`
 
 [update]                      # "Update available": one small file from GitHub Pages, nothing about you is sent
 check = true                  # at start and every 6 hours; or Settings → Updates (SWATLAS_UPDATE_CHECK=0)

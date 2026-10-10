@@ -11,9 +11,9 @@ export type AudioSettings = { choice: AudioChoice,
  */
 locked: Array<string>, config_path: string, 
 /**
- * `ffmpeg -version`, or `None` if it is not installed.
+ * The OS audio API the capture uses ("ALSA", "WASAPI", "CoreAudio").
  */
-ffmpeg_version: string | null, 
+backend: string, 
 /**
  * The tuning's defaults on this OS ("Reset to defaults").
  */

@@ -16,7 +16,7 @@ use atlas_rig::{discover, Rig, RigConfig};
 use serde_json::Value;
 use tokio::sync::OnceCell;
 
-use crate::audio::{ffmpeg_version, sound_cards, AudioHub};
+use crate::audio::{backend, sound_cards, AudioHub};
 use crate::config::{save_audio, save_rig, save_update, AppConfig};
 use crate::update::{InstallRefused, UpdateService, Updater};
 
@@ -68,7 +68,7 @@ impl Atlas {
         let qth = Arc::new(RwLock::new(saved.unwrap_or_else(|| config.qth.clone())));
         let rig = Rig::from_config(&config.rig, stations.clone(), qth.clone());
         let rig_config = RwLock::new(config.rig.clone());
-        let audio = AudioHub::new(&config.audio.ffmpeg, config.audio.choice());
+        let audio = AudioHub::new(config.audio.choice());
         let update = UpdateService::new(updater, &config.update, config.update_locked.clone());
         update.spawn_checks();
         Ok(Arc::new_cyclic(|me| Self {
@@ -86,7 +86,7 @@ impl Atlas {
         }))
     }
 
-    /// Stop the helpers we started (rigctld, ffmpeg) and wait until they have exited, so the
+    /// Stop the audio capture and the rigctld we started, and wait until they are gone, so the
     /// serial port, rigctld's TCP port and the sound card are free when the app is gone.
     pub async fn shutdown(&self) {
         self.audio.shutdown().await;
@@ -132,12 +132,12 @@ impl Atlas {
         Ok(())
     }
 
-    async fn audio_settings(&self) -> AudioSettings {
+    fn audio_settings(&self) -> AudioSettings {
         AudioSettings {
             choice: self.audio.choice(),
             locked: self.config.audio_locked.clone(),
             config_path: self.config_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
-            ffmpeg_version: ffmpeg_version(&self.config.audio.ffmpeg).await,
+            backend: backend(),
             defaults: default_tuning(Os::CURRENT),
         }
     }
@@ -259,8 +259,8 @@ impl Atlas {
                 Ok(Value::Null)
             }
             Call::RigDiagnostics => json(serde_json::to_value(self.rig.diagnostics())),
-            Call::AudioSettings => json(serde_json::to_value(self.audio_settings().await)),
-            Call::SoundCards => json(serde_json::to_value(sound_cards(&self.config.audio.ffmpeg).await)),
+            Call::AudioSettings => json(serde_json::to_value(self.audio_settings())),
+            Call::SoundCards => json(serde_json::to_value(sound_cards().await)),
             Call::ApplyAudio(choice) => {
                 self.apply_audio(choice)?;
                 Ok(Value::Null)

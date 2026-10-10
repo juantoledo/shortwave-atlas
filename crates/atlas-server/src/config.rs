@@ -62,36 +62,28 @@ impl Default for ServerConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AudioConfig {
-    /// Capture the rig's audio (ffmpeg) and offer Listen to every client.
+    /// Capture the rig's audio and offer Listen to every client.
     pub enabled: bool,
-    /// ALSA device of the rig's USB codec.
+    /// Capture device of the rig's USB codec (an ALSA name on Linux, the device name elsewhere).
     pub device: String,
     /// Sample rate sent to listeners (16-bit mono PCM).
     pub rate: u32,
     /// Buffer sizes and timing (see `AudioTuning`), flat in `[audio]`.
     pub block_ms: u32,
     pub queue_ms: u32,
-    pub input_queue: u32,
-    pub drift_correction: u32,
-    pub capture_buffer_ms: u32,
     pub capture_rate: u32,
     pub cushion_ms: u32,
     pub max_ahead_ms: u32,
-    /// `ffmpeg` executable. Never settable from the UI (see `AudioChoice`).
-    pub ffmpeg: String,
 }
 
 impl Default for AudioConfig {
     fn default() -> Self {
-        Self::from_choice(
-            &AudioChoice {
-                enabled: false,
-                device: default_device(Os::CURRENT).into(),
-                rate: 16_000,
-                tuning: default_tuning(Os::CURRENT),
-            },
-            "ffmpeg".into(),
-        )
+        Self::from_choice(&AudioChoice {
+            enabled: false,
+            device: default_device(Os::CURRENT).into(),
+            rate: 16_000,
+            tuning: default_tuning(Os::CURRENT),
+        })
     }
 }
 
@@ -104,9 +96,6 @@ impl AudioConfig {
             tuning: AudioTuning {
                 block_ms: self.block_ms,
                 queue_ms: self.queue_ms,
-                input_queue: self.input_queue,
-                drift_correction: self.drift_correction,
-                capture_buffer_ms: self.capture_buffer_ms,
                 capture_rate: self.capture_rate,
                 cushion_ms: self.cushion_ms,
                 max_ahead_ms: self.max_ahead_ms,
@@ -114,11 +103,7 @@ impl AudioConfig {
         }
     }
 
-    pub fn with_choice(&self, c: &AudioChoice) -> Self {
-        Self::from_choice(c, self.ffmpeg.clone())
-    }
-
-    fn from_choice(c: &AudioChoice, ffmpeg: String) -> Self {
+    fn from_choice(c: &AudioChoice) -> Self {
         let t = &c.tuning;
         Self {
             enabled: c.enabled,
@@ -126,13 +111,9 @@ impl AudioConfig {
             rate: c.rate,
             block_ms: t.block_ms,
             queue_ms: t.queue_ms,
-            input_queue: t.input_queue,
-            drift_correction: t.drift_correction,
-            capture_buffer_ms: t.capture_buffer_ms,
             capture_rate: t.capture_rate,
             cushion_ms: t.cushion_ms,
             max_ahead_ms: t.max_ahead_ms,
-            ffmpeg,
         }
     }
 }
@@ -306,10 +287,12 @@ pub fn save_rig(path: &Path, choice: &RigChoice) -> Result<(), String> {
             ("device", choice.device.as_str().into()),
             ("baud", i64::from(choice.baud).into()),
         ],
+        &[],
     )
 }
 
-/// Write `choice` into the `[audio]` table, the same way as `save_rig` (`ffmpeg` is kept).
+/// Write `choice` into the `[audio]` table, the same way as `save_rig`, dropping the keys of
+/// the ffmpeg capture it replaced.
 pub fn save_audio(path: &Path, choice: &AudioChoice) -> Result<(), String> {
     let t = &choice.tuning;
     let n = |v: u32| i64::from(v).into();
@@ -322,24 +305,27 @@ pub fn save_audio(path: &Path, choice: &AudioChoice) -> Result<(), String> {
             ("rate", n(choice.rate)),
             ("block_ms", n(t.block_ms)),
             ("queue_ms", n(t.queue_ms)),
-            ("input_queue", n(t.input_queue)),
-            ("drift_correction", n(t.drift_correction)),
-            ("capture_buffer_ms", n(t.capture_buffer_ms)),
             ("capture_rate", n(t.capture_rate)),
             ("cushion_ms", n(t.cushion_ms)),
             ("max_ahead_ms", n(t.max_ahead_ms)),
         ],
+        &["ffmpeg", "input_queue", "drift_correction", "capture_buffer_ms"],
     )
 }
 
 /// Write the update preferences into the `[update]` table, the same way as `save_rig`
 /// (`url` is kept).
 pub fn save_update(path: &Path, check: bool, channel: Channel) -> Result<(), String> {
-    save_table(path, "update", [("check", check.into()), ("channel", channel.as_str().into())])
+    save_table(path, "update", [("check", check.into()), ("channel", channel.as_str().into())], &[])
 }
 
-/// Set `keys` in table `name` of the TOML at `path`, keeping everything else.
-fn save_table<const N: usize>(path: &Path, name: &str, keys: [(&str, Value); N]) -> Result<(), String> {
+/// Set `keys` in table `name` of the TOML at `path` and remove `obsolete`, keeping everything else.
+fn save_table<const N: usize>(
+    path: &Path,
+    name: &str,
+    keys: [(&str, Value); N],
+    obsolete: &[&str],
+) -> Result<(), String> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -362,6 +348,9 @@ fn save_table<const N: usize>(path: &Path, name: &str, keys: [(&str, Value); N])
                 table.insert(key, Item::Value(v));
             }
         }
+    }
+    for key in obsolete {
+        table.remove(key);
     }
 
     if let Some(dir) = path.parent() {
@@ -458,7 +447,7 @@ mod tests {
         let path = tmp("audio");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, include_str!("../../../docs/swatlas.example.toml")).unwrap();
-        let tuning = AudioTuning { cushion_ms: 300, input_queue: 512, ..default_tuning(Os::Macos) };
+        let tuning = AudioTuning { cushion_ms: 300, capture_rate: 44_100, ..default_tuning(Os::Macos) };
         let choice = AudioChoice { enabled: true, device: "plughw:CARD=CODEC,DEV=0".into(), rate: 8_000, tuning };
         save_audio(&path, &choice).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
@@ -471,7 +460,25 @@ mod tests {
         assert!(text.contains("cushion_ms = 300"), "{text}");
         let c: AppConfig = toml::from_str(&text).unwrap();
         assert_eq!(c.audio.choice(), choice);
-        assert_eq!((c.rig.model, c.audio.ffmpeg.as_str()), (1042, "ffmpeg"));
+        assert_eq!(c.rig.model, 1042);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn ffmpeg_era_audio_keys_are_ignored_then_dropped() {
+        let path = tmp("ffmpeg-keys");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let old = "[audio]\nenabled = true\ndevice = \"USB AUDIO  CODEC\"\nrate = 16000\ninput_queue = 512\n\
+                   drift_correction = 5000\ncapture_buffer_ms = 50\nffmpeg = \"/opt/homebrew/bin/ffmpeg\"\ncushion_ms = 200\n";
+        std::fs::write(&path, old).unwrap();
+        let c: AppConfig = toml::from_str(old).unwrap();
+        assert_eq!(c.audio.cushion_ms, 200);
+        save_audio(&path, &c.audio.choice()).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        for gone in ["ffmpeg", "input_queue", "drift_correction", "capture_buffer_ms"] {
+            assert!(!text.contains(gone), "{gone} in {text}");
+        }
+        assert!(text.contains("cushion_ms = 200") && text.contains("device = \"USB AUDIO  CODEC\""), "{text}");
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

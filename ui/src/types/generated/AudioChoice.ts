@@ -2,8 +2,7 @@
 import type { AudioTuning } from "./AudioTuning";
 
 /**
- * The part of `[audio]` the settings page may change. Like `RigChoice`, it has no
- * executable path, so no client can make the core run an arbitrary program.
+ * The part of `[audio]` the settings page may change.
  */
 export type AudioChoice = { 
 /**
@@ -11,7 +10,8 @@ export type AudioChoice = {
  */
 enabled: boolean, 
 /**
- * ALSA capture device, e.g. `plughw:CARD=CODEC,DEV=0`.
+ * Capture device: an ALSA PCM name on Linux (`plughw:CARD=CODEC,DEV=0`), the device's
+ * name elsewhere (`USB AUDIO  CODEC`).
  */
 device: string, 
 /**

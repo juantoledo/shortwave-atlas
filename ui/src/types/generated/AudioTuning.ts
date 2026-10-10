@@ -14,21 +14,8 @@ block_ms: number,
  */
 queue_ms: number, 
 /**
- * ffmpeg's input packet queue (`-thread_queue_size`); 0 = ffmpeg's default. ffmpeg says
- * "Thread message queue blocking" when it is too small.
- */
-input_queue: number, 
-/**
- * Clock correction: samples per second aresample may stretch or pad to follow the
- * capture timestamps (`async`); 0 = off.
- */
-drift_correction: number, 
-/**
- * Windows: DirectShow capture buffer in milliseconds (`-audio_buffer_size`).
- */
-capture_buffer_ms: number, 
-/**
- * Linux: the rate asked of the card (plughw converts; the rig codec is 48 kHz).
+ * The rate asked of the card, before conversion to `rate` (the rig codec is 48 kHz).
+ * A card that cannot do it is opened at the nearest rate it can.
  */
 capture_rate: number, 
 /**
