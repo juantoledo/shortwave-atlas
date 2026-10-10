@@ -269,9 +269,9 @@ pub fn pick_capture_format(
     if let Some(d) = default.filter(|d| d.channels > 0 && d.format.rank().is_some()) {
         return Some(d);
     }
-    usable()
-        .min_by_key(|o| (wanted_rate.clamp(o.min_rate, o.max_rate).abs_diff(wanted_rate), key(o)))
-        .map(|o| CaptureFormat { channels: o.channels, rate: wanted_rate.clamp(o.min_rate, o.max_rate), format: o.format })
+    usable().min_by_key(|o| (wanted_rate.clamp(o.min_rate, o.max_rate).abs_diff(wanted_rate), key(o))).map(|o| {
+        CaptureFormat { channels: o.channels, rate: wanted_rate.clamp(o.min_rate, o.max_rate), format: o.format }
+    })
 }
 
 /// Turns the card's interleaved samples into what listeners get: mono (the channels
@@ -570,7 +570,10 @@ mod tests {
     #[test]
     fn windows_and_macos_device_lists() {
         // what WASAPI and CoreAudio list on a laptop with an FTDX10 plugged in
-        let w = cards_from_names(Os::Windows, names(&["Microphone Array (Realtek(R) Audio)", "Microphone (USB AUDIO  CODEC)"]));
+        let w = cards_from_names(
+            Os::Windows,
+            names(&["Microphone Array (Realtek(R) Audio)", "Microphone (USB AUDIO  CODEC)"]),
+        );
         let devs: Vec<_> = w.iter().map(|c| c.device.as_str()).collect();
         assert_eq!(devs, ["Microphone (USB AUDIO  CODEC)", "Microphone Array (Realtek(R) Audio)"]);
         assert!(w[0].rig_codec && !w[1].rig_codec);
@@ -601,7 +604,8 @@ mod tests {
     #[test]
     fn finds_the_configured_device() {
         // Linux: cpal lists ALSA PCM ids in the long form
-        let alsa = names(&["default", "pipewire", "hw:CARD=CODEC,DEV=0", "plughw:CARD=CODEC,DEV=0", "plughw:CARD=1,DEV=0"]);
+        let alsa =
+            names(&["default", "pipewire", "hw:CARD=CODEC,DEV=0", "plughw:CARD=CODEC,DEV=0", "plughw:CARD=1,DEV=0"]);
         assert_eq!(find_device(Os::Linux, "plughw:CARD=CODEC,DEV=0", &alsa), Some(3));
         assert_eq!(find_device(Os::Linux, "plughw:CODEC", &alsa), Some(3));
         assert_eq!(find_device(Os::Linux, "plughw:CARD=CODEC", &alsa), Some(3));
@@ -661,7 +665,10 @@ mod tests {
         );
         // mono and a preferred format win; 8 channels only if nothing else fits
         let many = [offer(8, 8_000, 96_000, F32), offer(2, 8_000, 96_000, I16), offer(1, 8_000, 96_000, I32)];
-        assert_eq!(pick_capture_format(&many, 48_000, None), Some(CaptureFormat { channels: 1, rate: 48_000, format: I32 }));
+        assert_eq!(
+            pick_capture_format(&many, 48_000, None),
+            Some(CaptureFormat { channels: 1, rate: 48_000, format: I32 })
+        );
         let stereo = [offer(2, 8_000, 96_000, I16), offer(2, 8_000, 96_000, F32)];
         assert_eq!(pick_capture_format(&stereo, 48_000, None).unwrap().format, F32);
         // the wanted rate is not offered: the card's default, else the closest rate
@@ -739,7 +746,8 @@ mod tests {
     fn delivered_rate_drift() {
         let s = |n: u64| Duration::from_secs(n);
         assert_eq!(rate_drift(320_000, s(10), 16_000), None);
-        assert_eq!(rate_drift(323_000, s(10), 16_000), None); // within 2 %
+        // within 2 %
+        assert_eq!(rate_drift(323_000, s(10), 16_000), None);
         // a 44.1 kHz device labelled 48 kHz: 8 % short
         assert_eq!(rate_drift(294_000, s(10), 16_000).as_deref(), Some("delivering 14700 Hz of 16000 Hz"));
         assert_eq!(rate_drift(336_000, s(10), 16_000).as_deref(), Some("delivering 16800 Hz of 16000 Hz"));
@@ -748,7 +756,8 @@ mod tests {
 
     #[test]
     fn hints_per_os() {
-        let st = |f: CaptureFailure| AudioStatus { last_error: Some("x".into()), failure: Some(f), ..Default::default() };
+        let st =
+            |f: CaptureFailure| AudioStatus { last_error: Some("x".into()), failure: Some(f), ..Default::default() };
         for os in [Os::Linux, Os::Windows, Os::Macos] {
             assert_eq!(diagnose_audio(os, &st(CaptureFailure::DeviceBusy)), [AudioHint::DeviceBusy]);
             assert_eq!(diagnose_audio(os, &st(CaptureFailure::DeviceMissing)), [AudioHint::DeviceMissing]);

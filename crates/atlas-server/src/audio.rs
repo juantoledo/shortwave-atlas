@@ -343,7 +343,9 @@ fn run_capture(hub: Weak<AudioHub>, generation: u64, choice: AudioChoice, stop: 
                 return end(format!("{name}: no audio for {} s", AUDIO_STALL.as_secs()), CaptureFailure::Other);
             }
             Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return end(format!("{name}: the stream closed"), CaptureFailure::Other),
+            Err(RecvTimeoutError::Disconnected) => {
+                return end(format!("{name}: the stream closed"), CaptureFailure::Other)
+            }
         }
     }
 }
@@ -380,7 +382,8 @@ fn open(
     let Some(fmt) = pick_capture_format(&offers, choice.tuning.capture_rate, default) else {
         return Err((format!("{name}: no sample format this program can read"), CaptureFailure::Other));
     };
-    let config = cpal::StreamConfig { channels: fmt.channels, sample_rate: fmt.rate, buffer_size: cpal::BufferSize::Default };
+    let config =
+        cpal::StreamConfig { channels: fmt.channels, sample_rate: fmt.rate, buffer_size: cpal::BufferSize::Default };
     let stream = match fmt.format {
         SampleKind::F32 => build::<f32>(dev, config, tx),
         SampleKind::I16 => build::<i16>(dev, config, tx),
