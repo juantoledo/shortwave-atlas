@@ -128,10 +128,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .clock b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
 .icon-btn {
   display: inline-grid; place-items: center; flex: none;
-  width: var(--hit); height: var(--hit); padding: 0; background: transparent; border: 1px solid var(--line-strong);
+  width: var(--hit); height: var(--hit); padding: 0; background: transparent; border: 1px solid rgba(140, 185, 230, 0.45);
   border-radius: 999px; color: var(--dim); font-size: 15px; line-height: 1;
 }
-.icon-btn:hover:not(:disabled) { color: var(--text); background: rgba(140, 185, 230, 0.08); }
+.icon-btn:hover:not(:disabled) { color: var(--text); background: rgba(140, 185, 230, 0.08); border-color: rgba(140, 185, 230, 0.7); }
 .icon-btn:disabled { opacity: 0.4; cursor: default; }
 .power {
   flex: none; display: inline-flex; align-items: center; gap: 8px; min-height: var(--hit); padding: 0 12px;
