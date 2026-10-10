@@ -2,15 +2,22 @@
 // on the desktop) played through Web Audio (port of the original prototype's player).
 //
 // Blocks are scheduled back to back on the AudioContext clock. The queue ahead of the
-// playhead is kept between CUSHION (rebuilt after an underrun) and MAX_AHEAD (blocks
-// beyond that are dropped), so latency cannot grow over time.
+// playhead is kept between the cushion (rebuilt after an underrun) and the maximum (blocks
+// beyond that are dropped), so latency cannot grow over time. Both come from Settings →
+// Audio → Advanced.
 // Graph: sources -> bus -> gain -> speakers
 //                       \-> analyser (waterfall, independent of the volume)
 
 import type { OpenAudio } from '../api/transport';
 
-const CUSHION_S = 0.12, MAX_AHEAD_S = 0.5, RETRY_MS = 1000;
+const RETRY_MS = 1000;
 export const FFT_SIZE = 4096;
+
+/** The listener's buffer, in milliseconds (`AudioTuning.cushion_ms`, `max_ahead_ms`). */
+export interface PlayerBuffer {
+  cushionMs: number;
+  maxAheadMs: number;
+}
 
 export type PlayerStatus =
   | { kind: 'connecting' }
@@ -34,7 +41,7 @@ export class AudioPlayer {
 
   private rate = 0;
 
-  constructor(private open: OpenAudio, volume: number, private onStatus: (s: PlayerStatus) => void) {
+  constructor(private open: OpenAudio, volume: number, private buffer: PlayerBuffer, private onStatus: (s: PlayerStatus) => void) {
     this.ctx = new AudioContext();
     void this.ctx.resume();
     this.bus = this.ctx.createGain();
@@ -52,6 +59,10 @@ export class AudioPlayer {
 
   setVolume(v: number) {
     this.gain.gain.value = v;
+  }
+
+  setBuffer(b: PlayerBuffer) {
+    this.buffer = b;
   }
 
   stop() {
@@ -102,8 +113,8 @@ export class AudioPlayer {
 
   private play() {
     const now = this.ctx.currentTime;
-    if (this.t < now) this.t = now + CUSHION_S; // underrun (or first block): rebuild a small cushion
-    else if (this.t - now > MAX_AHEAD_S) return; // too far behind live: drop this block
+    if (this.t < now) this.t = now + this.buffer.cushionMs / 1000; // underrun (or first block): rebuild the cushion
+    else if (this.t - now > this.buffer.maxAheadMs / 1000) return; // too far behind live: drop this block
     const ab = this.ctx.createBuffer(1, this.block.length, this.rate);
     ab.getChannelData(0).set(this.block);
     const src = this.ctx.createBufferSource();

@@ -1,5 +1,5 @@
-//! Starting the helper programs (`rigctld`, `ffmpeg`): found next to the app first (the
-//! installers' sidecars), then on PATH and in the usual install directories, and never
+//! Starting the helper program (`rigctld`): found next to the app first (the
+//! installers' sidecar), then on PATH and in the usual install directories, and never
 //! with a console window popping up on Windows.
 
 use std::path::Path;

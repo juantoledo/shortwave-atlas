@@ -128,10 +128,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .clock b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
 .icon-btn {
   display: inline-grid; place-items: center; flex: none;
-  width: var(--hit); height: var(--hit); padding: 0; background: transparent; border: 1px solid var(--line-strong);
+  width: var(--hit); height: var(--hit); padding: 0; background: transparent; border: 1px solid rgba(140, 185, 230, 0.45);
   border-radius: 999px; color: var(--dim); font-size: 15px; line-height: 1;
 }
-.icon-btn:hover:not(:disabled) { color: var(--text); background: rgba(140, 185, 230, 0.08); }
+.icon-btn:hover:not(:disabled) { color: var(--text); background: rgba(140, 185, 230, 0.08); border-color: rgba(140, 185, 230, 0.7); }
 .icon-btn:disabled { opacity: 0.4; cursor: default; }
 .power {
   flex: none; display: inline-flex; align-items: center; gap: 8px; min-height: var(--hit); padding: 0 12px;
@@ -708,8 +708,8 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .hint b { font-weight: 500; }
 .hint span { color: var(--dim); font-size: 12.5px; }
 .hint b > span { color: var(--warn); }
-.log { margin-top: 12px; }
-.log summary { cursor: pointer; font: 500 10.5px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
+.log, .adv { margin-top: 12px; }
+.log summary, .adv summary { cursor: pointer; font: 500 10.5px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
 .log pre { max-height: 220px; overflow: auto; margin: 8px 0 0; padding: 8px; background: #050a11; border: 1px solid var(--line); border-radius: 6px; font: 10.5px/1.45 var(--font-mono); color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* help */

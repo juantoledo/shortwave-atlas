@@ -29,7 +29,8 @@ describe('i18n', () => {
     expect(hintText(en, 'windows', 'device_busy')[0]).toBe('The COM port is in use');
     expect(hintText(en, 'windows', 'tcp_port_in_use')).toEqual(en.hints.tcp_port_in_use);
     expect(audioHintText(es, 'macos', 'microphone_denied')[1]).toContain('Micrófono');
-    expect(audioHintText(en, 'windows', 'ffmpeg_missing')[1]).toContain('reinstall');
+    expect(audioHintText(en, 'windows', 'permission_denied')[1]).toContain('Privacy');
+    expect(audioHintText(en, 'linux', 'permission_denied')[1]).toContain('audio group');
   });
 
   it('picks the override, then the browser language, then English', () => {

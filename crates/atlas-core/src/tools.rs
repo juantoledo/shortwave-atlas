@@ -1,7 +1,7 @@
-//! Where to look for the helper programs SW Atlas runs (`rigctld`, `ffmpeg`).
+//! Where to look for the helper program SW Atlas runs (`rigctld`).
 //!
-//! Desktop installers ship them as sidecars next to the app's executable. Otherwise they
-//! come from PATH, or from the usual install directories, which matters on macOS: an app
+//! Desktop installers ship it as a sidecar next to the app's executable. Otherwise it
+//! comes from PATH, or from the usual install directories, which matters on macOS: an app
 //! started from Finder does not get the shell's PATH (no Homebrew).
 
 use crate::platform::Os;
@@ -44,9 +44,6 @@ pub fn tool_candidates(
             if let Some(local) = env("LOCALAPPDATA") {
                 dirs.push(os.join(&local, r"Microsoft\WinGet\Links"));
             }
-            if let Some(pf) = env("ProgramFiles") {
-                dirs.push(os.join(&pf, r"ffmpeg\bin"));
-            }
         }
     }
     let mut out: Vec<String> = vec![];
@@ -87,14 +84,14 @@ mod tests {
     fn macos_finds_homebrew_without_a_shell_path() {
         let c = tool_candidates(
             Os::Macos,
-            "ffmpeg",
+            "rigctld",
             Some("/Applications/SW Atlas.app/Contents/MacOS"),
             env(&[("PATH", "/usr/bin:/bin")]),
             |_| vec![],
         );
-        assert_eq!(c[0], "/Applications/SW Atlas.app/Contents/MacOS/ffmpeg");
-        assert!(c.contains(&"/opt/homebrew/bin/ffmpeg".to_string()));
-        assert!(c.contains(&"/usr/local/bin/ffmpeg".to_string()));
+        assert_eq!(c[0], "/Applications/SW Atlas.app/Contents/MacOS/rigctld");
+        assert!(c.contains(&"/opt/homebrew/bin/rigctld".to_string()));
+        assert!(c.contains(&"/usr/local/bin/rigctld".to_string()));
     }
 
     #[test]
@@ -118,7 +115,6 @@ mod tests {
                 r"C:\Program Files\hamlib-w64-4.6\bin\rigctld.exe",
                 r"C:\Program Files\hamlib-w64-4.5.5\bin\rigctld.exe",
                 r"C:\Users\me\AppData\Local\Microsoft\WinGet\Links\rigctld.exe",
-                r"C:\Program Files\ffmpeg\bin\rigctld.exe",
             ]
         );
     }

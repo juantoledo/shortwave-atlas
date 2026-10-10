@@ -19,6 +19,10 @@ lang: string | null,
  */
 audio: boolean, audio_rate: number, 
 /**
+ * The listener's buffer (`AudioTuning::cushion_ms`, `max_ahead_ms`).
+ */
+audio_cushion_ms: number, audio_max_ahead_ms: number, 
+/**
  * A config file exists (false on a first run: the UI invites you to set up the rig).
  */
 configured: boolean, 

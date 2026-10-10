@@ -1,20 +1,20 @@
-"""Build the helper programs the Windows and macOS installers ship (Tauri sidecars).
+"""Build the helper program the Windows and macOS installers ship (a Tauri sidecar).
 
 usage: python3 assets/sidecars/build.py <target> [--out src-tauri/binaries] [--work .sidecars]
 
-  x86_64-pc-windows-msvc   run on Linux, needs mingw-w64 (apt install mingw-w64 make)
+  x86_64-pc-windows-msvc   run anywhere (Hamlib's own Windows build is downloaded)
   aarch64-apple-darwin     run on macOS (Xcode command line tools)
   x86_64-apple-darwin      run on macOS (cross-compiles on Apple Silicon)
   universal-apple-darwin   both macOS ones, merged with lipo
-  x86_64-unknown-linux-gnu Linux, only to check the ffmpeg build locally (Linux packages
-                           use the system's rigctld and ffmpeg; nothing is bundled)
+
+Linux packages use the system's rigctld; nothing is bundled there.
 
 Writes, as Tauri's `externalBin` expects:
   <out>/rigctld-<target>[.exe]    Hamlib's rigctld. Windows: the official w64 build, plus
                                   its DLLs in <out>/windows/. macOS: built static from source.
-  <out>/ffmpeg-<target>[.exe]     A minimal LGPL ffmpeg: the OS's audio capture input, PCM,
-                                  resampling, raw s16le out on a pipe. ~3 MB, not ~80 MB.
-  <out>/licenses/{hamlib,ffmpeg}/ their license texts (bundled, see THIRD_PARTY_NOTICES.md)
+  <out>/licenses/hamlib/          its license texts (bundled, see THIRD_PARTY_NOTICES.md)
+
+The rig audio is captured in-process (cpal): there is no audio helper to build.
 
 Sources are pinned by version and SHA-256; downloads are cached in <work>.
 """
@@ -35,23 +35,6 @@ HAMLIB_SRC = (f"https://github.com/Hamlib/Hamlib/releases/download/{HAMLIB}/haml
               "ae1fcf2dbc80ea0786ea8f047b09399c3f7737d1930442f61a031708ed33e88f")
 HAMLIB_W64 = (f"https://github.com/Hamlib/Hamlib/releases/download/{HAMLIB}/hamlib-w64-{HAMLIB}.zip",
               "8553bc6c5c6032e8debf99c017e98f58fed7e07e7c25d04815dc3e8bbe3304c7")
-FFMPEG = "9.0.2"
-FFMPEG_SRC = (f"https://ffmpeg.org/releases/ffmpeg-{FFMPEG}.tar.xz",
-              "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e")
-MACOS_MIN = "11.0"
-
-# Everything SW Atlas asks of ffmpeg (crates/atlas-core/src/audio.rs): one capture input,
-# PCM in, downmix + resample, s16le out on stdout. The capture input is added per OS.
-FFMPEG_COMMON = [
-    "--disable-everything", "--enable-small", "--disable-doc", "--disable-debug",
-    "--disable-network", "--disable-ffplay", "--disable-ffprobe", "--disable-x86asm",
-    "--enable-ffmpeg", "--enable-swresample",
-    "--enable-protocol=pipe,file",
-    "--enable-muxer=pcm_s16le", "--enable-encoder=pcm_s16le",
-    "--enable-decoder=pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le",
-    "--enable-filter=abuffer,abuffersink,aformat,anull,aresample",
-]
-
 # Hamlib: just the library and rigctld, no bindings or optional libraries, static.
 HAMLIB_CONFIGURE = [
     "--disable-shared", "--enable-static", "--without-readline", "--without-libusb",
@@ -95,23 +78,8 @@ def jobs() -> str:
     return str(os.cpu_count() or 2)
 
 
-def ffmpeg_build(work: Path, name: str, flags: list, exe: str) -> Path:
-    src = unpack(fetch(work, *FFMPEG_SRC), work)
-    build = fresh(work / f"ffmpeg-build-{name}")
-    run([src / "configure", *FFMPEG_COMMON, *flags], cwd=build)
-    run(["make", "-j", jobs(), exe], cwd=build)
-    return build / exe
-
-
-def ffmpeg_licenses(work: Path, out: Path):
-    src = work / f"ffmpeg-{FFMPEG}"
-    lic = fresh(out / "licenses" / "ffmpeg")
-    for f in ("LICENSE.md", "COPYING.LGPLv2.1"):
-        shutil.copy(src / f, lic / f)
-
-
 def windows(work: Path, out: Path):
-    target = "x86_64-pc-windows-msvc"  # the name Tauri looks for; built with mingw
+    target = "x86_64-pc-windows-msvc"  # the name Tauri looks for
     # rigctld: the Hamlib project's own Windows build, with the DLLs it needs
     z = fetch(work, *HAMLIB_W64)
     dlls = fresh(out / "windows")
@@ -125,18 +93,10 @@ def windows(work: Path, out: Path):
                 (dlls / base).write_bytes(zf.read(n))
             elif base in ("COPYING.txt", "COPYING.LIB.txt", "LICENSE.txt"):
                 (lic / base).write_bytes(zf.read(n))
-    # ffmpeg: cross-compiled, statically linked (no MinGW runtime DLLs to ship)
-    exe = ffmpeg_build(work, "windows", [
-        "--disable-autodetect", "--enable-cross-compile", "--target-os=mingw32", "--arch=x86_64",
-        "--cross-prefix=x86_64-w64-mingw32-", "--pkg-config=false",
-        "--extra-ldflags=-static", "--enable-indev=dshow",
-    ], "ffmpeg.exe")
-    shutil.copy(exe, out / f"ffmpeg-{target}.exe")
-    ffmpeg_licenses(work, out)
 
 
-def mac_arch(work: Path, out: Path, arch: str) -> tuple:
-    """rigctld and ffmpeg for one macOS architecture (`arm64` or `x86_64`)."""
+def mac_arch(work: Path, out: Path, arch: str) -> Path:
+    """rigctld for one macOS architecture (`arm64` or `x86_64`)."""
     flags = f"-arch {arch} -mmacosx-version-min={MACOS_MIN}"
     native = platform.machine() == arch
     triple = {"arm64": "aarch64-apple-darwin", "x86_64": "x86_64-apple-darwin"}[arch]
@@ -153,25 +113,10 @@ def mac_arch(work: Path, out: Path, arch: str) -> tuple:
         if (src / f).exists():
             shutil.copy(src / f, lic / f"{f}.txt")
 
-    cross = [] if native else ["--enable-cross-compile", f"--arch={arch}", "--target-os=darwin"]
-    # no --disable-autodetect: the capture input needs the system frameworks it detects
-    ff = ffmpeg_build(work, f"mac-{arch}", [
-        *cross, f"--extra-cflags={flags}", f"--extra-ldflags={flags}",
-        "--disable-sdl2", "--disable-iconv", "--disable-xlib", "--disable-libxcb",
-        "--enable-indev=avfoundation",
-    ], "ffmpeg")
-    ffmpeg_licenses(work, out)
-    rig, ffm = out / f"rigctld-{triple}", out / f"ffmpeg-{triple}"
+    rig = out / f"rigctld-{triple}"
     shutil.copy(build / "tests" / "rigctld", rig)
     run(["strip", rig])  # static, with every rig backend: ~28 MB -> ~12 MB
-    shutil.copy(ff, ffm)
-    return rig, ffm
-
-
-def linux_check(work: Path, out: Path):
-    exe = ffmpeg_build(work, "linux", ["--disable-autodetect", "--enable-alsa", "--enable-indev=alsa"], "ffmpeg")
-    shutil.copy(exe, out / "ffmpeg-x86_64-unknown-linux-gnu")
-    ffmpeg_licenses(work, out)
+    return rig
 
 
 def main():
@@ -190,10 +135,7 @@ def main():
         mac_arch(work, out, "arm64" if a.target.startswith("aarch64") else "x86_64")
     elif a.target == "universal-apple-darwin":
         arm, x86 = mac_arch(work, out, "arm64"), mac_arch(work, out, "x86_64")
-        for i, name in enumerate(("rigctld", "ffmpeg")):
-            run(["lipo", "-create", arm[i], x86[i], "-output", out / f"{name}-universal-apple-darwin"])
-    elif a.target == "x86_64-unknown-linux-gnu":
-        linux_check(work, out)
+        run(["lipo", "-create", arm, x86, "-output", out / "rigctld-universal-apple-darwin"])
     else:
         sys.exit(f"unknown target {a.target}")
     print("done:", ", ".join(sorted(p.name for p in out.iterdir())))

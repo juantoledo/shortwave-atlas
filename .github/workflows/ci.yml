@@ -38,11 +38,11 @@ jobs:
             package-lock.json
             ui/package-lock.json
 
-      - name: Linux libraries (Tauri; Hamlib and ffmpeg for the real-program tests)
+      - name: Linux libraries (Tauri; ALSA for the audio capture; Hamlib for the real-rigctld test)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libhamlib-utils ffmpeg
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libhamlib-utils
 
       # Tauri checks that sidecars and resources exist even for a debug build; the real
       # ones are only built for releases (sidecars.yml).
@@ -53,7 +53,7 @@ jobs:
           host=$(rustc -vV | sed -n 's/^host: //p')
           ext=""; [ "$RUNNER_OS" = Windows ] && ext=.exe
           mkdir -p src-tauri/binaries/windows src-tauri/binaries/licenses
-          for b in rigctld ffmpeg; do touch "src-tauri/binaries/$b-$host$ext"; done
+          touch "src-tauri/binaries/rigctld-$host$ext"
           touch src-tauri/binaries/windows/stub.dll src-tauri/binaries/licenses/README
 
       - run: npm ci && npm --prefix ui ci

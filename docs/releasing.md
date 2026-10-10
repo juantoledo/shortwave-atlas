@@ -20,7 +20,7 @@ them (`.commitlintrc.json`).
 | `feat!: new config format` (or a `BREAKING CHANGE:` line) | 0.x: next minor; 1.x+: next major | yes |
 | `chore:`, `docs:`, `ci:`, `test:`, `refactor:`, `build:` | none on its own | no |
 
-A scope is optional: `fix(windows): stop ffmpeg on exit`.
+A scope is optional: `fix(windows): stop rigctld on exit`.
 
 ## Release a version
 1. Push to `main` as usual. **Release PR** (`release-please.yml`) keeps a pull request called

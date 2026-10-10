@@ -24,7 +24,7 @@ See README.md for layout and commands.
   and never edit them by hand.
 - Logic that doesn't touch IO goes in `atlas-core`, with unit tests. The UI only keeps animation
   math (`ui/src/geo/geo.ts`).
-- Linux, Windows and macOS. Per-OS rules (device names, ffmpeg inputs, error strings, tool
+- Linux, Windows and macOS. Per-OS rules (device names and matching, error strings, tool
   lookup) are pure functions in `atlas-core` that take an `atlas_core::platform::Os`, so all three
   variants are tested on any machine. IO code passes `Os::CURRENT`; no `cfg!` in the logic.
 - Start helper programs only with `atlas_rig::process::command` (it finds sidecars and hides the

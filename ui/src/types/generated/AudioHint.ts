@@ -3,4 +3,4 @@
 /**
  * A likely cause of a capture problem, explained in the UI.
  */
-export type AudioHint = "ffmpeg_missing" | "device_busy" | "device_missing" | "permission_denied" | "microphone_denied";
+export type AudioHint = "device_busy" | "device_missing" | "permission_denied" | "microphone_denied";

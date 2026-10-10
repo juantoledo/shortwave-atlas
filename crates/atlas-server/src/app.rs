@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use atlas_core::api::{
     ApiError, AudioDiagnostics, AudioSettings, Call, ErrorKind, Info, Qth, RigSettings, UpdatePrefs,
 };
-use atlas_core::audio::{diagnose_audio, validate_audio, AudioChoice};
+use atlas_core::audio::{default_tuning, diagnose_audio, validate_audio, AudioChoice};
 use atlas_core::platform::Os;
 use atlas_core::setup::{validate_choice, RigChoice, RigModel};
 use atlas_core::stations::{Catalog, LOOKUP_TOLERANCE_HZ};
@@ -16,7 +16,7 @@ use atlas_rig::{discover, Rig, RigConfig};
 use serde_json::Value;
 use tokio::sync::OnceCell;
 
-use crate::audio::{ffmpeg_version, sound_cards, AudioHub};
+use crate::audio::{backend, sound_cards, AudioHub};
 use crate::config::{save_audio, save_rig, save_update, AppConfig};
 use crate::update::{InstallRefused, UpdateService, Updater};
 
@@ -68,7 +68,7 @@ impl Atlas {
         let qth = Arc::new(RwLock::new(saved.unwrap_or_else(|| config.qth.clone())));
         let rig = Rig::from_config(&config.rig, stations.clone(), qth.clone());
         let rig_config = RwLock::new(config.rig.clone());
-        let audio = AudioHub::new(&config.audio.ffmpeg, config.audio.choice());
+        let audio = AudioHub::new(config.audio.choice());
         let update = UpdateService::new(updater, &config.update, config.update_locked.clone());
         update.spawn_checks();
         Ok(Arc::new_cyclic(|me| Self {
@@ -86,7 +86,7 @@ impl Atlas {
         }))
     }
 
-    /// Stop the helpers we started (rigctld, ffmpeg) and wait until they have exited, so the
+    /// Stop the audio capture and the rigctld we started, and wait until they are gone, so the
     /// serial port, rigctld's TCP port and the sound card are free when the app is gone.
     pub async fn shutdown(&self) {
         self.audio.shutdown().await;
@@ -132,12 +132,13 @@ impl Atlas {
         Ok(())
     }
 
-    async fn audio_settings(&self) -> AudioSettings {
+    fn audio_settings(&self) -> AudioSettings {
         AudioSettings {
             choice: self.audio.choice(),
             locked: self.config.audio_locked.clone(),
             config_path: self.config_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
-            ffmpeg_version: ffmpeg_version(&self.config.audio.ffmpeg).await,
+            backend: backend(),
+            defaults: default_tuning(Os::CURRENT),
         }
     }
 
@@ -200,6 +201,8 @@ impl Atlas {
             lang: self.config.lang.clone(),
             audio: audio.enabled,
             audio_rate: audio.rate,
+            audio_cushion_ms: audio.tuning.cushion_ms,
+            audio_max_ahead_ms: audio.tuning.max_ahead_ms,
             configured: self.config_path.as_ref().is_some_and(|p| p.is_file()),
             os: Os::CURRENT,
         }
@@ -256,8 +259,8 @@ impl Atlas {
                 Ok(Value::Null)
             }
             Call::RigDiagnostics => json(serde_json::to_value(self.rig.diagnostics())),
-            Call::AudioSettings => json(serde_json::to_value(self.audio_settings().await)),
-            Call::SoundCards => json(serde_json::to_value(sound_cards(&self.config.audio.ffmpeg).await)),
+            Call::AudioSettings => json(serde_json::to_value(self.audio_settings())),
+            Call::SoundCards => json(serde_json::to_value(sound_cards().await)),
             Call::ApplyAudio(choice) => {
                 self.apply_audio(choice)?;
                 Ok(Value::Null)
@@ -339,15 +342,18 @@ pub(crate) mod tests {
         let path = dir.join("swatlas.toml");
         let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, no_updates()).unwrap();
 
-        let bad = AudioChoice { enabled: true, device: "-f lavfi".into(), rate: 16_000 };
+        let tuning = default_tuning(Os::CURRENT);
+        let bad = AudioChoice { enabled: true, device: "-f lavfi".into(), rate: 16_000, tuning };
         let e = atlas.call(Call::ApplyAudio(bad)).await.unwrap_err();
         assert_eq!(e.kind, ErrorKind::Invalid);
         assert!(!path.exists(), "a refused choice must not be saved");
 
-        let codec = AudioChoice { enabled: true, device: default_device(Os::CURRENT).into(), rate: 8_000 };
+        let tuning = atlas_core::audio::AudioTuning { cushion_ms: 250, ..tuning };
+        let codec = AudioChoice { enabled: true, device: default_device(Os::CURRENT).into(), rate: 8_000, tuning };
         atlas.call(Call::ApplyAudio(codec.clone())).await.unwrap();
         let info = atlas.call(Call::Info).await.unwrap();
         assert_eq!((info["audio"].as_bool(), info["audio_rate"].as_u64()), (Some(true), Some(8_000)));
+        assert_eq!((info["audio_cushion_ms"].as_u64(), info["audio_max_ahead_ms"].as_u64()), (Some(250), Some(500)));
         let settings = atlas.call(Call::AudioSettings).await.unwrap();
         assert_eq!(settings["choice"]["rate"], 8_000);
         let saved: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();

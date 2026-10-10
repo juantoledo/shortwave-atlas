@@ -235,8 +235,8 @@ impl UpdateService {
         Ok(())
     }
 
-    /// Download, then `stop` the helpers (rigctld, ffmpeg: their files are about to be
-    /// replaced) and install. The app restarts on success; on failure `resume` brings the
+    /// Download, then `stop` the helpers (the audio capture, and rigctld: its file is about to
+    /// be replaced) and install. The app restarts on success; on failure `resume` brings the
     /// helpers back and the state says why.
     pub async fn run_install(self: Arc<Self>, stop: impl Future<Output = ()>, resume: impl Future<Output = ()>) {
         let me = self.clone();

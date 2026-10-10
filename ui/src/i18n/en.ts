@@ -1,6 +1,7 @@
 // English (default). Every other catalog must have exactly these keys (see `Messages`).
 
 import type { AudioHint } from '../types/generated/AudioHint';
+import type { AudioTuning } from '../types/generated/AudioTuning';
 import type { Hint } from '../types/generated/Hint';
 import type { ManualReason } from '../types/generated/ManualReason';
 import type { Os } from '../types/generated/Os';
@@ -163,7 +164,7 @@ export const en = {
   aboutBlurb: "Live shortwave broadcast schedule on a 3D globe. See what's on the air right now, then tune it on your own radio via Hamlib. Receive only. Desktop app for Linux, Windows and macOS, or a browser UI from a headless server. Station data from EiBi.",
   sourceCode: 'Source code on GitHub',
   receiveOnly: 'Receive only: Shortwave Atlas never transmits.',
-  thirdParty: 'Third-party programs (Hamlib, ffmpeg) and their licenses are listed in THIRD_PARTY_NOTICES.md, next to the program.',
+  thirdParty: 'Third-party programs (Hamlib) and their licenses are listed in THIRD_PARTY_NOTICES.md, next to the program.',
   back: 'Back',
   subtitleSetup: 'Simulated rig · connect your radio →',
   rigSection: 'Rig',
@@ -275,9 +276,7 @@ export const en = {
   audioSection: 'Audio',
   audioOffLabel: 'Off',
   audioOn: 'Listen to the rig',
-  audioHelp: "Captures the rig's audio from a sound card (ffmpeg) so you can listen here and in remote browsers.",
-  ffmpegVersion: (v: string) => `ffmpeg ${v}`,
-  ffmpegMissing: 'ffmpeg is not installed.',
+  audioHelp: "Captures the rig's audio from a sound card so you can listen here and in remote browsers.",
   soundCard: 'Sound card',
   otherCard: 'Other…',
   alsaDevice: 'ALSA device',
@@ -285,13 +284,23 @@ export const en = {
   rigCodec: 'rig codec',
   audioRate: 'Sample rate',
   audioRateHelp: (khz: number, kbps: number) => `Audio up to ${khz} kHz · ${kbps} kbit/s per listener.`,
+  cardBadName: 'name the config cannot hold',
+  audioAdvanced: 'Advanced: buffers and timing',
+  audioAdvancedHelp: 'If Listen cuts out, raise the listener cushion first. Changes apply to every listener.',
+  audioDefaults: 'Reset to defaults',
+  audioTuning: {
+    cushion_ms: ['Listener cushion (ms)', 'Audio queued before playing, rebuilt after a gap. More = fewer cutouts, more delay.'],
+    max_ahead_ms: ['Listener maximum (ms)', 'Most audio queued ahead; later blocks are dropped so the delay cannot grow.'],
+    block_ms: ['Block size (ms)', 'Audio per block sent to listeners.'],
+    queue_ms: ['Server queue (ms)', 'Audio kept for a slow listener before the server drops blocks.'],
+    capture_rate: ['Card rate (Hz)', 'Rate asked of the sound card before conversion (the rig codec is 48000). A card that cannot do it runs at its nearest rate.'],
+  } as Record<keyof AudioTuning, [string, string]>,
   apply: 'Apply',
   audioOff: 'Audio is off',
   audioIdle: 'Ready · nobody is listening',
   audioCapturing: (n: number) => `Capturing · ${n} listener${n === 1 ? '' : 's'}`,
-  ffmpegLog: 'ffmpeg log',
+  captureLog: 'Capture log',
   audioHints: {
-    ffmpeg_missing: ['ffmpeg is not installed', 'Install it (Debian/Ubuntu: sudo apt install ffmpeg), then press Listen again.'],
     device_busy: ['The sound card is in use', 'Another program (WSJT-X, fldigi, arecord) has it open. Close it and press Listen again.'],
     device_missing: ['The sound card is not there', 'The rig is unplugged or this is the wrong card. Plug it in, press Refresh and pick the card again.'],
     permission_denied: ['No permission to open the sound card', 'Add yourself to the audio group: sudo usermod -aG audio $USER, then log out and back in.'],
@@ -299,12 +308,11 @@ export const en = {
   } as Record<AudioHint, [string, string]>,
   audioHintsByOs: {
     windows: {
-      ffmpeg_missing: ['ffmpeg is missing', 'Shortwave Atlas ships it: reinstall Shortwave Atlas, or set audio.ffmpeg in the config file.'],
+      permission_denied: ['Windows may not let Shortwave Atlas use the microphone', 'Turn on Settings › Privacy & security › Microphone › "Let desktop apps access your microphone", then press Listen again.'],
       device_missing: ['The sound device is not there', 'The radio is off or unplugged, or Windows renamed it (for example "2- USB AUDIO CODEC"). Press Refresh and pick it again.'],
       device_busy: ['The sound device is in use', 'Another program has it open exclusively. Close it, or untick "Allow applications to take exclusive control" in the device\'s sound properties.'],
     },
     macos: {
-      ffmpeg_missing: ['ffmpeg is missing', 'Shortwave Atlas ships it: reinstall Shortwave Atlas, or set audio.ffmpeg in the config file.'],
       device_missing: ['The sound device is not there', 'The radio is off or unplugged. Plug it in, press Refresh and pick it again.'],
     },
   } as ByOs<AudioHint>,

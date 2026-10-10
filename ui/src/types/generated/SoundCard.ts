@@ -7,7 +7,7 @@ export type SoundCard = {
 /**
  * Name to use in the config. Linux: an ALSA `plughw` name by card id (converts any
  * rate and channel count, survives re-plugging in another order). Windows and macOS:
- * the device's name as DirectShow / AVFoundation list it.
+ * the device's name as the OS lists it.
  */
 device: string, 
 /**
@@ -15,6 +15,11 @@ device: string,
  */
 label: string, card_id: string, 
 /**
- * The TI/Burr-Brown USB audio codec built into Yaesu, Icom and Kenwood rigs.
+ * A rig's sound card: the TI/Burr-Brown USB audio codec built into Yaesu, Icom and
+ * Kenwood rigs, or a USB interface like the SignaLink or Digirig (see `is_rig_codec`).
  */
-rig_codec: boolean, };
+rig_codec: boolean, 
+/**
+ * The name can be saved as `[audio] device` (see `device_name_ok`).
+ */
+usable: boolean, };

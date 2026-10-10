@@ -10,7 +10,7 @@
   },
   "bundle": {
     "targets": ["nsis"],
-    "externalBin": ["binaries/rigctld", "binaries/ffmpeg"],
+    "externalBin": ["binaries/rigctld"],
     "resources": {
       "binaries/windows/*.dll": "./",
       "binaries/licenses/**/*": "licenses/",

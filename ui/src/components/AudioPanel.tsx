@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { OpenAudio } from '../api/transport';
-import { AudioPlayer, type PlayerStatus } from '../audio/player';
+import { AudioPlayer, type PlayerBuffer, type PlayerStatus } from '../audio/player';
 import { cwDelta, SP_H, Waterfall, WF_H, WF_W } from '../audio/waterfall';
 import { useT, type Messages } from '../i18n';
 
@@ -30,6 +30,7 @@ function statusText(t: Messages, s: PlayerStatus | null): string {
 interface Props {
   openAudio: OpenAudio;
   rate: number;
+  buffer: PlayerBuffer;
   mode: string | null;
   cwPitch: number | null;
   freqHz: number | null;
@@ -37,7 +38,7 @@ interface Props {
   keys?: RefObject<AudioKeys | null>;
 }
 
-export function AudioPanel({ openAudio, rate, mode, cwPitch, freqHz, onTune, keys }: Props) {
+export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onTune, keys }: Props) {
   const t = useT();
   const spans = [...new Set([3000, 4000, rate / 2])].filter((s) => s <= rate / 2);
   const [span, setSpan] = useState(spans[0]);
@@ -60,6 +61,8 @@ export function AudioPanel({ openAudio, rate, mode, cwPitch, freqHz, onTune, key
   }, [player]);
   useEffect(() => () => player?.stop(), [player]);
   useEffect(() => player?.setVolume(volume), [player, volume]);
+  const { cushionMs, maxAheadMs } = buffer;
+  useEffect(() => player?.setBuffer({ cushionMs, maxAheadMs }), [player, cushionMs, maxAheadMs]);
 
   const toggle = () => {
     if (player) {
@@ -67,7 +70,7 @@ export function AudioPanel({ openAudio, rate, mode, cwPitch, freqHz, onTune, key
       setStatus(null);
       setHover('');
     } else {
-      setPlayer(new AudioPlayer(openAudio, volume, setStatus));
+      setPlayer(new AudioPlayer(openAudio, volume, buffer, setStatus));
     }
   };
   // mute remembers the level it left

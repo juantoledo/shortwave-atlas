@@ -147,7 +147,7 @@ async fn audio_stream(State(ctx): State<Ctx>) -> Response {
     };
     let rate = sub.rate;
     let body = futures_util::stream::unfold(sub, |mut sub| async move {
-        // ends when ffmpeg stops, the audio is reconfigured, or no audio arrives for a while
+        // ends when the capture stops, the audio is reconfigured, or no audio arrives for a while
         sub.next_block().await.map(|block| (Ok::<_, Infallible>(block), sub))
     });
     Response::builder()

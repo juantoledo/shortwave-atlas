@@ -60,7 +60,7 @@ crates/atlas-rig      RigBackend trait, Hamlib (rigctld) and simulated backends,
 crates/atlas-server   config, the Atlas dispatcher, audio hub, HTTP/WebSocket server, swatlas-server binary
 src-tauri             desktop shell (per-OS bundle settings in tauri.{linux,windows,macos}.conf.json)
 ui                    React + TypeScript + Vite (react-globe.gl)
-assets/sidecars       builds the rigctld and ffmpeg that the Windows and macOS installers ship
+assets/sidecars       builds the rigctld that the Windows and macOS installers ship
 data/eibi             the EiBi schedule bundled into the binary (see data/eibi/README.md)
 ```
 
@@ -68,13 +68,13 @@ data/eibi             the EiBi schedule bundled into the binary (see data/eibi/R
 Releases have installers for each OS: `.deb` or AppImage for Linux, `-setup.exe` for
 Windows, and `.dmg` for macOS. There is also a `swatlas-server` archive per OS.
 
-| | Rig (rigctld) and audio (ffmpeg) | Serial port | Notes |
+| | Rig (rigctld) | Serial port | Notes |
 |---|---|---|---|
-| **Linux** | System packages: `sudo apt install libhamlib-utils ffmpeg` (the `.deb` pulls them in) | `/dev/serial/by-id/...`; needs the `dialout` group | |
+| **Linux** | System package: `sudo apt install libhamlib-utils` (the `.deb` pulls it in) | `/dev/serial/by-id/...`; needs the `dialout` group | |
 | **Windows** | Included in the installer | `COMn`. For the FTDX10, the CP2105's **Enhanced COM Port**. Windows usually installs the Silicon Labs CP210x driver by itself; if not, get the VCP driver from Silicon Labs | Not signed yet: SmartScreen asks; choose *More info → Run anyway* |
 | **macOS** (11+) | Included in the app | `/dev/cu.*` (for example `cu.SLAB_USBtoUART`) | Not notarized yet: the first time, right-click the app → *Open*. On the first **Listen**, macOS asks for microphone access, which is how the radio's USB sound card arrives |
 
-The bundled programs and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+The bundled program and its license are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Setup for development (Linux)
 ```
@@ -83,6 +83,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 nvm install 22
 # Tauri system libraries
 sudo apt install libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev
+# ALSA, for the rig audio capture
+sudo apt install libasound2-dev
 # Hamlib and serial access
 sudo apt install libhamlib-utils
 sudo usermod -aG dialout $USER      # log out and back in
@@ -90,8 +92,8 @@ sudo usermod -aG dialout $USER      # log out and back in
 npm install && npm --prefix ui install
 ```
 On Windows or macOS, install Rust, Node 22 and the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
-Then build the sidecars once: `python3 assets/sidecars/build.py universal-apple-darwin` on a Mac, or
-`x86_64-pc-windows-msvc` from Linux with `mingw-w64`. Without them, put Hamlib and ffmpeg on PATH:
+Then build the sidecar once: `python3 assets/sidecars/build.py universal-apple-darwin` on a Mac, or
+`x86_64-pc-windows-msvc` anywhere. Without it, put Hamlib on PATH:
 Shortwave Atlas looks next to its executable, then on PATH, then in Homebrew (`/opt/homebrew/bin`,
 `/usr/local/bin`) and in Hamlib's Windows install folder.
 
@@ -125,12 +127,15 @@ port unplugged or busy, the rigctld TCP port taken, the radio not answering, Ham
 can only be set in the file, never from the page.
 
 The **Audio** section on the same page turns on **Listen**. It captures the rig's audio from a
-sound card with `ffmpeg` (`sudo apt install ffmpeg`), for the desktop app and remote browsers alike.
-It lists the sound cards that can capture, with the rig's USB codec first (the Burr-Brown
-"USB AUDIO CODEC" inside Yaesu, Icom and Kenwood rigs). It also lets you choose the sample rate:
-16 kHz carries audio up to 8 kHz and costs 256 kbit/s per listener. **Apply** switches over live and
-saves the choice. The page shows whether ffmpeg is capturing, and explains a busy or missing card or
-a missing `audio` group. The ffmpeg executable path can only be set in the file.
+sound card through the OS audio system (ALSA, WASAPI or CoreAudio; nothing to install), for the
+desktop app and remote browsers alike.
+It lists the sound cards that can capture, with the rig's sound card first (the Burr-Brown
+"USB AUDIO CODEC" inside Yaesu, Icom and Kenwood rigs and the SignaLink, or a C-Media interface like
+the Digirig). It also lets you choose the sample rate: 16 kHz carries audio up to 8 kHz and costs
+256 kbit/s per listener. **Advanced** sets the buffers and timing, from the card rate to the
+listener's cushion; if Listen cuts out, raise the cushion first. **Apply** switches over live and
+saves the choice. The page shows whether the card is capturing, and explains a busy or missing card,
+a missing `audio` group or a refused microphone permission (Windows, macOS).
 
 To configure by hand, copy `docs/swatlas.example.toml` to `~/.config/swatlas/swatlas.toml`. The
 desktop app and the server share it. The prototype's environment variables (`RIGCTLD_PORT`, `WEB_AUTH`, `AUDIO_DEVICE`, ...)
@@ -142,7 +147,7 @@ Rig-specific notes live in `docs/rigs/` (start with `ftdx10.md`).
 When a new version is out, a lamp on the globe says **Update x.y.z available**. Open it for the
 release notes and:
 - **Windows, macOS and the Linux AppImage:** press **Install and restart**. Shortwave Atlas downloads the
-  update, checks its signature, stops rigctld and ffmpeg, installs and starts again. Nothing is
+  update, checks its signature, stops the audio and rigctld, installs and starts again. Nothing is
   downloaded until you press it.
 - **Linux `.deb` and `swatlas-server`:** the panel links to the release; install it the way you
   installed the first one.
@@ -161,7 +166,7 @@ juantoledo/shortwave-atlas`. How releases are made: [docs/releasing.md](docs/rel
 ## Remote access
 `swatlas-server` refuses to listen beyond loopback without `server.auth`. Use Tailscale rather than
 exposing it to the internet. Release archives hold the server, the built UI and (Windows, macOS)
-rigctld and ffmpeg side by side; run it from there.
+rigctld side by side; run it from there.
 
 - **Windows:** run `swatlas-server.exe` at logon from Task Scheduler, or as a service with
   [NSSM](https://nssm.cc/), with `WEB_BIND`/`WEB_AUTH` set as environment variables. Windows
