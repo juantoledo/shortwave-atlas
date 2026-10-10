@@ -153,7 +153,7 @@ export const es: Messages = {
   aboutBlurb: 'Horario de emisoras de onda corta en vivo sobre un globo 3D. Mira qué está en el aire ahora mismo y sintonízalo en tu propia radio con Hamlib. Solo recepción. App de escritorio para Linux, Windows y macOS, o una interfaz web desde un servidor sin pantalla. Datos de emisoras de EiBi.',
   sourceCode: 'Código fuente en GitHub',
   receiveOnly: 'Solo recepción: Shortwave Atlas nunca transmite.',
-  thirdParty: 'Los programas de terceros (Hamlib, ffmpeg) y sus licencias están en THIRD_PARTY_NOTICES.md, junto al programa.',
+  thirdParty: 'Los programas de terceros (Hamlib) y sus licencias están en THIRD_PARTY_NOTICES.md, junto al programa.',
   back: 'Volver',
   subtitleSetup: 'Rig simulado · conecta tu radio →',
   rigSection: 'Rig',

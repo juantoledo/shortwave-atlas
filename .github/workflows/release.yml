@@ -167,7 +167,7 @@ jobs:
         with:
           name: sidecars-${{ matrix.target == 'aarch64-apple-darwin' && 'universal-apple-darwin' || matrix.target }}
           path: sidecars
-      # The server finds rigctld/ffmpeg and the UI next to its executable.
+      # The server finds rigctld and the UI next to its executable.
       - name: Package
         shell: bash
         run: |
@@ -179,15 +179,13 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then
             cp target/release/swatlas-server.exe "$name/"
             cp sidecars/rigctld-*.exe "$name/rigctld.exe"
-            cp sidecars/ffmpeg-*.exe "$name/ffmpeg.exe"
             cp sidecars/windows/*.dll "$name/"
           else
             cp target/release/swatlas-server "$name/"
           fi
           if [ "$RUNNER_OS" = macOS ]; then
             cp sidecars/rigctld-universal-apple-darwin "$name/rigctld"
-            cp sidecars/ffmpeg-universal-apple-darwin "$name/ffmpeg"
-            chmod +x "$name/rigctld" "$name/ffmpeg"
+            chmod +x "$name/rigctld"
           fi
           if [ -d sidecars/licenses ]; then cp -r sidecars/licenses "$name/"; fi
           echo "DIR=$name" >> "$GITHUB_ENV"
@@ -201,7 +199,6 @@ jobs:
           [ "$out" = "swatlas-server ${TAG#v}" ]
           if [ "$RUNNER_OS" != Linux ]; then
             "$DIR/rigctld$ext" --version
-            "$DIR/ffmpeg$ext" -version | head -1
           fi
       - name: Upload
         shell: bash
@@ -236,9 +233,7 @@ jobs:
           Get-ChildItem $dir
           & (Join-Path $dir 'rigctld.exe') --version
           if ($LASTEXITCODE) { throw 'rigctld does not run' }
-          & (Join-Path $dir 'ffmpeg.exe') -version | Select-Object -First 1
-          if ($LASTEXITCODE) { throw 'ffmpeg does not run' }
-          $app = Get-ChildItem $dir -Filter *.exe | Where-Object { $_.Name -notin 'rigctld.exe', 'ffmpeg.exe', 'uninstall.exe' } | Select-Object -First 1
+          $app = Get-ChildItem $dir -Filter *.exe | Where-Object { $_.Name -notin 'rigctld.exe', 'uninstall.exe' } | Select-Object -First 1
           $p = Start-Process $app.FullName -PassThru
           Start-Sleep -Seconds 15
           if ($p.HasExited) { throw "SW Atlas exited with code $($p.ExitCode)" }
@@ -252,7 +247,6 @@ jobs:
           app=$(ls -d /Volumes/swatlas/*.app | head -1)
           codesign --verify --deep --strict --verbose=2 "$app"
           "$app/Contents/MacOS/rigctld" --version
-          "$app/Contents/MacOS/ffmpeg" -version | head -1
           "$app/Contents/MacOS/$(defaults read "$app/Contents/Info" CFBundleExecutable)" &
           pid=$!
           sleep 15
@@ -280,14 +274,14 @@ jobs:
           sleep 20
           kill -0 "$pid" || { echo "::error::the AppImage exited"; exit 1; }
           kill "$pid" || true
-          # the .deb, with its dependencies (Hamlib, ffmpeg, WebKitGTK), on a clean Ubuntu
+          # the .deb, with its dependencies (Hamlib, ALSA, WebKitGTK), on a clean Ubuntu
           deb=$(basename "$(ls dist/*.deb | head -1)")
           docker run --rm -v "$PWD/dist:/dist" ubuntu:22.04 bash -ec "
             apt-get update -qq
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /dist/$deb > /dev/null
             pkg=\$(dpkg-deb -f /dist/$deb Package)
             dpkg -L \$pkg | grep /usr/bin/
-            command -v rigctld ffmpeg"
+            command -v rigctld"
 
   finalize:
     needs: [desktop, server, smoke]

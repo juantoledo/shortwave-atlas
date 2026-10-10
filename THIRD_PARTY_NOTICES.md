@@ -1,10 +1,10 @@
 # Third-party software in SW Atlas installers
 
-The Windows and macOS installers include two programs that SW Atlas runs as separate
-processes. They are built by `assets/sidecars/build.py`, from the sources below, and their
-license texts are installed in the `licenses/` folder next to this file.
+The Windows and macOS installers include one program that SW Atlas runs as a separate
+process. It is built by `assets/sidecars/build.py`, from the sources below, and its license
+texts are installed in the `licenses/` folder next to this file.
 
-Linux packages ship neither: they use the system's Hamlib and ffmpeg packages.
+Linux packages do not ship it: they use the system's Hamlib package.
 
 ## Hamlib 4.7.2: `rigctld`
 
@@ -22,27 +22,7 @@ Talks to the radio over its CAT serial port.
   `--disable-shared --enable-static --without-readline --without-libusb --without-cxx-binding
   --without-xml-support --without-indi --disable-winradio`.
 
-## FFmpeg 9.0.2: `ffmpeg`
-
-Captures the radio's audio from its USB sound card.
-
-- License: GNU LGPL v2.1 or later. The build enables no GPL or nonfree parts.
-- Home: https://ffmpeg.org/
-- Source: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
-  (SHA-256 `8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`)
-- Configured with
-  `--disable-everything --enable-small --disable-doc --disable-debug --disable-network
-  --disable-ffplay --disable-ffprobe --disable-x86asm --enable-ffmpeg --enable-swresample
-  --enable-protocol=pipe,file --enable-muxer=pcm_s16le --enable-encoder=pcm_s16le
-  --enable-decoder=pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le
-  --enable-filter=abuffer,abuffersink,aformat,anull,aresample`, plus:
-  - Windows (cross-compiled with MinGW-w64): `--disable-autodetect --enable-cross-compile
-    --target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32- --pkg-config=false
-    --extra-ldflags=-static --enable-indev=dshow`
-  - macOS: `-arch <arch> -mmacosx-version-min=11.0` and `--disable-sdl2 --disable-iconv
-    --disable-xlib --disable-libxcb --enable-indev=avfoundation`
-
-To rebuild either program, or to build it from modified sources, run
+To rebuild it, or to build it from modified sources, run
 `python3 assets/sidecars/build.py <target>` from the SW Atlas source tree.
 
 # Data and artwork in every build

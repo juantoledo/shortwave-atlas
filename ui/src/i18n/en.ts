@@ -164,7 +164,7 @@ export const en = {
   aboutBlurb: "Live shortwave broadcast schedule on a 3D globe. See what's on the air right now, then tune it on your own radio via Hamlib. Receive only. Desktop app for Linux, Windows and macOS, or a browser UI from a headless server. Station data from EiBi.",
   sourceCode: 'Source code on GitHub',
   receiveOnly: 'Receive only: Shortwave Atlas never transmits.',
-  thirdParty: 'Third-party programs (Hamlib, ffmpeg) and their licenses are listed in THIRD_PARTY_NOTICES.md, next to the program.',
+  thirdParty: 'Third-party programs (Hamlib) and their licenses are listed in THIRD_PARTY_NOTICES.md, next to the program.',
   back: 'Back',
   subtitleSetup: 'Simulated rig · connect your radio →',
   rigSection: 'Rig',

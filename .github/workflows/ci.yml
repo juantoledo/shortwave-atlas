@@ -53,7 +53,7 @@ jobs:
           host=$(rustc -vV | sed -n 's/^host: //p')
           ext=""; [ "$RUNNER_OS" = Windows ] && ext=.exe
           mkdir -p src-tauri/binaries/windows src-tauri/binaries/licenses
-          for b in rigctld ffmpeg; do touch "src-tauri/binaries/$b-$host$ext"; done
+          touch "src-tauri/binaries/rigctld-$host$ext"
           touch src-tauri/binaries/windows/stub.dll src-tauri/binaries/licenses/README
 
       - run: npm ci && npm --prefix ui ci
