@@ -16,7 +16,7 @@ tune into a place on the map. Spin the dial and the globe flies to the transmitt
 from your station across the live day/night line, and tells you who's on the air, how far away
 they are, which way to point your antenna and when they broadcast next.
 
-![Shortwave Atlas tuned to WRMI on 5850 kHz: the station list, the globe with the transmitter sites and the QTH, the station card and the band scale](docs/images/screenshot.png)
+![Shortwave Atlas tuned to Radio France Int. on 11790 kHz: the station list filtered to French stations on the air, the globe with the route from Issoudun to the QTH, the station card, the 25 m band dial with a scan profile, and the audio waterfall](docs/images/screenshot.png)
 
 <table>
 <tr>
