@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.2.2...v0.3.0) (2026-10-10)
+
+
+### Features
+
+* **audio:** buffer and timing settings, more rig interfaces in the card list ([2059e53](https://github.com/juantoledo/shortwave-atlas/commit/2059e5353ff02a064efc2d30b0cd805fc0a8ccf3))
+* **audio:** capture with the OS audio API (cpal) instead of ffmpeg ([8785e70](https://github.com/juantoledo/shortwave-atlas/commit/8785e70163e6b9f292f441c103198942acfa0ebf))
+
 ## [0.2.2](https://github.com/juantoledo/shortwave-atlas/compare/v0.2.1...v0.2.2) (2026-10-09)
 
 
