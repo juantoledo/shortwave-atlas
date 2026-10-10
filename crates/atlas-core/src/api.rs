@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::audio::{AudioChoice, AudioHint, AudioStatus};
+use crate::audio::{AudioChoice, AudioHint, AudioStatus, AudioTuning};
 use crate::geo::LatLon;
 use crate::platform::Os;
 use crate::rig::{CommandError, RigCommand, RigState};
@@ -127,6 +127,8 @@ pub struct AudioSettings {
     pub config_path: String,
     /// `ffmpeg -version`, or `None` if it is not installed.
     pub ffmpeg_version: Option<String>,
+    /// The tuning's defaults on this OS ("Reset to defaults").
+    pub defaults: AudioTuning,
 }
 
 /// Result of `Call::AudioDiagnostics`.
@@ -150,6 +152,9 @@ pub struct Info {
     /// Rig audio is enabled: `GET /api/audio` (browser) or `audio_open` (desktop).
     pub audio: bool,
     pub audio_rate: u32,
+    /// The listener's buffer (`AudioTuning::cushion_ms`, `max_ahead_ms`).
+    pub audio_cushion_ms: u32,
+    pub audio_max_ahead_ms: u32,
     /// A config file exists (false on a first run: the UI invites you to set up the rig).
     pub configured: bool,
     /// Where the core runs (the UI words hints, ports and devices for it).
@@ -232,10 +237,14 @@ mod tests {
         assert_eq!(c, Call::StationsMeta);
         let c: Call = serde_json::from_str(r#"{"cmd":"rig","args":{"cmd":"set_power","on":false}}"#).unwrap();
         assert_eq!(c, Call::Rig(RigCommand::SetPower { on: false }));
-        let c: Call =
-            serde_json::from_str(r#"{"cmd":"apply_audio","args":{"enabled":true,"device":"default","rate":16000}}"#)
-                .unwrap();
-        assert_eq!(c, Call::ApplyAudio(AudioChoice { enabled: true, device: "default".into(), rate: 16_000 }));
+        let c: Call = serde_json::from_str(
+            r#"{"cmd":"apply_audio","args":{"enabled":true,"device":"default","rate":16000,"tuning":{
+                "block_ms":20,"queue_ms":1000,"input_queue":0,"drift_correction":0,"capture_buffer_ms":50,
+                "capture_rate":48000,"cushion_ms":120,"max_ahead_ms":500}}}"#,
+        )
+        .unwrap();
+        let tuning = crate::audio::default_tuning(Os::Linux);
+        assert_eq!(c, Call::ApplyAudio(AudioChoice { enabled: true, device: "default".into(), rate: 16_000, tuning }));
     }
 
     #[test]

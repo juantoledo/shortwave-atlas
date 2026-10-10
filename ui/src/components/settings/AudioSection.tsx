@@ -1,4 +1,5 @@
-// Rig audio: enable it, pick the sound card and the rate; live capture status and hints.
+// Rig audio: enable it, pick the sound card, the rate and (Advanced) the buffers; live
+// capture status and hints.
 
 import { useEffect, useId, useState } from 'react';
 import type { Api } from '../../api/client';
@@ -7,6 +8,7 @@ import { useAudioSettings } from '../../hooks/useAudioSettings';
 import { audioHintText, useT, type Messages } from '../../i18n';
 import type { AudioChoice } from '../../types/generated/AudioChoice';
 import type { AudioDiagnostics } from '../../types/generated/AudioDiagnostics';
+import type { AudioTuning } from '../../types/generated/AudioTuning';
 import type { Os } from '../../types/generated/Os';
 import type { SoundCard } from '../../types/generated/SoundCard';
 
@@ -18,6 +20,19 @@ const DEVICE_EXAMPLE: Record<Os, string> = {
   windows: 'Microphone (USB AUDIO  CODEC)',
   macos: 'USB AUDIO  CODEC',
 };
+
+/** Advanced fields, listener first (what fixes cutouts); `os` = only there. The ranges are
+ *  `validate_audio`'s (the server checks them again). */
+export const TUNING: { key: keyof AudioTuning; min: number; max: number; step: number; os?: Os }[] = [
+  { key: 'cushion_ms', min: 20, max: 2000, step: 10 },
+  { key: 'max_ahead_ms', min: 50, max: 5000, step: 10 },
+  { key: 'block_ms', min: 10, max: 100, step: 5 },
+  { key: 'queue_ms', min: 20, max: 5000, step: 10 },
+  { key: 'input_queue', min: 0, max: 4096, step: 8 },
+  { key: 'drift_correction', min: 0, max: 20000, step: 500 },
+  { key: 'capture_buffer_ms', min: 10, max: 1000, step: 10, os: 'windows' },
+  { key: 'capture_rate', min: 8000, max: 192000, step: 100, os: 'linux' },
+];
 
 /** "ffmpeg version 6.1.1-3ubuntu5 Copyright ..." -> "6.1.1-3ubuntu5" */
 export const ffmpegVersion = (line: string) => /version\s+(\S+)/.exec(line)?.[1] ?? line;
@@ -75,6 +90,7 @@ export function AudioSection({ api, os, onError, onApplied }: Props) {
   if (!settings || !draft) return null;
 
   const set = (patch: Partial<AudioChoice>) => setDraft({ ...draft, ...patch });
+  const setTuning = (patch: Partial<AudioTuning>) => set({ tuning: { ...draft.tuning, ...patch } });
   const known = cards.some((c) => c.device === draft.device);
   const cardValue = other ? OTHER : draft.device;
   const rates = RATES.includes(draft.rate) ? RATES : [...RATES, draft.rate].sort((a, b) => a - b);
@@ -116,7 +132,11 @@ export function AudioSection({ api, os, onError, onApplied }: Props) {
                 value={cardValue}
                 opts={[
                   ...(draft.device && !known ? [{ value: draft.device, label: draft.device, hint: t.notFound }] : []),
-                  ...cards.map((c) => ({ value: c.device, label: cardLabel(c, t.rigCodec) })),
+                  ...cards.map((c) => ({
+                    value: c.device,
+                    label: cardLabel(c, t.rigCodec),
+                    ...(c.usable ? {} : { disabled: true, hint: t.cardBadName }),
+                  })),
                   { value: OTHER, label: t.otherCard },
                 ]}
                 onChange={(v) => {
@@ -145,6 +165,29 @@ export function AudioSection({ api, os, onError, onApplied }: Props) {
             />
             <small>{t.audioRateHelp(draft.rate / 2000, (draft.rate * 16) / 1000)}</small>
           </div>
+
+          <details className="adv">
+            <summary>{t.audioAdvanced}</summary>
+            <p className="note">{t.audioAdvancedHelp}</p>
+            {TUNING.filter((f) => !f.os || f.os === os).map((f) => (
+              <label className="field" key={f.key}>
+                <span>{t.audioTuning[f.key][0]}</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={f.min}
+                  max={f.max}
+                  step={f.step}
+                  value={draft.tuning[f.key]}
+                  onChange={(e) => setTuning({ [f.key]: Math.max(0, Math.round(e.currentTarget.valueAsNumber || 0)) })}
+                />
+                <small>{t.audioTuning[f.key][1]}</small>
+              </label>
+            ))}
+            <div className="actions">
+              <button className="btn" type="button" onClick={() => set({ tuning: settings.defaults })}>{t.audioDefaults}</button>
+            </div>
+          </details>
         </>
       )}
 

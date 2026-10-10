@@ -15,6 +15,11 @@ device: string,
  */
 label: string, card_id: string, 
 /**
- * The TI/Burr-Brown USB audio codec built into Yaesu, Icom and Kenwood rigs.
+ * A rig's sound card: the TI/Burr-Brown USB audio codec built into Yaesu, Icom and
+ * Kenwood rigs, or a USB interface like the SignaLink or Digirig (see `is_rig_codec`).
  */
-rig_codec: boolean, };
+rig_codec: boolean, 
+/**
+ * ffmpeg can open it by this name (see `device_name_ok`).
+ */
+usable: boolean, };

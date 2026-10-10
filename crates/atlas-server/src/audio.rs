@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use atlas_core::audio::{
     capture_filter_args, capture_input_args, parse_asound, parse_avfoundation_devices, parse_dshow_devices, rate_drift,
-    AudioChoice, AudioStatus, SoundCard,
+    AudioChoice, AudioStatus, AudioTuning, SoundCard,
 };
 use atlas_core::platform::Os;
 use atlas_rig::process::{command, tie_to_app};
@@ -23,8 +23,6 @@ use tokio::process::{Child, ChildStderr};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-/// Blocks buffered per listener (1 s at 20 ms per block) before dropping.
-const QUEUE_BLOCKS: usize = 50;
 /// A listener gets nothing for this long: assume the device is stuck and end the stream.
 pub const AUDIO_STALL: Duration = Duration::from_secs(5);
 /// ffmpeg stderr lines kept for the settings page.
@@ -119,9 +117,14 @@ impl AudioHub {
         })
     }
 
-    /// Bytes per block sent to listeners (20 ms).
-    fn chunk(rate: u32) -> usize {
-        rate as usize * 2 / 50
+    /// Bytes per block sent to listeners (`block_ms` of s16le mono).
+    fn chunk(rate: u32, t: &AudioTuning) -> usize {
+        rate as usize * 2 * t.block_ms as usize / 1000
+    }
+
+    /// Blocks buffered per listener (`queue_ms`) before dropping.
+    fn queue_blocks(t: &AudioTuning) -> usize {
+        (t.queue_ms.div_ceil(t.block_ms.max(1)) as usize).max(2)
     }
 
     fn ffmpeg_args(os: Os, choice: &AudioChoice) -> Vec<String> {
@@ -130,8 +133,8 @@ impl AudioHub {
         let tail = ["-ac", "1", "-ar", rate.as_str(), "-f", "s16le", "-flush_packets", "1", "pipe:1"];
         head.iter()
             .map(|s| s.to_string())
-            .chain(capture_input_args(os, &choice.device))
-            .chain(capture_filter_args(os))
+            .chain(capture_input_args(os, &choice.device, &choice.tuning))
+            .chain(capture_filter_args(&choice.tuning))
             .chain(tail.iter().map(|s| s.to_string()))
             .collect()
     }
@@ -162,9 +165,10 @@ impl AudioHub {
             inner.generation += 1;
             inner.spawn_error = None;
             inner.log.clear();
-            inner.pump = Some(tokio::spawn(pump(Arc::downgrade(self), child, inner.generation, inner.choice.rate)));
+            let (rate, chunk) = (inner.choice.rate, Self::chunk(inner.choice.rate, &inner.choice.tuning));
+            inner.pump = Some(tokio::spawn(pump(Arc::downgrade(self), child, inner.generation, rate, chunk)));
         }
-        let (tx, rx) = mpsc::channel(QUEUE_BLOCKS);
+        let (tx, rx) = mpsc::channel(Self::queue_blocks(&inner.choice.tuning));
         let id = inner.next_id;
         inner.next_id += 1;
         inner.subs.push((id, tx));
@@ -279,8 +283,7 @@ async fn read_stderr(hub: Weak<AudioHub>, err: ChildStderr, generation: u64) {
     }
 }
 
-async fn pump(hub: Weak<AudioHub>, mut child: Child, generation: u64, rate: u32) {
-    let chunk = AudioHub::chunk(rate);
+async fn pump(hub: Weak<AudioHub>, mut child: Child, generation: u64, rate: u32, chunk: usize) {
     let mut out = child.stdout.take().expect("piped stdout");
     let stderr = tokio::spawn(read_stderr(hub.clone(), child.stderr.take().expect("piped stderr"), generation));
     let mut buf = BytesMut::with_capacity(chunk * 2);
@@ -364,9 +367,10 @@ pub async fn ffmpeg_version(ffmpeg: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use atlas_core::audio::default_tuning;
 
     fn codec(rate: u32) -> AudioChoice {
-        AudioChoice { enabled: true, device: "plughw:CARD=CODEC,DEV=0".into(), rate }
+        AudioChoice { enabled: true, device: "plughw:CARD=CODEC,DEV=0".into(), rate, tuning: default_tuning(Os::Linux) }
     }
 
     #[test]
@@ -374,14 +378,29 @@ mod tests {
         let a = AudioHub::ffmpeg_args(Os::Linux, &codec(16_000)).join(" ");
         assert!(a.contains("-f alsa -ac 2 -ar 48000 -i plughw:CARD=CODEC,DEV=0"));
         assert!(a.ends_with("-ac 1 -ar 16000 -f s16le -flush_packets 1 pipe:1"));
-        assert_eq!(AudioHub::chunk(16_000), 640);
-        let m = AudioHub::ffmpeg_args(Os::Macos, &AudioChoice { device: "USB AUDIO  CODEC".into(), ..codec(16_000) });
-        let m = m.join(" ");
+        let t = default_tuning(Os::Linux);
+        assert_eq!(AudioHub::chunk(16_000, &t), 640);
+        assert_eq!(AudioHub::queue_blocks(&t), 50);
+        let mac = AudioChoice { device: "USB AUDIO  CODEC".into(), tuning: default_tuning(Os::Macos), ..codec(16_000) };
+        let m = AudioHub::ffmpeg_args(Os::Macos, &mac).join(" ");
         assert!(
             m.contains("-i :USB AUDIO  CODEC -af aresample=async=5000:first_pts=0 -ac 1 -ar 16000 -f s16le"),
             "{m}"
         );
         assert!(!a.contains("-af"));
+    }
+
+    #[test]
+    fn blocks_and_queue_follow_the_tuning() {
+        let t = AudioTuning { block_ms: 40, queue_ms: 500, ..default_tuning(Os::Macos) };
+        assert_eq!(AudioHub::chunk(16_000, &t), 1_280);
+        assert_eq!(AudioHub::queue_blocks(&t), 13); // rounded up
+        assert_eq!(AudioHub::queue_blocks(&AudioTuning { block_ms: 100, queue_ms: 100, ..t }), 2);
+        let m = AudioHub::ffmpeg_args(
+            Os::Macos,
+            &AudioChoice { tuning: AudioTuning { input_queue: 512, ..t }, ..codec(8_000) },
+        );
+        assert!(m.join(" ").contains("-f avfoundation -thread_queue_size 512 -i"));
     }
 
     #[tokio::test]
@@ -424,19 +443,19 @@ mod tests {
             eprintln!("ffmpeg not installed: skipping");
             return;
         }
-        let hub = AudioHub::new("ffmpeg", AudioChoice { enabled: true, device: "null".into(), rate: 8_000 });
+        let hub = AudioHub::new("ffmpeg", AudioChoice { device: "null".into(), ..codec(8_000) });
         let mut a = hub.subscribe().unwrap();
         let mut b = hub.subscribe().unwrap();
         assert_eq!(a.rate, 8_000);
         let block = a.next_block().await.expect("PCM from ffmpeg");
-        assert!(block.len() >= AudioHub::chunk(8_000));
+        assert!(block.len() >= AudioHub::chunk(8_000, &default_tuning(Os::Linux)));
         assert!(b.next_block().await.is_some());
         let st = hub.status();
         assert!(st.running);
         assert_eq!(st.listeners, 2);
 
         // a new choice ends the current streams
-        hub.reconfigure(AudioChoice { enabled: true, device: "null".into(), rate: 16_000 });
+        hub.reconfigure(AudioChoice { device: "null".into(), ..codec(16_000) });
         while a.next_block().await.is_some() {}
         assert_eq!(hub.status().listeners, 0);
         drop((a, b));
@@ -446,7 +465,7 @@ mod tests {
         assert!(!hub.status().running);
 
         // a card that is not there: ffmpeg stops and says why
-        hub.reconfigure(AudioChoice { enabled: true, device: "plughw:CARD=NoSuchCard,DEV=0".into(), rate: 16_000 });
+        hub.reconfigure(AudioChoice { device: "plughw:CARD=NoSuchCard,DEV=0".into(), ..codec(16_000) });
         let mut d = hub.subscribe().unwrap();
         assert!(d.next_block().await.is_none());
         let st = hub.status();

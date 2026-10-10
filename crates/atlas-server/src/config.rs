@@ -4,7 +4,7 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use atlas_core::api::Qth;
-use atlas_core::audio::{default_device, validate_audio, AudioChoice};
+use atlas_core::audio::{default_device, default_tuning, validate_audio, AudioChoice, AudioTuning};
 use atlas_core::platform::Os;
 use atlas_core::setup::RigChoice;
 use atlas_core::update::Channel;
@@ -68,23 +68,72 @@ pub struct AudioConfig {
     pub device: String,
     /// Sample rate sent to listeners (16-bit mono PCM).
     pub rate: u32,
+    /// Buffer sizes and timing (see `AudioTuning`), flat in `[audio]`.
+    pub block_ms: u32,
+    pub queue_ms: u32,
+    pub input_queue: u32,
+    pub drift_correction: u32,
+    pub capture_buffer_ms: u32,
+    pub capture_rate: u32,
+    pub cushion_ms: u32,
+    pub max_ahead_ms: u32,
     /// `ffmpeg` executable. Never settable from the UI (see `AudioChoice`).
     pub ffmpeg: String,
 }
 
 impl Default for AudioConfig {
     fn default() -> Self {
-        Self { enabled: false, device: default_device(Os::CURRENT).into(), rate: 16_000, ffmpeg: "ffmpeg".into() }
+        Self::from_choice(
+            &AudioChoice {
+                enabled: false,
+                device: default_device(Os::CURRENT).into(),
+                rate: 16_000,
+                tuning: default_tuning(Os::CURRENT),
+            },
+            "ffmpeg".into(),
+        )
     }
 }
 
 impl AudioConfig {
     pub fn choice(&self) -> AudioChoice {
-        AudioChoice { enabled: self.enabled, device: self.device.clone(), rate: self.rate }
+        AudioChoice {
+            enabled: self.enabled,
+            device: self.device.clone(),
+            rate: self.rate,
+            tuning: AudioTuning {
+                block_ms: self.block_ms,
+                queue_ms: self.queue_ms,
+                input_queue: self.input_queue,
+                drift_correction: self.drift_correction,
+                capture_buffer_ms: self.capture_buffer_ms,
+                capture_rate: self.capture_rate,
+                cushion_ms: self.cushion_ms,
+                max_ahead_ms: self.max_ahead_ms,
+            },
+        }
     }
 
     pub fn with_choice(&self, c: &AudioChoice) -> Self {
-        Self { enabled: c.enabled, device: c.device.clone(), rate: c.rate, ffmpeg: self.ffmpeg.clone() }
+        Self::from_choice(c, self.ffmpeg.clone())
+    }
+
+    fn from_choice(c: &AudioChoice, ffmpeg: String) -> Self {
+        let t = &c.tuning;
+        Self {
+            enabled: c.enabled,
+            device: c.device.clone(),
+            rate: c.rate,
+            block_ms: t.block_ms,
+            queue_ms: t.queue_ms,
+            input_queue: t.input_queue,
+            drift_correction: t.drift_correction,
+            capture_buffer_ms: t.capture_buffer_ms,
+            capture_rate: t.capture_rate,
+            cushion_ms: t.cushion_ms,
+            max_ahead_ms: t.max_ahead_ms,
+            ffmpeg,
+        }
     }
 }
 
@@ -262,13 +311,23 @@ pub fn save_rig(path: &Path, choice: &RigChoice) -> Result<(), String> {
 
 /// Write `choice` into the `[audio]` table, the same way as `save_rig` (`ffmpeg` is kept).
 pub fn save_audio(path: &Path, choice: &AudioChoice) -> Result<(), String> {
+    let t = &choice.tuning;
+    let n = |v: u32| i64::from(v).into();
     save_table(
         path,
         "audio",
         [
             ("enabled", choice.enabled.into()),
             ("device", choice.device.as_str().into()),
-            ("rate", i64::from(choice.rate).into()),
+            ("rate", n(choice.rate)),
+            ("block_ms", n(t.block_ms)),
+            ("queue_ms", n(t.queue_ms)),
+            ("input_queue", n(t.input_queue)),
+            ("drift_correction", n(t.drift_correction)),
+            ("capture_buffer_ms", n(t.capture_buffer_ms)),
+            ("capture_rate", n(t.capture_rate)),
+            ("cushion_ms", n(t.cushion_ms)),
+            ("max_ahead_ms", n(t.max_ahead_ms)),
         ],
     )
 }
@@ -349,6 +408,7 @@ mod tests {
         .unwrap();
         assert_eq!((c.rig.backend, c.rig.model, c.rig.baud, c.rig.port), (BackendKind::Spawn, 1042, 9600, 4532));
         assert_eq!(c.audio.rate, 16_000);
+        assert_eq!(c.audio.choice().tuning, default_tuning(Os::CURRENT), "an older [audio] gets the defaults");
     }
 
     #[test]
@@ -398,7 +458,8 @@ mod tests {
         let path = tmp("audio");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, include_str!("../../../docs/swatlas.example.toml")).unwrap();
-        let choice = AudioChoice { enabled: true, device: "plughw:CARD=CODEC,DEV=0".into(), rate: 8_000 };
+        let tuning = AudioTuning { cushion_ms: 300, input_queue: 512, ..default_tuning(Os::Macos) };
+        let choice = AudioChoice { enabled: true, device: "plughw:CARD=CODEC,DEV=0".into(), rate: 8_000, tuning };
         save_audio(&path, &choice).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         let rate = text.lines().find(|l| l.starts_with("rate =")).unwrap();
@@ -407,6 +468,7 @@ mod tests {
             "{rate}"
         );
         assert!(text.contains("model = 1042                  # FTDX10 (`rigctl -l`)"));
+        assert!(text.contains("cushion_ms = 300"), "{text}");
         let c: AppConfig = toml::from_str(&text).unwrap();
         assert_eq!(c.audio.choice(), choice);
         assert_eq!((c.rig.model, c.audio.ffmpeg.as_str()), (1042, "ffmpeg"));
@@ -421,6 +483,10 @@ mod tests {
         c.audio.enabled = true;
         assert!(c.validate_server().is_err());
         c.audio.rate = 16_000;
+        c.audio.cushion_ms = 5;
+        assert!(c.validate_server().is_err());
+        c.audio.cushion_ms = 120;
+        c.validate_server().unwrap();
         c.audio.device = "-f lavfi".into();
         assert!(c.validate_server().is_err());
     }

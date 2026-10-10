@@ -33,6 +33,54 @@ pub struct AudioChoice {
     pub device: String,
     /// Sample rate sent to listeners.
     pub rate: u32,
+    /// Buffer sizes and timing, from capture to the listener's speakers.
+    pub tuning: AudioTuning,
+}
+
+/// Buffer sizes and timing of the audio path (Settings → Audio → Advanced). The defaults
+/// come from `default_tuning`; `validate_audio` checks the ranges.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AudioTuning {
+    /// Milliseconds of PCM per block sent to listeners.
+    pub block_ms: u32,
+    /// Milliseconds of blocks queued for a slow listener before the server drops them.
+    pub queue_ms: u32,
+    /// ffmpeg's input packet queue (`-thread_queue_size`); 0 = ffmpeg's default. ffmpeg says
+    /// "Thread message queue blocking" when it is too small.
+    pub input_queue: u32,
+    /// Clock correction: samples per second aresample may stretch or pad to follow the
+    /// capture timestamps (`async`); 0 = off.
+    pub drift_correction: u32,
+    /// Windows: DirectShow capture buffer in milliseconds (`-audio_buffer_size`).
+    pub capture_buffer_ms: u32,
+    /// Linux: the rate asked of the card (plughw converts; the rig codec is 48 kHz).
+    pub capture_rate: u32,
+    /// The listener's cushion in milliseconds, rebuilt after an underrun.
+    pub cushion_ms: u32,
+    /// Most audio, in milliseconds, queued ahead of the listener's playhead; later blocks are
+    /// dropped, so latency cannot grow.
+    pub max_ahead_ms: u32,
+}
+
+/// The audio path's defaults on `os`. AVFoundation can deliver fewer samples than its
+/// declared rate (the stream drains and cuts out about once a second); its timestamps are
+/// real time, so macOS follows them (up to ~10 % at 48 kHz). ALSA and DirectShow keep time.
+pub fn default_tuning(os: Os) -> AudioTuning {
+    AudioTuning {
+        block_ms: 20,
+        queue_ms: 1_000,
+        input_queue: 0,
+        drift_correction: match os {
+            Os::Linux | Os::Windows => 0,
+            Os::Macos => 5_000,
+        },
+        // DirectShow buffers 500 ms by default; 50 ms keeps the latency of the ALSA path
+        capture_buffer_ms: 50,
+        capture_rate: 48_000,
+        cushion_ms: 120,
+        max_ahead_ms: 500,
+    }
 }
 
 /// A capture-capable sound card device.
@@ -46,8 +94,11 @@ pub struct SoundCard {
     /// What to show: the card name and the PCM name.
     pub label: String,
     pub card_id: String,
-    /// The TI/Burr-Brown USB audio codec built into Yaesu, Icom and Kenwood rigs.
+    /// A rig's sound card: the TI/Burr-Brown USB audio codec built into Yaesu, Icom and
+    /// Kenwood rigs, or a USB interface like the SignaLink or Digirig (see `is_rig_codec`).
     pub rig_codec: bool,
+    /// ffmpeg can open it by this name (see `device_name_ok`).
+    pub usable: bool,
 }
 
 /// Capture devices from the text of `/proc/asound/cards` and `/proc/asound/pcm`, rig
@@ -93,6 +144,7 @@ pub fn parse_asound(cards: &str, pcm: &str) -> Vec<SoundCard> {
                 label: if pcm_name.is_empty() { name.clone() } else { format!("{name} · {pcm_name}") },
                 card_id: id.clone(),
                 rig_codec,
+                usable: true, // a plughw name we built
             },
         ));
     }
@@ -100,10 +152,12 @@ pub fn parse_asound(cards: &str, pcm: &str) -> Vec<SoundCard> {
     out.into_iter().map(|(_, _, c)| c).collect()
 }
 
-/// The TI/Burr-Brown codec's names: "USB AUDIO  CODEC", "Microphone (2- USB AUDIO  CODEC)".
+/// A rig's sound card by name: the TI/Burr-Brown codec in rigs and the SignaLink ("USB AUDIO
+/// CODEC", "Microphone (2- USB AUDIO  CODEC)"), or a C-Media interface (Digirig, RigBlaster,
+/// CM108/CM119 adapters: "USB PnP Sound Device", "USB Audio Device").
 fn is_rig_codec(name: &str) -> bool {
     let lower = squash(&name.to_lowercase());
-    lower.contains("usb audio codec") || lower.contains("burr")
+    ["usb audio codec", "burr", "usb pnp sound device", "usb audio device"].iter().any(|n| lower.contains(n))
 }
 
 /// Audio capture devices from `ffmpeg -list_devices true -f dshow -i dummy` (stderr).
@@ -130,7 +184,7 @@ pub fn parse_dshow_devices(stderr: &str) -> Vec<SoundCard> {
             names.push(name.to_string());
         }
     }
-    named_cards(names)
+    named_cards(Os::Windows, names)
 }
 
 /// Audio capture devices from `ffmpeg -f avfoundation -list_devices true -i ""` (stderr):
@@ -152,14 +206,20 @@ pub fn parse_avfoundation_devices(stderr: &str) -> Vec<SoundCard> {
             }
         }
     }
-    named_cards(names)
+    named_cards(Os::Macos, names)
 }
 
-/// Cards known by name (Windows, macOS), rig codecs first.
-fn named_cards(names: Vec<String>) -> Vec<SoundCard> {
+/// Cards known by name on `os` (Windows, macOS), rig codecs first.
+fn named_cards(os: Os, names: Vec<String>) -> Vec<SoundCard> {
     let mut out: Vec<SoundCard> = names
         .into_iter()
-        .map(|n| SoundCard { label: squash(&n), card_id: n.clone(), rig_codec: is_rig_codec(&n), device: n })
+        .map(|n| SoundCard {
+            label: squash(&n),
+            card_id: n.clone(),
+            rig_codec: is_rig_codec(&n),
+            usable: device_name_ok(os, &n),
+            device: n,
+        })
         .collect();
     out.sort_by_key(|c| !c.rig_codec);
     out
@@ -167,26 +227,33 @@ fn named_cards(names: Vec<String>) -> Vec<SoundCard> {
 
 /// ffmpeg's input options for capturing `device` on `os`. The output side (mono,
 /// `rate`, s16le on stdout) is the same everywhere.
-pub fn capture_input_args(os: Os, device: &str) -> Vec<String> {
-    let (fixed, input): (&[&str], String) = match os {
-        // plughw converts, so asking for the codec's native 48 kHz stereo always works
-        Os::Linux => (&["-f", "alsa", "-ac", "2", "-ar", "48000", "-i"], device.to_string()),
-        // DirectShow buffers 500 ms by default; 50 ms keeps the latency of the ALSA path
-        Os::Windows => (&["-f", "dshow", "-audio_buffer_size", "50", "-i"], format!("audio={device}")),
-        Os::Macos => (&["-f", "avfoundation", "-i"], format!(":{device}")),
+pub fn capture_input_args(os: Os, device: &str, t: &AudioTuning) -> Vec<String> {
+    let (format, input) = match os {
+        // plughw converts, so asking for the codec's native rate in stereo always works
+        Os::Linux => (vec!["-f", "alsa", "-ac", "2", "-ar"], device.to_string()),
+        Os::Windows => (vec!["-f", "dshow", "-audio_buffer_size"], format!("audio={device}")),
+        Os::Macos => (vec!["-f", "avfoundation"], format!(":{device}")),
     };
-    fixed.iter().map(|s| s.to_string()).chain([input]).collect()
+    let mut args: Vec<String> = format.into_iter().map(String::from).collect();
+    match os {
+        Os::Linux => args.push(t.capture_rate.to_string()),
+        Os::Windows => args.push(t.capture_buffer_ms.to_string()),
+        Os::Macos => {}
+    }
+    if t.input_queue > 0 {
+        args.extend(["-thread_queue_size".into(), t.input_queue.to_string()]);
+    }
+    args.extend(["-i".into(), input]);
+    args
 }
 
-/// ffmpeg's filter options for capturing on `os`, between the input and the output side.
-/// AVFoundation can deliver fewer samples than its declared rate (the stream drains and
-/// cuts out about once a second); its timestamps are real time, so aresample stretches or
-/// pads to them (up to ~10 %; `first_pts=0` ignores the host-clock start). ALSA and
-/// DirectShow keep time.
-pub fn capture_filter_args(os: Os) -> Vec<String> {
-    match os {
-        Os::Linux | Os::Windows => vec![],
-        Os::Macos => vec!["-af".into(), "aresample=async=5000:first_pts=0".into()],
+/// ffmpeg's filter options, between the input and the output side: with clock correction
+/// on, aresample stretches or pads to the capture timestamps (`first_pts=0` ignores the
+/// host-clock start).
+pub fn capture_filter_args(t: &AudioTuning) -> Vec<String> {
+    match t.drift_correction {
+        0 => vec![],
+        n => vec!["-af".into(), format!("aresample=async={n}:first_pts=0")],
     }
 }
 
@@ -208,9 +275,18 @@ fn squash(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Check a choice before it reaches ffmpeg. The device goes to ffmpeg as one argument
-/// after `-i`. On Linux it is limited to ALSA name characters. Elsewhere it is a device
-/// name: no `:` or `"`, which DirectShow / AVFoundation would read as a second device.
+/// A device name ffmpeg can take as one argument after `-i`. On Linux it is limited to ALSA
+/// name characters. Elsewhere it is a device name: no `:` or `"`, which DirectShow /
+/// AVFoundation would read as a second device.
+pub fn device_name_ok(os: Os, d: &str) -> bool {
+    let chars_ok = match os {
+        Os::Linux => d.chars().all(|ch| ch.is_ascii_alphanumeric() || "_:=,.-".contains(ch)),
+        Os::Windows | Os::Macos => d.chars().all(|ch| !ch.is_control() && ch != ':' && ch != '"'),
+    };
+    !d.is_empty() && d.len() <= 128 && !d.starts_with('-') && d.trim() == d && chars_ok
+}
+
+/// Check a choice before it reaches ffmpeg.
 pub fn validate_audio(os: Os, c: &AudioChoice) -> Result<(), String> {
     if !(8_000..=48_000).contains(&c.rate) {
         return Err("The audio rate must be between 8000 and 48000 Hz".into());
@@ -219,17 +295,32 @@ pub fn validate_audio(os: Os, c: &AudioChoice) -> Result<(), String> {
     if d.is_empty() {
         return Err("Choose a sound card".into());
     }
-    let chars_ok = match os {
-        Os::Linux => d.chars().all(|ch| ch.is_ascii_alphanumeric() || "_:=,.-".contains(ch)),
-        Os::Windows | Os::Macos => d.chars().all(|ch| !ch.is_control() && ch != ':' && ch != '"'),
-    };
-    if d.len() > 128 || d.starts_with('-') || d.trim() != d || !chars_ok {
+    if !device_name_ok(os, d) {
         return Err(match os {
             Os::Linux => format!("Not an ALSA device name: {d:?}"),
             _ => format!("Not a sound device name: {d:?}"),
         });
     }
-    Ok(())
+    validate_tuning(&c.tuning)
+}
+
+fn validate_tuning(t: &AudioTuning) -> Result<(), String> {
+    let range = |what: &str, v: u32, lo: u32, hi: u32, unit: &str| {
+        if (lo..=hi).contains(&v) {
+            Ok(())
+        } else {
+            Err(format!("{what} must be between {lo} and {hi}{unit}"))
+        }
+    };
+    range("The block size", t.block_ms, 10, 100, " ms")?;
+    range("The server queue", t.queue_ms, 2 * t.block_ms, 5_000, " ms")?;
+    range("The input queue", t.input_queue, 0, 4_096, " packets")?;
+    range("The clock correction", t.drift_correction, 0, 20_000, " samples/s")?;
+    range("The capture buffer", t.capture_buffer_ms, 10, 1_000, " ms")?;
+    range("The capture rate", t.capture_rate, 8_000, 192_000, " Hz")?;
+    range("The listener cushion", t.cushion_ms, 20, 2_000, " ms")?;
+    // above the cushion plus a block, or every block after an underrun would be dropped
+    range("The listener maximum", t.max_ahead_ms, t.cushion_ms + t.block_ms + 1, 5_000, " ms")
 }
 
 /// State of the audio capture (ffmpeg).
@@ -367,9 +458,13 @@ mod tests {
         assert!(parse_asound(CARDS, "garbage : here").is_empty());
     }
 
+    fn choice(os: Os, device: &str) -> AudioChoice {
+        AudioChoice { enabled: true, device: device.into(), rate: 16_000, tuning: default_tuning(os) }
+    }
+
     #[test]
     fn validation() {
-        let ok = AudioChoice { enabled: true, device: "plughw:CARD=CODEC,DEV=0".into(), rate: 16_000 };
+        let ok = choice(Os::Linux, "plughw:CARD=CODEC,DEV=0");
         assert!(validate_audio(Os::Linux, &ok).is_ok());
         for d in ["default", "pipewire", "hw:1,0", "dsnoop:CARD=CODEC"] {
             assert!(validate_audio(Os::Linux, &AudioChoice { device: d.into(), ..ok.clone() }).is_ok(), "{d}");
@@ -380,6 +475,41 @@ mod tests {
         for r in [0, 7_999, 48_001] {
             assert!(validate_audio(Os::Linux, &AudioChoice { rate: r, ..ok.clone() }).is_err(), "{r}");
         }
+    }
+
+    #[test]
+    fn tuning_defaults_and_ranges() {
+        for os in [Os::Linux, Os::Windows, Os::Macos] {
+            assert!(validate_tuning(&default_tuning(os)).is_ok(), "{os:?}");
+        }
+        assert_eq!(default_tuning(Os::Macos).drift_correction, 5_000);
+        assert_eq!(default_tuning(Os::Linux).drift_correction, 0);
+        let d = default_tuning(Os::Linux);
+        let bad = |t: AudioTuning| validate_tuning(&t).is_err();
+        assert!(bad(AudioTuning { block_ms: 5, ..d }));
+        assert!(bad(AudioTuning { block_ms: 101, ..d }));
+        assert!(bad(AudioTuning { queue_ms: 30, ..d }), "less than two blocks");
+        assert!(bad(AudioTuning { input_queue: 5_000, ..d }));
+        assert!(bad(AudioTuning { drift_correction: 20_001, ..d }));
+        assert!(bad(AudioTuning { capture_buffer_ms: 5, ..d }));
+        assert!(bad(AudioTuning { capture_rate: 4_000, ..d }));
+        assert!(bad(AudioTuning { cushion_ms: 10, ..d }));
+        assert!(bad(AudioTuning { cushion_ms: 490, ..d }), "no room above the cushion");
+        assert!(bad(AudioTuning { max_ahead_ms: 6_000, ..d }));
+        let wide = AudioTuning {
+            block_ms: 100,
+            queue_ms: 5_000,
+            input_queue: 4_096,
+            cushion_ms: 400,
+            max_ahead_ms: 1_000,
+            ..d
+        };
+        assert!(validate_tuning(&wide).is_ok());
+        let e = validate_audio(
+            Os::Linux,
+            &AudioChoice { tuning: AudioTuning { cushion_ms: 10, ..d }, ..choice(Os::Linux, "default") },
+        );
+        assert_eq!(e.unwrap_err(), "The listener cushion must be between 20 and 2000 ms");
     }
 
     // ffmpeg 6/7 on Windows (one camera, the onboard mic, an FTDX10)
@@ -424,18 +554,59 @@ dummy: Immediate exit requested
 
     #[test]
     fn capture_args_per_os() {
+        let t = default_tuning;
         assert_eq!(
-            capture_input_args(Os::Linux, "plughw:CARD=CODEC,DEV=0").join(" "),
+            capture_input_args(Os::Linux, "plughw:CARD=CODEC,DEV=0", &t(Os::Linux)).join(" "),
             "-f alsa -ac 2 -ar 48000 -i plughw:CARD=CODEC,DEV=0"
         );
-        let w = capture_input_args(Os::Windows, "Microphone (USB AUDIO  CODEC)");
+        let w = capture_input_args(Os::Windows, "Microphone (USB AUDIO  CODEC)", &t(Os::Windows));
         assert_eq!(w, ["-f", "dshow", "-audio_buffer_size", "50", "-i", "audio=Microphone (USB AUDIO  CODEC)"]);
         assert_eq!(
-            capture_input_args(Os::Macos, "USB AUDIO  CODEC"),
+            capture_input_args(Os::Macos, "USB AUDIO  CODEC", &t(Os::Macos)),
             ["-f", "avfoundation", "-i", ":USB AUDIO  CODEC"]
         );
-        assert!(capture_filter_args(Os::Linux).is_empty() && capture_filter_args(Os::Windows).is_empty());
-        assert_eq!(capture_filter_args(Os::Macos), ["-af", "aresample=async=5000:first_pts=0"]);
+        assert!(capture_filter_args(&t(Os::Linux)).is_empty() && capture_filter_args(&t(Os::Windows)).is_empty());
+        assert_eq!(capture_filter_args(&t(Os::Macos)), ["-af", "aresample=async=5000:first_pts=0"]);
+    }
+
+    #[test]
+    fn capture_args_follow_the_tuning() {
+        let mac = AudioTuning { input_queue: 512, drift_correction: 0, ..default_tuning(Os::Macos) };
+        assert_eq!(
+            capture_input_args(Os::Macos, "USB AUDIO  CODEC", &mac),
+            ["-f", "avfoundation", "-thread_queue_size", "512", "-i", ":USB AUDIO  CODEC"]
+        );
+        assert!(capture_filter_args(&mac).is_empty());
+        let lin = AudioTuning { capture_rate: 44_100, drift_correction: 2_000, ..default_tuning(Os::Linux) };
+        assert_eq!(capture_input_args(Os::Linux, "hw:1", &lin).join(" "), "-f alsa -ac 2 -ar 44100 -i hw:1");
+        assert_eq!(capture_filter_args(&lin), ["-af", "aresample=async=2000:first_pts=0"]);
+        let win = AudioTuning { capture_buffer_ms: 200, input_queue: 64, ..default_tuning(Os::Windows) };
+        assert_eq!(
+            capture_input_args(Os::Windows, "Line", &win).join(" "),
+            "-f dshow -audio_buffer_size 200 -thread_queue_size 64 -i audio=Line"
+        );
+    }
+
+    #[test]
+    fn interfaces_marked_and_odd_names_flagged() {
+        // a Digirig (C-Media CM108) and a name with a colon ffmpeg cannot be given
+        let dshow = r#"[dshow @ 01] "Microphone (Realtek(R) Audio)" (audio)
+[dshow @ 01] "Microphone (USB PnP Sound Device)" (audio)
+[dshow @ 01] "Line 1: Virtual Cable" (audio)
+"#;
+        let w = parse_dshow_devices(dshow);
+        assert_eq!(w[0].device, "Microphone (USB PnP Sound Device)");
+        assert!(w[0].rig_codec && w[0].usable);
+        let odd = w.iter().find(|c| c.device.starts_with("Line 1")).unwrap();
+        assert!(!odd.rig_codec && !odd.usable);
+        let avf = "[AVFoundation indev @ 0x1] AVFoundation audio devices:
+[AVFoundation indev @ 0x1] [0] MacBook Pro Microphone
+[AVFoundation indev @ 0x1] [1] USB Audio Device
+";
+        let m = parse_avfoundation_devices(avf);
+        assert_eq!(m[0].device, "USB Audio Device");
+        assert!(m[0].rig_codec && m.iter().all(|c| c.usable));
+        assert!(parse_asound(CARDS, PCM).iter().all(|c| c.usable));
     }
 
     #[test]
@@ -452,8 +623,7 @@ dummy: Immediate exit requested
     #[test]
     fn default_devices_are_valid_on_their_os() {
         for os in [Os::Linux, Os::Windows, Os::Macos] {
-            let c = AudioChoice { enabled: true, device: default_device(os).into(), rate: 16_000 };
-            assert!(validate_audio(os, &c).is_ok(), "{os:?}");
+            assert!(validate_audio(os, &choice(os, default_device(os))).is_ok(), "{os:?}");
         }
         // and they are the names the device lists report for the codec
         assert_eq!(parse_dshow_devices(DSHOW)[0].device, default_device(Os::Windows));
@@ -462,7 +632,7 @@ dummy: Immediate exit requested
 
     #[test]
     fn device_names_per_os() {
-        let c = |d: &str| AudioChoice { enabled: true, device: d.into(), rate: 16_000 };
+        let c = |d: &str| choice(Os::Linux, d);
         for os in [Os::Windows, Os::Macos] {
             assert!(validate_audio(os, &c("Microphone (USB AUDIO  CODEC)")).is_ok());
             assert!(validate_audio(os, &c("Micrófono (2- USB AUDIO  CODEC)")).is_ok());

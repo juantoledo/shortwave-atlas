@@ -1,6 +1,7 @@
 // English (default). Every other catalog must have exactly these keys (see `Messages`).
 
 import type { AudioHint } from '../types/generated/AudioHint';
+import type { AudioTuning } from '../types/generated/AudioTuning';
 import type { Hint } from '../types/generated/Hint';
 import type { ManualReason } from '../types/generated/ManualReason';
 import type { Os } from '../types/generated/Os';
@@ -285,6 +286,20 @@ export const en = {
   rigCodec: 'rig codec',
   audioRate: 'Sample rate',
   audioRateHelp: (khz: number, kbps: number) => `Audio up to ${khz} kHz · ${kbps} kbit/s per listener.`,
+  cardBadName: 'name ffmpeg cannot open',
+  audioAdvanced: 'Advanced: buffers and timing',
+  audioAdvancedHelp: 'If Listen cuts out, raise the listener cushion first. Changes apply to every listener.',
+  audioDefaults: 'Reset to defaults',
+  audioTuning: {
+    cushion_ms: ['Listener cushion (ms)', 'Audio queued before playing, rebuilt after a gap. More = fewer cutouts, more delay.'],
+    max_ahead_ms: ['Listener maximum (ms)', 'Most audio queued ahead; later blocks are dropped so the delay cannot grow.'],
+    block_ms: ['Block size (ms)', 'Audio per block sent to listeners.'],
+    queue_ms: ['Server queue (ms)', 'Audio kept for a slow listener before the server drops blocks.'],
+    input_queue: ['ffmpeg input queue (packets)', '0 = ffmpeg default. Raise it if the log says "Thread message queue blocking".'],
+    drift_correction: ['Clock correction (samples/s)', 'Follows the sound card clock when it runs slow or fast. 0 = off.'],
+    capture_buffer_ms: ['Capture buffer (ms)', 'DirectShow buffer. More = steadier, more delay.'],
+    capture_rate: ['Card rate (Hz)', 'Rate asked of the sound card before conversion (the rig codec is 48000).'],
+  } as Record<keyof AudioTuning, [string, string]>,
   apply: 'Apply',
   audioOff: 'Audio is off',
   audioIdle: 'Ready · nobody is listening',

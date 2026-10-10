@@ -261,7 +261,7 @@ export function App() {
           />
           {/* always mounted, so audio keeps playing whatever else opens */}
           {info?.audio && api ? (
-            <AudioPanel openAudio={api.transport.openAudio.bind(api.transport)} rate={info.audio_rate} mode={rig.mode} cwPitch={rig.cw_pitch_hz} freqHz={freqHz} onTune={tune} keys={audioKeys} />
+            <AudioPanel openAudio={api.transport.openAudio.bind(api.transport)} rate={info.audio_rate} buffer={{ cushionMs: info.audio_cushion_ms, maxAheadMs: info.audio_max_ahead_ms }} mode={rig.mode} cwPitch={rig.cw_pitch_hz} freqHz={freqHz} onTune={tune} keys={audioKeys} />
           ) : (
             info && <AudioOff onSetUp={() => openSettings('audio')} />
           )}

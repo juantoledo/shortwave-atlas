@@ -126,10 +126,12 @@ can only be set in the file, never from the page.
 
 The **Audio** section on the same page turns on **Listen**. It captures the rig's audio from a
 sound card with `ffmpeg` (`sudo apt install ffmpeg`), for the desktop app and remote browsers alike.
-It lists the sound cards that can capture, with the rig's USB codec first (the Burr-Brown
-"USB AUDIO CODEC" inside Yaesu, Icom and Kenwood rigs). It also lets you choose the sample rate:
-16 kHz carries audio up to 8 kHz and costs 256 kbit/s per listener. **Apply** switches over live and
-saves the choice. The page shows whether ffmpeg is capturing, and explains a busy or missing card or
+It lists the sound cards that can capture, with the rig's sound card first (the Burr-Brown
+"USB AUDIO CODEC" inside Yaesu, Icom and Kenwood rigs and the SignaLink, or a C-Media interface like
+the Digirig). It also lets you choose the sample rate: 16 kHz carries audio up to 8 kHz and costs
+256 kbit/s per listener. **Advanced** sets the buffers and timing, from ffmpeg's input queue and
+clock correction to the listener's cushion; if Listen cuts out, raise the cushion first. **Apply**
+switches over live and saves the choice. The page shows whether ffmpeg is capturing, and explains a busy or missing card or
 a missing `audio` group. The ffmpeg executable path can only be set in the file.
 
 To configure by hand, copy `docs/swatlas.example.toml` to `~/.config/swatlas/swatlas.toml`. The
