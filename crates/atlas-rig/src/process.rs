@@ -36,7 +36,7 @@ pub fn command(name: &str) -> Command {
     cmd
 }
 
-/// Tie a started helper to this process, so it cannot outlive SW Atlas. A clean exit stops
+/// Tie a started helper to this process, so it cannot outlive Shortwave Atlas. A clean exit stops
 /// the helpers itself (`Atlas::shutdown`); this covers a crash or Task Manager on Windows,
 /// where the helper joins a job that the OS kills when our last handle to it closes.
 /// Elsewhere it does nothing.

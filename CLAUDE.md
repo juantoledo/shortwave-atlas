@@ -1,4 +1,4 @@
-# SW Atlas
+# Shortwave Atlas
 
 Rig (Hamlib `rigctld`) → Rust core → React UI (Tauri desktop, or browser via `swatlas-server`).
 See README.md for layout and commands.

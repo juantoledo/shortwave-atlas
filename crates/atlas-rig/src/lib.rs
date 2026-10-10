@@ -1,4 +1,4 @@
-//! Rig access for SW Atlas: backends (Hamlib `rigctld`, simulator), the poller that
+//! Rig access for Shortwave Atlas: backends (Hamlib `rigctld`, simulator), the poller that
 //! publishes `RigState` changes, and the `rigctld` supervisor.
 
 use std::sync::{Arc, Mutex, RwLock};

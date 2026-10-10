@@ -1,4 +1,4 @@
-"""Build SW Atlas globe rasters (4096x2048 grayscale JPEG, equirectangular).
+"""Build Shortwave Atlas globe rasters (4096x2048 grayscale JPEG, equirectangular).
 
 usage (needs numpy + pillow), from a folder holding the two sources:
   curl -O https://naciscdn.org/naturalearth/50m/raster/SR_50M.zip && unzip SR_50M.zip

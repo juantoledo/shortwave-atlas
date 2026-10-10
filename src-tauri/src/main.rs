@@ -1,4 +1,4 @@
-//! SW Atlas desktop shell (Tauri v2).
+//! Shortwave Atlas desktop shell (Tauri v2).
 //!
 //! The UI calls the core through one command, `call`, carrying the same `Call`s the
 //! remote browser sends over the WebSocket; rig state changes arrive as `rig://state`.
@@ -186,7 +186,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![call, audio_open, audio_close])
         .build(tauri::generate_context!())
-        .expect("error while running SW Atlas")
+        .expect("error while running Shortwave Atlas")
         .run(|app, event| {
             // Tauri exits the process without dropping state, so stop rigctld and the audio capture here
             if let RunEvent::Exit = event {

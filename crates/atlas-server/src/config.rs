@@ -527,7 +527,7 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("model = 1040                  # FTDX10 (`rigctl -l`)"), "{text}");
         assert!(text.contains("baud = 38400"));
-        assert!(text.contains("# SW Atlas config:"));
+        assert!(text.contains("# Shortwave Atlas config:"));
         assert!(text.contains("# rigctld = \"rigctld\""));
         let c: AppConfig = toml::from_str(&text).unwrap();
         assert_eq!(c.rig.choice(), choice);

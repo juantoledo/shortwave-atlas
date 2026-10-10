@@ -1,4 +1,4 @@
-//! Headless SW Atlas: rig + remote browser UI, no desktop window.
+//! Headless Shortwave Atlas: rig + remote browser UI, no desktop window.
 //! The systemd-friendly successor of the original Python prototype.
 //!
 //! Config: `$SWATLAS_CONFIG`, else `~/.config/swatlas/swatlas.toml`, plus env overrides

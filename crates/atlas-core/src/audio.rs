@@ -442,7 +442,7 @@ pub enum AudioHint {
     DeviceMissing,
     /// This user may not open the sound card (Linux `audio` group, Windows microphone privacy).
     PermissionDenied,
-    /// macOS: SW Atlas is not allowed to use the microphone (Privacy & Security).
+    /// macOS: Shortwave Atlas is not allowed to use the microphone (Privacy & Security).
     MicrophoneDenied,
 }
 

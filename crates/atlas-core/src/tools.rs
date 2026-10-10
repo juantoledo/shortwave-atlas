@@ -1,4 +1,4 @@
-//! Where to look for the helper program SW Atlas runs (`rigctld`).
+//! Where to look for the helper program Shortwave Atlas runs (`rigctld`).
 //!
 //! Desktop installers ship it as a sidecar next to the app's executable. Otherwise it
 //! comes from PATH, or from the usual install directories, which matters on macOS: an app
@@ -85,11 +85,11 @@ mod tests {
         let c = tool_candidates(
             Os::Macos,
             "rigctld",
-            Some("/Applications/SW Atlas.app/Contents/MacOS"),
+            Some("/Applications/Shortwave Atlas.app/Contents/MacOS"),
             env(&[("PATH", "/usr/bin:/bin")]),
             |_| vec![],
         );
-        assert_eq!(c[0], "/Applications/SW Atlas.app/Contents/MacOS/rigctld");
+        assert_eq!(c[0], "/Applications/Shortwave Atlas.app/Contents/MacOS/rigctld");
         assert!(c.contains(&"/opt/homebrew/bin/rigctld".to_string()));
         assert!(c.contains(&"/usr/local/bin/rigctld".to_string()));
     }
@@ -105,11 +105,11 @@ mod tests {
             assert_eq!(d, r"C:\Program Files");
             vec!["hamlib-w64-4.5.5".into(), "hamlib-w64-4.6".into(), "Git".into()]
         };
-        let c = tool_candidates(Os::Windows, "rigctld", Some(r"C:\Program Files\SW Atlas"), e, list);
+        let c = tool_candidates(Os::Windows, "rigctld", Some(r"C:\Program Files\Shortwave Atlas"), e, list);
         assert_eq!(
             c,
             [
-                r"C:\Program Files\SW Atlas\rigctld.exe",
+                r"C:\Program Files\Shortwave Atlas\rigctld.exe",
                 r"C:\Windows\system32\rigctld.exe",
                 r"C:\Windows\rigctld.exe",
                 r"C:\Program Files\hamlib-w64-4.6\bin\rigctld.exe",

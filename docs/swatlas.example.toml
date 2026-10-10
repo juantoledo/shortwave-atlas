@@ -1,4 +1,4 @@
-# SW Atlas config: ~/.config/swatlas/swatlas.toml (or $SWATLAS_CONFIG).
+# Shortwave Atlas config: ~/.config/swatlas/swatlas.toml (or $SWATLAS_CONFIG).
 # Shared by the desktop app and swatlas-server. Every key is optional.
 # Environment overrides: SWATLAS_RIG, RIGCTLD_HOST, RIGCTLD_PORT, SWATLAS_RIG_MODEL,
 # SWATLAS_RIG_DEVICE, SWATLAS_RIG_BAUD, WEB_BIND, WEB_PORT, WEB_AUTH, AUDIO_DEVICE,

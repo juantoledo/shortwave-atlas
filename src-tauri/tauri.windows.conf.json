@@ -16,6 +16,9 @@
       "binaries/licenses/**/*": "licenses/",
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
     },
-    "windows": { "webviewInstallMode": { "type": "downloadBootstrapper" } }
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": { "installerHooks": "windows/hooks.nsh" }
+    }
   }
 }
