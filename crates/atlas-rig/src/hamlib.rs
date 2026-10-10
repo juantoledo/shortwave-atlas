@@ -7,7 +7,7 @@ use std::io;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use atlas_core::rig::{CommandError, Link, Mode, Power, RigState};
+use atlas_core::rig::{parse_dump_state, CommandError, Link, Mode, Power, RigState, RxRange};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
@@ -33,6 +33,8 @@ pub enum Cmd {
     GetCwPitch,
     GetPowerstat,
     SetPowerstat(bool),
+    /// The rig's capabilities, read for its receive ranges (extended answer, ends in `RPRT`).
+    DumpState,
 }
 
 impl Cmd {
@@ -47,15 +49,17 @@ impl Cmd {
             Self::GetCwPitch => "l CWPITCH".into(),
             Self::GetPowerstat => "\\get_powerstat".into(),
             Self::SetPowerstat(on) => format!("\\set_powerstat {}", u8::from(on)),
+            Self::DumpState => "+\\dump_state".into(),
         }
     }
 
-    /// Lines in a successful answer (an error is always a single `RPRT -n` line).
-    fn reply_lines(self) -> usize {
-        if self == Self::GetMode {
-            2
-        } else {
-            1
+    /// Lines in a successful answer (an error is always a single `RPRT -n` line); `None` reads
+    /// up to the closing `RPRT` line of an extended (`+`) answer.
+    fn reply_lines(self) -> Option<usize> {
+        match self {
+            Self::GetMode => Some(2),
+            Self::DumpState => None,
+            _ => Some(1),
         }
     }
 
@@ -118,7 +122,7 @@ impl Hamlib {
         let res = timeout(cmd.timeout(), Self::exchange(&self.addr, &mut guard, cmd)).await;
         let res = res.unwrap_or_else(|_| Err(io::Error::new(io::ErrorKind::TimedOut, "timed out")));
         let res = match res {
-            Ok(lines) => match lines.first() {
+            Ok(lines) => match lines.last() {
                 Some(l) if l.starts_with("RPRT") && l != "RPRT 0" => Err(CmdError::Rig(l.clone())),
                 _ => Ok(lines),
             },
@@ -141,7 +145,7 @@ impl Hamlib {
         let conn = slot.as_mut().expect("connected above");
         conn.writer.write_all(format!("{}\n", cmd.line()).as_bytes()).await?;
         let mut lines = Vec::with_capacity(2);
-        while lines.len() < cmd.reply_lines() {
+        while cmd.reply_lines().is_none_or(|n| lines.len() < n) {
             let mut buf = String::new();
             if conn.reader.read_line(&mut buf).await? == 0 {
                 return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "rigctld closed the connection"));
@@ -242,6 +246,11 @@ impl RigBackend for Hamlib {
     async fn set_power(&self, on: bool) -> Result<(), CommandError> {
         Ok(self.write(Cmd::SetPowerstat(on)).await?)
     }
+
+    async fn coverage(&self) -> Option<Vec<RxRange>> {
+        let ranges = parse_dump_state(&self.send(Cmd::DumpState).await.ok()?);
+        (!ranges.is_empty()).then_some(ranges)
+    }
 }
 
 #[cfg(test)]
@@ -253,8 +262,21 @@ mod tests {
     fn command_lines() {
         assert_eq!(Cmd::SetFreq(13_570_000).line(), "F 13570000");
         assert_eq!(Cmd::SetMode(Mode::AM).line(), "M AM 0");
+        assert_eq!(Cmd::SetMode(Mode::AMN).line(), "M AMN 0");
         assert_eq!(Cmd::SetPowerstat(true).line(), "\\set_powerstat 1");
         assert_eq!(Cmd::GetStrength.line(), "l STRENGTH");
+        assert_eq!(Cmd::DumpState.line(), "+\\dump_state");
+    }
+
+    #[tokio::test]
+    async fn reads_coverage() {
+        let fake = FakeRigctld::start().await;
+        let h = Hamlib::new("127.0.0.1", fake.port);
+        assert_eq!(h.coverage().await, Some(vec![RxRange { lo_khz: 30, hi_khz: 470_000 }]));
+        // the multi-line answer leaves the connection in step
+        assert_eq!(h.send(Cmd::GetMode).await.unwrap(), ["USB", "3000"]);
+        fake.fail_next("RPRT -11").await;
+        assert_eq!(h.coverage().await, None);
     }
 
     #[test]

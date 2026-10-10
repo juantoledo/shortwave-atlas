@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use atlas_core::api::Qth;
-use atlas_core::rig::{CommandError, Link, Mode, Power, RigState};
+use atlas_core::rig::{default_coverage, CommandError, Link, Mode, Power, RigState, RxRange};
 use atlas_core::stations::{Catalog, LOOKUP_TOLERANCE_HZ};
 
 use crate::RigBackend;
@@ -57,6 +57,7 @@ pub fn s_units_to_db(s: f64) -> i32 {
 fn passband(mode: Mode) -> u32 {
     match mode {
         Mode::AM => 6000,
+        Mode::AMN => 3000,
         Mode::FM => 12000,
         Mode::USB | Mode::LSB => 2400,
         Mode::CW | Mode::CWR => 500,
@@ -102,6 +103,11 @@ impl RigBackend for Sim {
     async fn set_power(&self, on: bool) -> Result<(), CommandError> {
         self.rig.lock().expect("sim lock").power = on;
         Ok(())
+    }
+
+    /// The FTDX10's general coverage.
+    async fn coverage(&self) -> Option<Vec<RxRange>> {
+        Some(default_coverage())
     }
 }
 

@@ -3,4 +3,4 @@
 /**
  * Modes the UI may set. The rig may report others (e.g. PKTUSB); those come back as strings.
  */
-export type Mode = "USB" | "LSB" | "CW" | "CWR" | "AM" | "FM";
+export type Mode = "USB" | "LSB" | "CW" | "CWR" | "AM" | "AMN" | "FM";

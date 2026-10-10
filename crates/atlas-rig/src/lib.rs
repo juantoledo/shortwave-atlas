@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use atlas_core::api::{Qth, RigDiagnostics};
-use atlas_core::rig::{CommandError, Link, Mode, Power, RigCommand, RigState};
+use atlas_core::rig::{default_coverage, CommandError, Link, Mode, Power, RigCommand, RigState, RxRange};
 use atlas_core::setup::diagnose;
 pub use atlas_core::setup::{BackendKind, RigConfig};
 use atlas_core::stations::Catalog;
@@ -34,6 +34,10 @@ pub trait RigBackend: Send + Sync {
     async fn set_freq(&self, hz: u32) -> Result<(), CommandError>;
     async fn set_mode(&self, mode: Mode) -> Result<(), CommandError>;
     async fn set_power(&self, on: bool) -> Result<(), CommandError>;
+    /// What the rig receives, if it can say.
+    async fn coverage(&self) -> Option<Vec<RxRange>> {
+        None
+    }
     /// Last error talking to the rig, for diagnostics.
     fn last_error(&self) -> Option<String> {
         None
@@ -48,6 +52,8 @@ struct Running {
     wake: Arc<Notify>,
     tasks: Vec<JoinHandle<()>>,
     supervisor: Option<rigctld::Supervisor>,
+    /// The backend's coverage, once it has answered.
+    coverage: Arc<Mutex<Option<Vec<RxRange>>>>,
 }
 
 impl Running {
@@ -127,7 +133,7 @@ impl Rig {
             tokio::spawn(poll(backend.clone(), self.state.clone(), wake.clone())),
             tokio::spawn(tune(backend.clone(), freq_rx, wake.clone())),
         ];
-        Running { kind, backend, freq, wake, tasks, supervisor }
+        Running { kind, backend, freq, wake, tasks, supervisor, coverage: Default::default() }
     }
 
     /// Stop the current backend (waiting for it), then start the one in `cfg`.
@@ -177,8 +183,28 @@ impl Rig {
         }
     }
 
+    /// What the rig receives: asked once per backend (until it answers), else the default.
+    pub async fn coverage(&self) -> Vec<RxRange> {
+        let (backend, cache) = {
+            let guard = self.running.lock().expect("rig lock");
+            let Some(r) = guard.as_ref() else { return default_coverage() };
+            (r.backend.clone(), r.coverage.clone())
+        };
+        if let Some(c) = cache.lock().expect("coverage lock").clone() {
+            return c;
+        }
+        let answer = backend.coverage().await;
+        // a reachable rigctld that cannot say keeps the fallback, rather than being asked on every tune
+        if answer.is_some() || self.state.borrow().link != Link::Down {
+            *cache.lock().expect("coverage lock") = Some(answer.clone().unwrap_or_else(default_coverage));
+        }
+        answer.unwrap_or_else(default_coverage)
+    }
+
     pub async fn execute(&self, cmd: RigCommand) -> Result<(), CommandError> {
-        cmd.validate()?;
+        if let RigCommand::SetFreq { .. } = cmd {
+            cmd.validate(&self.coverage().await)?;
+        }
         let (backend, wake) = {
             let guard = self.running.lock().expect("rig lock");
             let Some(r) = guard.as_ref() else {
@@ -303,6 +329,19 @@ mod tests {
         let e = rig.execute(RigCommand::SetMode { mode: Mode::AM }).await.unwrap_err();
         assert!(matches!(e, CommandError::Conflict(_)));
         let e = rig.execute(RigCommand::SetFreq { hz: 1 }).await.unwrap_err();
+        assert!(matches!(e, CommandError::Invalid(_)));
+    }
+
+    #[tokio::test]
+    async fn tuning_follows_the_rig_coverage() {
+        let fake = FakeRigctld::start().await;
+        let rig = Rig::start(Arc::new(hamlib::Hamlib::new("127.0.0.1", fake.port)));
+        let mut rx = rig.subscribe();
+        changed(&mut rx).await;
+        // the fake receives up to 470 MHz, past the 56 MHz fallback
+        rig.execute(RigCommand::SetFreq { hz: 145_500_000 }).await.unwrap();
+        until(&mut rx, |s| s.freq_hz == Some(145_500_000)).await;
+        let e = rig.execute(RigCommand::SetFreq { hz: 500_000_000 }).await.unwrap_err();
         assert!(matches!(e, CommandError::Invalid(_)));
     }
 

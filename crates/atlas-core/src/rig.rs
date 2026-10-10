@@ -5,9 +5,57 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// Tuning limits (FTDX10 general coverage receive range).
+/// Tuning limits when the rig cannot say what it receives (FTDX10 general coverage).
 pub const FREQ_MIN_HZ: u32 = 30_000;
 pub const FREQ_MAX_HZ: u32 = 56_000_000;
+
+/// A stretch the rig receives, in kHz (u32 Hz would stop at 4.29 GHz).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RxRange {
+    pub lo_khz: u32,
+    pub hi_khz: u32,
+}
+
+impl RxRange {
+    pub fn contains_hz(&self, hz: u32) -> bool {
+        (u64::from(self.lo_khz) * 1000..=u64::from(self.hi_khz) * 1000).contains(&u64::from(hz))
+    }
+}
+
+/// The coverage assumed when the rig cannot report its own.
+pub fn default_coverage() -> Vec<RxRange> {
+    vec![RxRange { lo_khz: FREQ_MIN_HZ / 1000, hi_khz: FREQ_MAX_HZ / 1000 }]
+}
+
+/// The receive ranges in rigctld's `+\dump_state` answer: after the header lines (protocol,
+/// model, ITU region) come `start end modes low_power high_power vfo ant` lines in Hz, ended
+/// by an all-zero line (then the transmit ranges, which we ignore). Sorted and merged.
+pub fn parse_dump_state(lines: &[String]) -> Vec<RxRange> {
+    let mut out: Vec<RxRange> = vec![];
+    let rows = lines.iter().map(|l| l.split_whitespace().collect::<Vec<_>>()).skip_while(|t| t.len() < 7);
+    for t in rows {
+        let (Some(lo), Some(hi)) = (t.first().and_then(|v| v.parse::<f64>().ok()), t.get(1).and_then(|v| v.parse::<f64>().ok()))
+        else {
+            break;
+        };
+        if t.len() < 7 || (lo == 0.0 && hi == 0.0) {
+            break;
+        }
+        if hi > lo && lo >= 0.0 {
+            let khz = |k: f64| k.min(f64::from(u32::MAX)) as u32;
+            out.push(RxRange { lo_khz: khz((lo / 1000.0).floor()), hi_khz: khz((hi / 1000.0).ceil()) });
+        }
+    }
+    out.sort_by_key(|r| r.lo_khz);
+    out.into_iter().fold(vec![], |mut acc: Vec<RxRange>, r| {
+        match acc.last_mut() {
+            Some(last) if r.lo_khz <= last.hi_khz => last.hi_khz = last.hi_khz.max(r.hi_khz),
+            _ => acc.push(r),
+        }
+        acc
+    })
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -42,6 +90,8 @@ pub enum Mode {
     CW,
     CWR,
     AM,
+    /// Narrow AM (the FTDX10's AM-N).
+    AMN,
     FM,
 }
 
@@ -53,6 +103,7 @@ impl Mode {
             Self::CW => "CW",
             Self::CWR => "CWR",
             Self::AM => "AM",
+            Self::AMN => "AMN",
             Self::FM => "FM",
         }
     }
@@ -114,10 +165,11 @@ impl std::fmt::Display for CommandError {
 impl std::error::Error for CommandError {}
 
 impl RigCommand {
-    /// Reject out-of-range input before anything reaches the rig.
-    pub fn validate(&self) -> Result<(), CommandError> {
+    /// Reject out-of-range input before anything reaches the rig: frequencies the rig does
+    /// not receive (`coverage`).
+    pub fn validate(&self, coverage: &[RxRange]) -> Result<(), CommandError> {
         match *self {
-            Self::SetFreq { hz } if !(FREQ_MIN_HZ..=FREQ_MAX_HZ).contains(&hz) => {
+            Self::SetFreq { hz } if !coverage.iter().any(|r| r.contains_hz(hz)) => {
                 Err(CommandError::Invalid("Frequency out of range".into()))
             }
             _ => Ok(()),
@@ -135,15 +187,61 @@ mod tests {
         assert_eq!(c, RigCommand::SetFreq { hz: 13_570_000 });
         let c: RigCommand = serde_json::from_str(r#"{"cmd":"set_mode","mode":"CWR"}"#).unwrap();
         assert_eq!(c, RigCommand::SetMode { mode: Mode::CWR });
+        let c: RigCommand = serde_json::from_str(r#"{"cmd":"set_mode","mode":"AMN"}"#).unwrap();
+        assert_eq!(c, RigCommand::SetMode { mode: Mode::AMN });
         assert!(serde_json::from_str::<RigCommand>(r#"{"cmd":"set_mode","mode":"PKTUSB"}"#).is_err());
     }
 
     #[test]
     fn frequency_limits() {
-        assert!(RigCommand::SetFreq { hz: FREQ_MIN_HZ }.validate().is_ok());
-        assert!(RigCommand::SetFreq { hz: FREQ_MAX_HZ }.validate().is_ok());
-        assert!(RigCommand::SetFreq { hz: FREQ_MIN_HZ - 1 }.validate().is_err());
-        assert!(RigCommand::SetFreq { hz: FREQ_MAX_HZ + 1 }.validate().is_err());
+        let d = default_coverage();
+        assert!(RigCommand::SetFreq { hz: FREQ_MIN_HZ }.validate(&d).is_ok());
+        assert!(RigCommand::SetFreq { hz: FREQ_MAX_HZ }.validate(&d).is_ok());
+        assert!(RigCommand::SetFreq { hz: FREQ_MIN_HZ - 1 }.validate(&d).is_err());
+        assert!(RigCommand::SetFreq { hz: FREQ_MAX_HZ + 1 }.validate(&d).is_err());
+        let vu = [RxRange { lo_khz: 144_000, hi_khz: 146_000 }, RxRange { lo_khz: 430_000, hi_khz: 440_000 }];
+        assert!(RigCommand::SetFreq { hz: 145_500_000 }.validate(&vu).is_ok());
+        assert!(RigCommand::SetFreq { hz: 14_074_000 }.validate(&vu).is_err());
+        assert!(RigCommand::SetMode { mode: Mode::AM }.validate(&vu).is_ok());
+    }
+
+    fn lines(l: &[&str]) -> Vec<String> {
+        l.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn dump_state_ranges() {
+        // rigctld 4.5 `+\dump_state` for the dummy rig (abridged after the ranges)
+        let dummy = lines(&[
+            "dump_state:",
+            "1",
+            "1",
+            "0",
+            "150000.000000 1500000000.000000 0x1ff -1 -1 0x17e00007 0xf",
+            "0 0 0 0 0 0 0",
+            "150000.000000 1500000000.000000 0x1ff 5000 100000 0x17e00007 0xf",
+            "0 0 0 0 0 0 0",
+            "0x1ff 1",
+            "0 0",
+            "RPRT 0",
+        ]);
+        assert_eq!(parse_dump_state(&dummy), [RxRange { lo_khz: 150, hi_khz: 1_500_000 }]);
+
+        // an HF + VHF/UHF rig: touching ranges merge, fractional kHz round outwards
+        let rig = lines(&[
+            "1",
+            "3073",
+            "2",
+            "30000 199999999 0x1bf -1 -1 0x3 0x0",
+            "200000000 470000000 0x1bf -1 -1 0x3 0x0",
+            "800000000 999990000.5 0x40 -1 -1 0x3 0x0",
+            "0 0 0 0 0 0 0",
+        ]);
+        assert_eq!(
+            parse_dump_state(&rig),
+            [RxRange { lo_khz: 30, hi_khz: 470_000 }, RxRange { lo_khz: 800_000, hi_khz: 999_991 }]
+        );
+        assert!(parse_dump_state(&lines(&["RPRT -11"])).is_empty());
     }
 
     #[test]

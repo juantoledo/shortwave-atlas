@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use atlas_core::api::{
     ApiError, AudioDiagnostics, AudioSettings, Call, ErrorKind, Info, Qth, RigSettings, UpdatePrefs,
 };
+use atlas_core::bands::{Dial, ItuRegion};
 use atlas_core::audio::{default_tuning, diagnose_audio, validate_audio, AudioChoice};
 use atlas_core::platform::Os;
 use atlas_core::setup::{validate_choice, RigChoice, RigModel};
@@ -247,6 +248,10 @@ impl Atlas {
                 self.set_qth(q)?;
                 Ok(Value::Null)
             }
+            Call::Dial => {
+                let region = ItuRegion::of(self.qth().pos());
+                json(serde_json::to_value(Dial::new(region, self.rig.coverage().await)))
+            }
             Call::RigSettings => json(serde_json::to_value(self.rig_settings().await)),
             Call::RigModels => json(serde_json::to_value(self.models().await)),
             Call::SerialPorts => json(serde_json::to_value(discover::serial_ports())),
@@ -314,6 +319,13 @@ pub(crate) mod tests {
         let again = Atlas::start(AppConfig::default(), None, Some(qth_file), no_updates()).unwrap();
         assert_eq!(again.qth(), madrid);
         let _ = std::fs::remove_dir_all(dir);
+
+        // the dial follows the QTH's ITU region and the sim's coverage
+        let dial = atlas.call(Call::Dial).await.unwrap();
+        assert_eq!(dial["region"], "R1");
+        let forty = dial["bands"].as_array().unwrap().iter().find(|b| b["id"] == "ham-40m").unwrap();
+        assert_eq!(forty["hi_khz"], 7_200);
+        assert_eq!(dial["spans"].as_array().unwrap().len(), 3);
 
         let bad = Qth { name: "x".into(), lat: 91.0, lon: 0.0 };
         assert!(atlas.call(Call::SetQth(bad)).await.is_err());

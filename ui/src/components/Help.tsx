@@ -18,6 +18,16 @@ interface Props {
 function Extra({ topic, version, meta }: { topic: HelpTopic; version: string | null; meta: CatalogMeta | null }) {
   const t = useT();
   const touch = useMedia(COARSE);
+  if (topic === 'start') {
+    return (
+      <ul className="legend-list">
+        <li><i className="lg band k-broadcast" />{t.legendBroadcast}</li>
+        <li><i className="lg band k-ham" />{t.legendHam}</li>
+        <li><i className="lg band k-utility" />{t.legendCb}</li>
+        <li><i className="lg band gap" />{t.legendGap}</li>
+      </ul>
+    );
+  }
   if (topic === 'globe') {
     return (
       <>

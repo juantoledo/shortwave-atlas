@@ -39,4 +39,8 @@ async fn dummy_rig_round_trip() {
     assert_eq!(s.freq_hz, Some(13_570_000));
     assert_eq!(s.mode.as_deref(), Some("AM"));
     assert!(s.strength_db.is_some());
+
+    // the dummy rig's receive ranges cover shortwave (and much more)
+    let cov = h.coverage().await.expect("dump_state ranges");
+    assert!(cov.iter().any(|r| r.contains_hz(13_570_000)), "{cov:?}");
 }

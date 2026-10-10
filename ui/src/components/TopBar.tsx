@@ -1,9 +1,10 @@
 // The window's top bar: name and version, what the rig is doing, the Ko-fi link, the UTC
-// clock, and the update, help, settings and power buttons.
+// clock, and the update, help, settings and power buttons (turning off asks first).
 
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { useNow } from '../hooks/useCore';
 import { useT } from '../i18n';
+import { Confirm } from './Confirm';
 import type { Info } from '../types/generated/Info';
 
 const two = (n: number) => String(n).padStart(2, '0');
@@ -25,6 +26,10 @@ interface Props {
   powerBusy: boolean;
   powerDisabled: boolean;
   onPower: () => void;
+  /** Asking whether to turn the rig off. */
+  askOff: boolean;
+  onConfirmOff: () => void;
+  onCancelOff: () => void;
   onSetup: () => void;
   onHelp: () => void;
   onSettings: () => void;
@@ -32,8 +37,9 @@ interface Props {
   update: ReactNode;
 }
 
-export function TopBar({ info, status, on, powerBusy, powerDisabled, onPower, onSetup, onHelp, onSettings, update }: Props) {
+export function TopBar({ info, status, on, powerBusy, powerDisabled, onPower, askOff, onConfirmOff, onCancelOff, onSetup, onHelp, onSettings, update }: Props) {
   const t = useT();
+  const power = useRef<HTMLDivElement>(null);
   const setup = info && !info.configured && info.backend === 'sim';
   return (
     <header className="topbar">
@@ -59,10 +65,13 @@ export function TopBar({ info, status, on, powerBusy, powerDisabled, onPower, on
         {update}
         <button className="icon-btn" type="button" aria-label={t.help} title={`${t.help} (F1)`} onClick={onHelp}>?</button>
         <button className="icon-btn" type="button" aria-label={t.settings} title={t.settings} onClick={onSettings}>⚙</button>
-        <button className="power" type="button" aria-pressed={on} disabled={powerBusy || powerDisabled} onClick={onPower}>
-          <span className="lamp" />
-          <span className="power-txt">{powerBusy ? t.powerBusy : on ? t.powerOn : t.powerOff}</span>
-        </button>
+        <div className="power-wrap" ref={power}>
+          <button className="power" type="button" aria-pressed={on} aria-expanded={askOff} disabled={powerBusy || powerDisabled} onClick={askOff ? onCancelOff : onPower}>
+            <span className="lamp" />
+            <span className="power-txt">{powerBusy ? t.powerBusy : on ? t.powerOn : t.powerOff}</span>
+          </button>
+          {askOff && <Confirm message={t.confirmOff} confirmLabel={t.turnOff} onConfirm={onConfirmOff} onCancel={onCancelOff} anchor={power} />}
+        </div>
       </div>
     </header>
   );

@@ -67,6 +67,13 @@ fn answer(rig: &mut Rig, line: &str) -> String {
     let mut parts = line.split_whitespace();
     let ok = "RPRT 0\n".to_string();
     match (parts.next(), parts.next()) {
+        (Some("+\\dump_state"), _) => concat!(
+            "dump_state:\n1\n3073\n2\n",
+            "30000.000000 470000000.000000 0x1bf -1 -1 0x3 0x0\n0 0 0 0 0 0 0\n",
+            "1800000.000000 54000000.000000 0x1bf 5000 100000 0x3 0x0\n0 0 0 0 0 0 0\n",
+            "RPRT 0\n"
+        )
+        .into(),
         (Some("\\get_powerstat"), _) => format!("{}\n", u8::from(rig.power)),
         (Some("\\set_powerstat"), Some(v)) => {
             rig.log.push(line.into());

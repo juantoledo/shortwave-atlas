@@ -5,6 +5,7 @@ import type { AudioDiagnostics } from '../types/generated/AudioDiagnostics';
 import type { AudioSettings } from '../types/generated/AudioSettings';
 import type { Candidate } from '../types/generated/Candidate';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
+import type { Dial } from '../types/generated/Dial';
 import type { Info } from '../types/generated/Info';
 import type { Overview } from '../types/generated/Overview';
 import type { Qth } from '../types/generated/Qth';
@@ -33,6 +34,7 @@ export class Api {
   overview = () => this.transport.call({ cmd: 'overview' }) as Promise<Overview>;
   stationsMeta = () => this.transport.call({ cmd: 'stations_meta' }) as Promise<CatalogMeta>;
   setQth = (args: Qth) => this.transport.call({ cmd: 'set_qth', args }) as Promise<null>;
+  dial = () => this.transport.call({ cmd: 'dial' }) as Promise<Dial>;
 
   rigSettings = () => this.transport.call({ cmd: 'rig_settings' }) as Promise<RigSettings>;
   rigModels = () => this.transport.call({ cmd: 'rig_models' }) as Promise<RigModel[]>;

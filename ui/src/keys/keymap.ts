@@ -43,7 +43,7 @@ export interface KeyCtx {
   mac: boolean;
 }
 
-const MODE_KEYS: Record<string, Mode> = { Digit1: 'AM', Digit2: 'USB', Digit3: 'LSB', Digit4: 'CW' };
+const MODE_KEYS: Record<string, Mode> = { Digit1: 'AM', Digit2: 'USB', Digit3: 'LSB', Digit4: 'CW', Digit5: 'AMN', Digit6: 'FM' };
 export const VOLUME_STEP = 0.1;
 
 const WIDGET_INPUTS = /^(checkbox|radio|range|button|submit|reset|color|file|image)$/;

@@ -54,6 +54,9 @@ pub enum Call {
     /// Code tables and facts about the station data (result: `CatalogMeta`).
     StationsMeta,
     SetQth(Qth),
+    /// The rig's coverage and the bands and spans on its dial, for the QTH's ITU region
+    /// (result: `Dial`).
+    Dial,
     /// Current rig choice and what the page needs around it (result: `RigSettings`).
     RigSettings,
     /// Hamlib models (result: `RigModel[]`, empty if `rigctl` is missing).

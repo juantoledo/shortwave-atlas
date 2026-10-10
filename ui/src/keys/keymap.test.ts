@@ -62,6 +62,8 @@ describe('keymap', () => {
   it('matches Alt combinations by key position', () => {
     expect(act('1', { altKey: true })).toEqual({ kind: 'mode', mode: 'AM' });
     expect(act('4', { altKey: true })).toEqual({ kind: 'mode', mode: 'CW' });
+    expect(act('5', { altKey: true })).toEqual({ kind: 'mode', mode: 'AMN' });
+    expect(act('6', { altKey: true })).toEqual({ kind: 'mode', mode: 'FM' });
     // macOS: ⌥M types µ, the code is still KeyM
     expect(keyAction({ ...k('µ', { altKey: true }), code: 'KeyM' }, { ...CTX, mac: true })).toEqual({ kind: 'mute' });
   });
