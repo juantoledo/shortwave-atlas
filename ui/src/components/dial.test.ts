@@ -6,8 +6,8 @@ import {
   spanAt, tickLabel, uncovered, windowPct, windowTicks,
 } from './dial';
 
-const bc = (id: string, lo_khz: number, hi_khz: number): Band => ({ id, label: id.replace(/m$/, ''), kind: 'broadcast', lo_khz, hi_khz });
-const ham = (len: string, lo_khz: number, hi_khz: number): Band => ({ id: `ham-${len}m`, label: len, kind: 'ham', lo_khz, hi_khz });
+const bc = (id: string, lo_khz: number, hi_khz: number): Band => ({ id, label: id.replace(/m$/, ''), kind: 'broadcast', lo_khz, hi_khz, scan_step_hz: 5000 });
+const ham = (len: string, lo_khz: number, hi_khz: number): Band => ({ id: `ham-${len}m`, label: len, kind: 'ham', lo_khz, hi_khz, scan_step_hz: 1000 });
 
 const BANDS: Band[] = [bc('49m', 5800, 6300), bc('31m', 9300, 9950), bc('25m', 11500, 12200)];
 /** Region 2 around 40 m: the ham band runs into the 41 m broadcast band. */

@@ -247,6 +247,10 @@ impl RigBackend for Hamlib {
         Ok(self.write(Cmd::SetPowerstat(on)).await?)
     }
 
+    async fn strength(&self) -> Option<i32> {
+        self.number(Cmd::GetStrength).await.ok().map(|s| s.round() as i32)
+    }
+
     async fn coverage(&self) -> Option<Vec<RxRange>> {
         let ranges = parse_dump_state(&self.send(Cmd::DumpState).await.ok()?);
         (!ranges.is_empty()).then_some(ranges)

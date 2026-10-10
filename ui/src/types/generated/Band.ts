@@ -12,4 +12,9 @@ id: string,
 /**
  * What the dial prints on its bar: `49`, `40`, `70cm`, `CB`, `MW`.
  */
-label: string, kind: BandKind, lo_khz: number, hi_khz: number, };
+label: string, kind: BandKind, lo_khz: number, hi_khz: number, 
+/**
+ * The step a scan of this band takes unless the listener picks another (see
+ * `scan::default_step_hz`).
+ */
+scan_step_hz: number, };

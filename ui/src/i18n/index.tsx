@@ -60,6 +60,15 @@ export function fmtDate(t: Messages, day: number): string {
   return new Intl.DateTimeFormat(t.locale, { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(day * 864e5));
 }
 
+/** Unix seconds as a short UTC date and time: `10 Oct, 14:32 UTC`. */
+export function fmtStamp(t: Messages, unix: number): string {
+  const f = new Intl.DateTimeFormat(t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' });
+  return `${f.format(new Date(unix * 1000))} UTC`;
+}
+
+/** A short duration in seconds: `45 s`, `3 min`. */
+export const fmtSecs = (t: Messages, s: number) => (s < 60 ? `${s} ${t.s}` : fmtDur(t, Math.round(s / 60)));
+
 /** `YYYY-MM` as a month and year. */
 export function fmtMonth(t: Messages, ym: string): string {
   const [y, m] = ym.split('-').map(Number);

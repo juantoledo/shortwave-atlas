@@ -10,6 +10,7 @@ pub mod eibi;
 pub mod geo;
 pub mod platform;
 pub mod rig;
+pub mod scan;
 pub mod schedule;
 pub mod setup;
 pub mod stations;

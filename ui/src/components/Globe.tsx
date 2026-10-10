@@ -5,18 +5,24 @@
 //  4. after 1.5 s a blue "received" ring at the QTH
 //  5. optionally reframe the whole route
 // Off-air stations get the flight and the label only. With nothing tuned the camera goes back
-// to the QTH and, left alone, the globe turns again. Every altitude is fitted to the view's
+// to the QTH and, left alone, the globe turns again.
+// While a band scan runs, lock-on rests: the camera holds over the QTH, a sonar pulse spreads
+// from it, and at each step the sites on the air on that channel flash, sized by the reading
+// (a signal also sends an arc home). When the scan ends, the sites it logged pulse green, framed
+// together with the QTH, and lock-on resumes. Every altitude is fitted to the view's
 // shape (`fitAltitude`), so a tall phone view shows as much as a wide window.
 
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import GlobeGL, { type GlobeMethods } from 'react-globe.gl';
 import { CanvasTexture, MeshPhongMaterial, SRGBColorSpace } from 'three';
-import { angleDeg, clamp, easeInOut, fitAltitude, fromVec, greatCircle, midpoint, slerp, toVec, type LatLon } from '../geo/geo';
+import { angleDeg, clamp, easeInOut, fitAltitude, frameAltitude, frameWithHome, fromVec, greatCircle, midpoint, pingAlpha, pingRadius, slerp, toVec, type LatLon } from '../geo/geo';
 import { GlobeTexture, makeStars } from '../geo/texture';
 import { flagUrl } from '../catalog/flags';
 import { useT } from '../i18n';
+import { SIGNAL_DB } from './scan';
 import type { Candidate } from '../types/generated/Candidate';
 import type { Qth } from '../types/generated/Qth';
+import type { ScanPing } from '../types/generated/ScanPing';
 import type { SiteDot } from '../types/generated/SiteDot';
 
 const REDUCE = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -29,6 +35,12 @@ const START_ALT = 2.6, LOCK_ALT = 1.5, HOME_ALT = 2.4, MIN_ALT = 0.3, MAX_ALT = 
 const ZOOM_STEP = 0.72;
 /** Turn again after this long without a station or a touch. */
 const IDLE_MS = 30_000;
+/** Scans: the camera's altitude over the QTH; how long a ping's ring, a signal's arc and the
+ *  finale last; how many of each at most; and how recently a touch keeps the camera still. */
+const SCAN_ALT = 2.8, PING_MS = 1600, ARC_MS = 2400, FINALE_MS = 4000, MAX_PINGS = 30, MAX_ARCS = 8, HANDS_OFF_MS = 10_000;
+/** While scanning the camera eases this often towards the sites pinged in the last `FOLLOW_SPAN_MS`
+ *  (most transmitters may face away from the QTH), unless it is nearly there already. */
+const FOLLOW_MS = 6000, FOLLOW_SPAN_MS = 15_000, FOLLOW_MIN_DEG = 10;
 
 /** A 1×1 ocean-coloured image: three-globe only reports "ready" after loading an image. */
 function placeholder(): string {
@@ -40,14 +52,19 @@ function placeholder(): string {
   return c.toDataURL('image/png');
 }
 const AMBER = '255,179,63', COOL = '127,208,255';
+/** A scan ping's size on screen per degree of `pingRadius`. */
+const PING_PX_PER_DEG = 8;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, REDUCE ? 0 : ms));
 
 interface Pin { lat: number; lng: number; el: HTMLElement }
-interface Ring { lat: number; lng: number; maxR: number; speed: number; period: number; rgb: string }
+interface Ring { lat: number; lng: number; maxR: number; speed: number; period: number; rgb: string; alpha?: number }
 interface Arc { sLat: number; sLng: number; eLat: number; eLng: number; dash: number; gap: number; anim: number; stroke: number; colors: string[] }
 interface Path { pts: LatLon[] }
 interface Fx { station: Pin | null; rings: Ring[]; arcs: Arc[]; paths: Path[] }
 const NO_FX: Fx = { station: null, rings: [], arcs: [], paths: [] };
+/** A scan's pings (glowing markers that pulse once) and arcs, each until a time (performance.now()). */
+interface ScanFx { marks: (Pin & { until: number })[]; arcs: (Arc & { until: number })[] }
+const NO_SCAN_FX: ScanFx = { marks: [], arcs: [] };
 
 function mkPin(cls: string, title: string, sub: string, flag: string | null = null): HTMLElement {
   const el = document.createElement('div');
@@ -66,13 +83,26 @@ function mkPin(cls: string, title: string, sub: string, flag: string | null = nu
   return el;
 }
 
+/** A pulse at a site: `ping` (a scan step; `sig` for a signal) or `finale` (logged, pulses
+ *  three times). Size in px and opacity as CSS variables; styles.css animates it. */
+function mkPulse(cls: string, sizePx: number, alpha: number): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'pulse ' + cls;
+  el.style.setProperty('--s', `${Math.round(sizePx)}px`);
+  el.style.setProperty('--a', alpha.toFixed(2));
+  return el;
+}
+
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /** Transmitter sites: short towers where something is on the air (taller with more), flat
- *  dim dots elsewhere, so they stand out from the city lights; the active site is white. */
-const siteColor = (s: SiteDot, active: boolean) =>
-  active ? '#ffffff' : s.on ? `rgba(255,226,160,${s.precise ? 1 : 0.75})` : `rgba(150,185,220,${s.precise ? 0.6 : 0.35})`;
-const siteRadius = (s: SiteDot, active: boolean) => (active ? 0.6 : s.on ? 0.45 : 0.32);
+ *  dim dots elsewhere, so they stand out from the city lights; the active site is white, and
+ *  sites of stations a scan logged are green (a little larger). */
+const siteColor = (s: SiteDot, active: boolean, logged: boolean) =>
+  active ? '#ffffff'
+  : logged ? `rgba(79,200,164,${s.on ? 1 : 0.7})`
+  : s.on ? `rgba(255,226,160,${s.precise ? 1 : 0.75})` : `rgba(150,185,220,${s.precise ? 0.6 : 0.35})`;
+const siteRadius = (s: SiteDot, active: boolean, logged: boolean) => (active ? 0.6 : s.on ? 0.45 : 0.32) + (logged && !active ? 0.1 : 0);
 const siteAltitude = (s: SiteDot, active: boolean) => (active ? 0.05 : s.on ? 0.012 + Math.min(0.03, s.on * 0.002) : 0.003);
 
 function route(site: LatLon, qth: LatLon): Pick<Fx, 'arcs' | 'paths'> {
@@ -90,12 +120,13 @@ function route(site: LatLon, qth: LatLon): Pick<Fx, 'arcs' | 'paths'> {
 // a new `htmlElement` makes three-globe rebuild every pin, which replays their fade-in (a blink),
 // and any other new accessor re-applies its whole layer.
 const pinEl = (d: object) => (d as Pin).el;
-const ringColor = (d: object) => (t: number) => `rgba(${(d as Ring).rgb},${(Math.pow(1 - t, 1.6) * 0.9).toFixed(3)})`;
+const ringColor = (d: object) => (t: number) => `rgba(${(d as Ring).rgb},${(Math.pow(1 - t, 1.6) * 0.9 * ((d as Ring).alpha ?? 1)).toFixed(3)})`;
 const pathLat = (p: object) => (p as LatLon).lat;
 const pathLng = (p: object) => (p as LatLon).lon;
 const pathColor = () => 'rgba(255,200,130,0.4)';
 
 const qthRing = (q: LatLon): Ring =>({ lat: q.lat, lng: q.lon, maxR: 4.5, speed: 2, period: 2200, rgb: COOL });
+const sonarRing = (q: LatLon): Ring => ({ lat: q.lat, lng: q.lon, maxR: 25, speed: 6, period: 2500, rgb: COOL, alpha: 0.6 });
 
 interface Props {
   sel: Candidate | null;
@@ -111,12 +142,18 @@ interface Props {
   /** Every transmitter site with its on-air count. */
   sites: SiteDot[];
   activeSite: number | null;
+  /** Sites of stations a band scan logged. */
+  loggedSites: ReadonlySet<number>;
+  /** While a band scan runs: its last steps measured, and the noise floor so far. */
+  scan: { pings: readonly ScanPing[]; floorDb: number | null } | null;
+  /** A scan that just ended (`key`: its id) and the sites of the stations it logged. */
+  finale: { key: string; sites: readonly number[] } | null;
   onSite: (id: number) => void;
   /** Tooltip text for a site: country name and "n of m on the air". */
   siteLabel: (s: SiteDot) => { country: string; onAir: string };
 }
 
-function GlobeView({ sel, qth, frame, onFrame, paused, onInteract, onQth, sites, activeSite, onSite, siteLabel }: Props) {
+function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQth, sites, activeSite, loggedSites, scan, finale, onSite, siteLabel }: Props) {
   const t = useT();
   const stage = useRef<HTMLDivElement>(null);
   const globe = useRef<GlobeMethods>(undefined);
@@ -130,8 +167,18 @@ function GlobeView({ sel, qth, frame, onFrame, paused, onInteract, onQth, sites,
   const seq = useRef(0), flight = useRef(0), grabbed = useRef(-1);
   const qthRef = useRef(qth);
   qthRef.current = qth;
-  const frameRef = useRef(frame);
-  frameRef.current = frame;
+  const frameRef = useRef(framing);
+  frameRef.current = framing;
+  const [scanFx, setScanFx] = useState<ScanFx>(NO_SCAN_FX);
+  const scanning = scan !== null;
+  /** The last scan step that pinged, and the sites pinged lately (for the camera to follow). */
+  const pinged = useRef(-1);
+  const recent = useRef<{ at: number; site: LatLon }[]>([]);
+  /** The finale already played (lock-on rests until then). */
+  const [finaleDone, setFinaleDone] = useState<string | null>(null);
+  const finaleOn = !!finale && finale.sites.length > 0 && finale.key !== finaleDone;
+  const siteIx = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites]);
+  const handsOff = () => performance.now() - touched.current > HANDS_OFF_MS;
   const selRef = useRef(sel);
   selRef.current = sel;
   const interact = useRef(onInteract);
@@ -271,11 +318,16 @@ function GlobeView({ sel, qth, frame, onFrame, paused, onInteract, onQth, sites,
     fly(p.lat, p.lng, clamp(p.altitude * k, MIN_ALT, fit(MAX_ALT)), 450, 0);
   }, [grab, fly, fit]);
 
-  // Lock on when the selected station (or its on-air status) changes.
+  // Lock on when the selected station (or its on-air status) changes; not during a scan or its
+  // finale (they own the globe), and again when they end.
   const lockKey = sel ? `${sel.station.id}:${sel.air.on}` : null;
   const lastKey = useRef<string | null>(null);
   useEffect(() => {
     if (!ready) return;
+    if (scanning || finaleOn) {
+      lastKey.current = null;
+      return;
+    }
     const my = ++seq.current;
     const was = lastKey.current;
     lastKey.current = lockKey;
@@ -313,7 +365,106 @@ function GlobeView({ sel, qth, frame, onFrame, paused, onInteract, onQth, sites,
       const mid = midpoint(qthRef.current, site);
       fly(mid.lat, mid.lon, fit(clamp(0.55 + angleDeg(qthRef.current, site) / 42, 1.5, 3.4)), 2200, 0.15);
     })();
-  }, [lockKey, ready, fly, fit, home]);
+  }, [lockKey, ready, fly, fit, home, scanning, finaleOn]);
+
+  // A scan starts: drop the station and its route, hold over the QTH. It ends: clear its layers.
+  useEffect(() => {
+    if (!ready) return;
+    if (!scanning) {
+      setScanFx(NO_SCAN_FX);
+      return;
+    }
+    seq.current++;
+    flight.current++;
+    pinged.current = -1;
+    recent.current = [];
+    setFx(NO_FX);
+    setScanFx(NO_SCAN_FX);
+    globe.current!.controls().autoRotate = false;
+    if (handsOff()) {
+      const q = qthRef.current;
+      fly(q.lat, q.lon, fit(SCAN_ALT), 1600, 0.2);
+    }
+  }, [scanning, ready, fly, fit]);
+
+  // Each new step measured: its sites flash; a signal also sends an arc home.
+  useEffect(() => {
+    if (!scan || !ready) return;
+    const fresh = scan.pings.filter((p) => p.index > pinged.current);
+    if (!fresh.length) return;
+    pinged.current = fresh[fresh.length - 1].index;
+    const now = performance.now(), q = qthRef.current;
+    const marks: ScanFx['marks'] = [], arcs: ScanFx['arcs'] = [];
+    for (const p of fresh) {
+      const signal = p.db !== null && scan.floorDb !== null && p.db >= scan.floorDb + SIGNAL_DB;
+      for (const id of p.sites) {
+        const s = siteIx.get(id);
+        if (!s) continue;
+        recent.current.push({ at: now, site: { lat: s.lat, lon: s.lon } });
+        const el = mkPulse(signal ? 'ping sig' : 'ping', pingRadius(p.db) * PING_PX_PER_DEG, pingAlpha(p.db));
+        marks.push({ lat: s.lat, lng: s.lon, el, until: now + PING_MS });
+        if (signal && !REDUCE) {
+          arcs.push({
+            sLat: s.lat, sLng: s.lon, eLat: q.lat, eLng: q.lon, dash: 0.25, gap: 1.2, anim: 1100, stroke: 0.45,
+            colors: ['rgba(255,228,175,0.95)', `rgba(${COOL},0.9)`], until: now + ARC_MS,
+          });
+        }
+      }
+    }
+    if (marks.length) setScanFx((f) => ({ marks: [...f.marks, ...marks].slice(-MAX_PINGS), arcs: [...f.arcs, ...arcs].slice(-MAX_ARCS) }));
+  }, [scan, ready, siteIx]);
+
+  // The scan ended: the sites it logged pulse green, framed with the QTH; then lock-on resumes.
+  const finaleKey = finaleOn ? finale!.key : null;
+  useEffect(() => {
+    if (!ready || !finaleKey || !finale) return;
+    const pts = finale.sites.map((id) => siteIx.get(id)).filter((s): s is SiteDot => !!s);
+    const now = performance.now();
+    seq.current++;
+    setFx(NO_FX);
+    setScanFx({ marks: pts.map((s) => ({ lat: s.lat, lng: s.lon, el: mkPulse('finale', 40, 1), until: now + FINALE_MS })), arcs: [] });
+    if (pts.length && handsOff()) {
+      const f = frameWithHome(pts.map((s) => ({ lat: s.lat, lon: s.lon })), qthRef.current);
+      fly(f.center.lat, f.center.lon, fit(frameAltitude(f.spreadDeg)), 2000, 0.2);
+    }
+    const id = setTimeout(() => {
+      setScanFx(NO_SCAN_FX);
+      setFinaleDone(finaleKey);
+    }, FINALE_MS);
+    return () => clearTimeout(id);
+  }, [finaleKey, ready]); // the finale plays once per scan, whatever else changes
+
+  // While scanning, ease towards where the pings are (and home, when it fits in the view).
+  useEffect(() => {
+    if (!scanning || !ready || REDUCE) return;
+    const id = setInterval(() => {
+      const now = performance.now();
+      recent.current = recent.current.filter((r) => now - r.at < FOLLOW_SPAN_MS);
+      if (!recent.current.length || !handsOff()) return;
+      const f = frameWithHome(recent.current.map((r) => r.site), qthRef.current);
+      const p = globe.current!.pointOfView();
+      if (angleDeg({ lat: p.lat, lon: p.lng }, f.center) < FOLLOW_MIN_DEG) return;
+      fly(f.center.lat, f.center.lon, fit(frameAltitude(f.spreadDeg)), 3000, 0.1);
+    }, FOLLOW_MS);
+    return () => clearInterval(id);
+  }, [scanning, ready, fly, fit]);
+
+  // Pings and arcs go when their time is up.
+  useEffect(() => {
+    if (!scanning) return;
+    const id = setInterval(() => {
+      const now = performance.now();
+      setScanFx((f) => {
+        const marks = f.marks.filter((m) => m.until > now), arcs = f.arcs.filter((a) => a.until > now);
+        return marks.length === f.marks.length && arcs.length === f.arcs.length ? f : { marks, arcs };
+      });
+    }, 250);
+    return () => clearInterval(id);
+  }, [scanning]);
+
+  const sonar = useMemo(() => sonarRing(qth), [qth]);
+  const rings = useMemo(() => (scanning && !REDUCE ? [...fx.rings, sonar] : fx.rings), [fx.rings, scanning, sonar]);
+  const arcs = useMemo(() => [...fx.arcs, ...scanFx.arcs], [fx.arcs, scanFx.arcs]);
 
   // Moving the QTH redraws the route in place.
   useEffect(() => {
@@ -338,11 +489,11 @@ function GlobeView({ sel, qth, frame, onFrame, paused, onInteract, onQth, sites,
   }, [idle]);
 
   const qthPin = useMemo<Pin>(() => ({ lat: qth.lat, lng: qth.lon, el: mkPin('qth', 'QTH', qth.name) }), [qth]);
-  const pins = useMemo(() => (fx.station ? [qthPin, fx.station] : [qthPin]), [qthPin, fx.station]);
+  const pins = useMemo(() => [qthPin, ...(fx.station ? [fx.station] : []), ...scanFx.marks], [qthPin, fx.station, scanFx.marks]);
   const stars = useMemo(() => makeStars(), []);
   const pointAltitude = useCallback((d: object) => siteAltitude(d as SiteDot, (d as SiteDot).id === activeSite), [activeSite]);
-  const pointRadius = useCallback((d: object) => siteRadius(d as SiteDot, (d as SiteDot).id === activeSite), [activeSite]);
-  const pointColor = useCallback((d: object) => siteColor(d as SiteDot, (d as SiteDot).id === activeSite), [activeSite]);
+  const pointRadius = useCallback((d: object) => siteRadius(d as SiteDot, (d as SiteDot).id === activeSite, loggedSites.has((d as SiteDot).id)), [activeSite, loggedSites]);
+  const pointColor = useCallback((d: object) => siteColor(d as SiteDot, (d as SiteDot).id === activeSite, loggedSites.has((d as SiteDot).id)), [activeSite, loggedSites]);
   const siteTip = useCallback((d: object) => {
     const s = d as SiteDot;
     const l = siteLabel(s);
@@ -390,7 +541,7 @@ function GlobeView({ sel, qth, frame, onFrame, paused, onInteract, onQth, sites,
             htmlAltitude={0.004}
             htmlElement={pinEl}
             htmlTransitionDuration={0}
-            ringsData={fx.rings}
+            ringsData={rings}
             ringLat="lat"
             ringLng="lng"
             ringAltitude={0.003}
@@ -398,7 +549,7 @@ function GlobeView({ sel, qth, frame, onFrame, paused, onInteract, onQth, sites,
             ringMaxRadius="maxR"
             ringPropagationSpeed="speed"
             ringRepeatPeriod="period"
-            arcsData={fx.arcs}
+            arcsData={arcs}
             arcStartLat="sLat"
             arcStartLng="sLng"
             arcEndLat="eLat"
@@ -427,7 +578,7 @@ function GlobeView({ sel, qth, frame, onFrame, paused, onInteract, onQth, sites,
           <button className="icon-btn" type="button" disabled={!ready} aria-label={t.zoomOut} title={t.zoomOut} onClick={() => zoom(1 / ZOOM_STEP)}>−</button>
           <button className="icon-btn" type="button" disabled={!ready} aria-label={t.centerQth} title={t.centerQth} onClick={() => { grab(); home(); }}>⌖</button>
         </div>
-        <button className="toggle" type="button" aria-pressed={frame} onClick={onFrame}>{t.frameRoute}</button>
+        <button className="toggle" type="button" aria-pressed={framing} onClick={onFrame}>{t.frameRoute}</button>
       </div>
     </>
   );

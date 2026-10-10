@@ -9,6 +9,7 @@ import { useT } from '../i18n';
 import { queryHz } from '../keys/keymap';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
 import type { Facets } from '../types/generated/Facets';
+import type { Logged } from '../types/generated/Logged';
 import type { Region } from '../types/generated/Region';
 import type { StationRow } from '../types/generated/StationRow';
 import { Dropdown, type DropOpt } from './Dropdown';
@@ -29,6 +30,8 @@ interface Props {
   loading: boolean;
   siteName: string | null;
   selId: number | null;
+  /** Stations a band scan logged, by id. */
+  logged: ReadonlyMap<number, Logged>;
   onPick: (r: StationRow) => void;
   /** Shift+Enter on a kHz query: tune there exactly. */
   onTuneHz: (hz: number) => void;
@@ -70,7 +73,7 @@ export function StationList(p: Props) {
   const countries = ranked((p.meta?.countries ?? []).map((c) => ({ value: c.itu, label: names.country(c.itu), n: count(p.facets?.countries, c.itu) })));
   const [showFilters, setShowFilters] = useState(false);
   const picked = f.bands.length + f.langs.length + f.regions.length + f.countries.length;
-  const filtered = f.bands.length + f.langs.length + f.regions.length + f.countries.length > 0 || f.site !== null || f.on_air || f.q !== '';
+  const filtered = f.bands.length + f.langs.length + f.regions.length + f.countries.length > 0 || f.site !== null || f.on_air || f.logged || f.q !== '';
   const season = p.meta?.source.season ?? '';
 
   const box = useRef<HTMLDivElement>(null), end = useRef<HTMLDivElement>(null);
@@ -152,6 +155,12 @@ export function StationList(p: Props) {
           <input type="checkbox" checked={f.on_air} onChange={(e) => set({ on_air: e.currentTarget.checked })} />
           <span>{t.onAirNow}</span>
         </label>
+        {(p.logged.size > 0 || f.logged) && (
+          <label className="chk">
+            <input type="checkbox" checked={f.logged} onChange={(e) => set({ logged: e.currentTarget.checked })} />
+            <span>{t.loggedOnly}</span>
+          </label>
+        )}
         {/* phones only: the selects fold away to leave room for the rows */}
         <button className="btn flt-toggle" type="button" aria-expanded={showFilters} onClick={() => setShowFilters((o) => !o)}>
           {t.filters}{picked > 0 && ` · ${picked}`}
@@ -170,7 +179,7 @@ export function StationList(p: Props) {
               {t.siteFilter(p.siteName ?? '')} <span aria-hidden="true">✕</span>
             </button>
           )}
-          {filtered && <button className="link" type="button" onClick={() => p.onFilters({ ...f, q: '', on_air: false, bands: [], langs: [], regions: [], countries: [], site: null })}>{t.clearFilters}</button>}
+          {filtered && <button className="link" type="button" onClick={() => p.onFilters({ ...f, q: '', on_air: false, logged: false, bands: [], langs: [], regions: [], countries: [], site: null })}>{t.clearFilters}</button>}
         </div>
       )}
       <div className="rows" ref={box}>
@@ -178,12 +187,13 @@ export function StationList(p: Props) {
           {p.rows.map((r) => {
             const country = names.country(r.itu);
             const abroad = r.site_itu !== r.itu;
+            const lg = p.logged.get(r.id);
             return (
               <li key={r.id}>
                 <button className="row" type="button" aria-current={p.on && p.selId === r.id} disabled={!p.on} onClick={() => p.onPick(r)}>
                   <span className="rf">{r.freq_hz / 1000}</span>
                   <span className="rn">
-                    <b><Flag flag={r.flag} title={country} />{r.name}</b>
+                    <b><Flag flag={r.flag} title={country} />{r.name}{lg && <span className="logged" title={t.loggedBadge(lg.count)} aria-label={t.loggedBadge(lg.count)}>✓</span>}</b>
                     <em>
                       {abroad && <>{t.via} <Flag flag={r.site_flag} title={names.country(r.site_itu)} /></>}
                       {r.site_name}

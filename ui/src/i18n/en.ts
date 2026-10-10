@@ -5,6 +5,8 @@ import type { AudioTuning } from '../types/generated/AudioTuning';
 import type { Hint } from '../types/generated/Hint';
 import type { ManualReason } from '../types/generated/ManualReason';
 import type { Os } from '../types/generated/Os';
+import type { ScanOutcome } from '../types/generated/ScanOutcome';
+import type { Verdict } from '../types/generated/Verdict';
 
 /** Hint texts that differ on some OS (the shared text is the Linux one). */
 /** Help topics, in the order the Help index lists them. */
@@ -52,6 +54,16 @@ export const en = {
   knobFine: 'Fine tuning knob, 1 kHz steps',
   prevBand: 'Previous band',
   nextBand: 'Next band',
+  scan: 'Scan',
+  scanTitle: (band: string) => `Scan ${band}: step through it, read the S-meter at each channel and match the signals to the schedule`,
+  scanStop: (pct: number) => `Stop · ${pct}%`,
+  scanStopTitle: 'Stop the scan (tuning anywhere stops it too)',
+  scanNoBand: 'Tune into a band to scan it',
+  scanStep: 'Scan step',
+  scanEstimate: (n: number, dur: string) => `${n} steps · ~${dur}`,
+  scanChip: (floor: string, logged: number, expected: number) => `floor ${floor} · ${logged}/${expected}`,
+  scanChipTitle: 'Last scan of this band: the noise floor, and the stations logged of those on the air. Open the scans',
+  scanProfile: 'Signal strength from the last scan',
   moreControls: 'More receiver controls',
   lessControls: 'Fewer receiver controls',
 
@@ -102,6 +114,9 @@ export const en = {
   keyPgUp: 'PgUp',
   keyPgDn: 'PgDn',
   onAirNow: 'On the air now',
+  loggedOnly: 'Logged',
+  loggedBadge: (n: number) => `Logged by ${n} scan${n === 1 ? '' : 's'}`,
+  loggedLine: (n: number, when: string, best: string) => `Logged ${n}× · last ${when} · best ${best}`,
   filters: 'Filters',
   band: 'Band',
   allBands: 'All bands',
@@ -143,6 +158,7 @@ export const en = {
   legendOnAir: 'Site on the air',
   legendQuiet: 'Quiet site',
   legendQth: 'Your QTH',
+  legendLogged: 'Site of a station you logged',
   zoomIn: 'Zoom in',
   zoomOut: 'Zoom out',
   centerQth: 'Center on your QTH',
@@ -165,6 +181,21 @@ export const en = {
   cwTuneHint: (pitch: number, delta: string) => `click to tune it to your ${pitch} Hz pitch (${delta} Hz)`,
 
   settings: 'Settings',
+  scans: 'Scans',
+  scansEmpty: 'No scans yet. Tune into a band and press Scan: the receiver steps through the band, reads the S-meter at each channel, and the signals it finds are matched to the stations on the air. Stations heard this way are marked as logged.',
+  scanAll: 'All scans',
+  scanCount: (signals: number, logged: number, expected: number) => `${signals} signals · ${logged} of ${expected} logged`,
+  scanMeta: (step: string, dwell: number, floor: string) => `${step} kHz steps · ${dwell} ms · floor ${floor}`,
+  scanOutcome: { complete: 'Complete', stopped: 'Stopped', failed: 'Failed' } as Record<ScanOutcome['kind'], string>,
+  scanSignals: 'Signals',
+  scanMissed: 'On the air, not heard',
+  scanMissedNone: 'Every station on the air was heard.',
+  scanNoSignals: 'No signal over the noise.',
+  verdicts: { sure: 'Identified', ambiguous: 'One of these', unidentified: 'Not in the schedule' } as Record<Verdict, string>,
+  scanDelete: 'Delete',
+  scanDeleteAsk: 'Delete this scan? Its stations leave the log unless another scan logged them.',
+  scanTune: (khz: string) => `Tune to ${khz} kHz`,
+  s: 's',
   help: 'Help',
   kofi: 'Buy Me a Coffee at ko-fi.com',
   helpTopics: 'Topics',

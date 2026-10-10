@@ -129,7 +129,7 @@ export function useOverview(api: Api | null) {
 }
 
 export type Filters = Omit<StationQuery, 'offset' | 'limit' | 'facets'>;
-export const NO_FILTERS: Filters = { q: '', on_air: false, bands: [], langs: [], countries: [], regions: [], site: null };
+export const NO_FILTERS: Filters = { q: '', on_air: false, logged: false, bands: [], langs: [], countries: [], regions: [], site: null };
 
 interface SearchState {
   rows: StationRow[];
@@ -140,8 +140,8 @@ interface SearchState {
 }
 
 /** The station list for `filters`: first page on change (debounced), more on demand, and
- *  the loaded rows refreshed each minute (on-air dots). */
-export function useStationSearch(api: Api | null, filters: Filters) {
+ *  the loaded rows refreshed each minute (on-air dots) and when `refresh` changes. */
+export function useStationSearch(api: Api | null, filters: Filters, refresh: unknown = null) {
   const [st, setSt] = useState<SearchState>({ rows: [], total: 0, onAir: 0, facets: null, loading: true });
   const seq = useRef(0);
   const shown = useRef(0);
@@ -160,7 +160,7 @@ export function useStationSearch(api: Api | null, filters: Filters) {
       rows.push(...p.items);
     }
     if (my === seq.current) setSt({ rows, total: first.total, onAir: first.on_air, facets: first.facets, loading: false });
-  }, [api, key]); // `key` stands for `filters`
+  }, [api, key, refresh]); // `key` stands for `filters`
 
   useEffect(() => {
     setSt((s) => ({ ...s, loading: true }));

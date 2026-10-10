@@ -157,7 +157,7 @@ fn main() {
             let updater = Arc::new(TauriUpdater { app: app.handle().clone(), pending: Default::default() });
             // Atlas spawns its tasks on Tauri's tokio runtime.
             let atlas = tauri::async_runtime::block_on(async {
-                Atlas::start(cfg, Some(path), Some(dir.join("qth.json")), updater)
+                Atlas::start(cfg, Some(path), Some(dir.join("qth.json")), Some(dir.join("scans")), updater)
             })?;
 
             let mut states = atlas.rig.subscribe();

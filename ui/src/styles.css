@@ -230,6 +230,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .lg.on { background: var(--site-on); box-shadow: 0 0 6px rgba(255, 226, 160, 0.7); }
 .lg.quiet { width: 6px; height: 6px; margin: 0 1px; background: var(--site-quiet); }
 .lg.qth { background: var(--cool); box-shadow: 0 0 6px rgba(127, 208, 255, 0.65); }
+.lg.logged { background: var(--band-ham); box-shadow: 0 0 6px rgba(79, 200, 164, 0.6); }
 .lg.band { width: 16px; height: 5px; border-radius: 1px; background: var(--band-bc); }
 .lg.band.k-ham { background: var(--band-ham); }
 .lg.band.k-utility { background: var(--band-util); }
@@ -246,6 +247,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 
 /* pins on the globe */
 .pin { position: relative; width: 0; height: 0; pointer-events: none; }
+/* scan pulses on the globe (Globe.tsx mkPulse): a glow and a ring that spreads and fades once;
+   --s is the size, --a the opacity. A finale pulse is green and beats three times. */
+.pulse { position: relative; width: 0; height: 0; pointer-events: none; }
+.pulse::before, .pulse::after {
+  content: ""; position: absolute; left: calc(var(--s) / -2); top: calc(var(--s) / -2); width: var(--s); height: var(--s);
+  border-radius: 50%; opacity: var(--a);
+}
+.pulse::before { background: radial-gradient(circle, rgba(255, 244, 215, 1), rgba(255, 200, 110, 0.6) 32%, transparent 68%); animation: pulse-glow 1.6s ease-out both; }
+.pulse::after { border: 2px solid rgba(255, 224, 160, 0.95); animation: pulse-ring 1.6s ease-out both; }
+.pulse.sig::after { border-width: 2.5px; box-shadow: 0 0 10px rgba(255, 200, 110, 0.6); }
+.pulse.finale::before { background: radial-gradient(circle, rgba(170, 245, 220, 0.95), rgba(79, 200, 164, 0.45) 30%, transparent 65%); animation: pulse-glow 1.3s ease-out 3; }
+.pulse.finale::after { border: 2px solid var(--band-ham); animation: pulse-ring 1.3s ease-out 3; }
+@keyframes pulse-glow { from { transform: scale(0.2); } 25% { transform: scale(0.55); } to { transform: scale(0.55); opacity: 0; } }
+@keyframes pulse-ring { from { transform: scale(0.1); } to { transform: scale(1); opacity: 0; } }
 .pin-dot {
   position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 50%;
   background: var(--amber); box-shadow: 0 0 0 2px rgba(7, 13, 21, 0.85), 0 0 14px 3px rgba(255, 179, 63, 0.7);
@@ -360,6 +375,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 }
 .d-name .flag { height: 0.62em; width: 0.83em; vertical-align: 0.06em; }
 .d-meta { margin: 4px 0 0; color: var(--dim); font-size: 13px; }
+.d-logged { margin: 4px 0 0; font: 500 11.5px var(--font-mono); color: var(--band-ham-text); }
 .d-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; margin: 12px 0 0; }
 .d-grid > div { min-width: 0; }
 .d-grid .wide { grid-column: 1 / -1; }
@@ -510,6 +526,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .rn b { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rn em { display: block; font-style: normal; font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rn em .flag { margin-left: 0.25em; margin-right: 0.3em; }
+.rn b .logged { margin-left: 6px; font: 500 12px var(--font-mono); color: var(--band-ham-text); }
 .dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #5b6c7f; }
 .dot.on { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 8px rgba(255, 179, 63, 0.7); }
 .btn.more { width: 100%; margin: 10px 0 4px; }
@@ -604,6 +621,25 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 @container (max-width: 260px) { .bdial-scale .tl.alt4 { display: none; } }
 .bdial-scale .dial-marks { height: 16px; }
 .bdial-scale .dial-marks .off { opacity: 0.55; transform: none; }
+
+/* band scans: the profile over the band dial (a strip above the marks), and the controls under it */
+.bdial-scale.has-prof { height: 82px; }
+.bdial-scale.has-prof .dial-marks { top: 26px; }
+.bdial-scale.has-prof .dial-scale { top: 48px; }
+.scan-prof { position: absolute; left: 0; top: 0; width: 100%; height: 24px; overflow: visible; pointer-events: none; }
+.scan-prof path, .scan-big path { vector-effect: non-scaling-stroke; }
+.scan-prof .now, .scan-big .now { fill: rgba(79, 200, 164, 0.2); stroke: var(--band-ham); stroke-width: 1px; }
+.scan-prof .ghost { fill: none; stroke: var(--dim); stroke-width: 1px; stroke-dasharray: 3 3; opacity: 0.75; }
+.scan-bar { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: center; gap: 14px; }
+.scan-go { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.scan-btn { flex: none; min-height: 30px; padding: 4px 12px; }
+.scan-btn.on { color: var(--amber); border-color: rgba(255, 179, 63, 0.6); background: var(--amber-soft); }
+.scan-step { flex: 1; min-width: 0; }
+.scan-step .drop { min-height: 30px; padding: 3px 8px; font: 12px var(--font-mono); }
+.scan-info { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-width: 0; }
+.scan-est { font: 400 11px var(--font-mono); color: var(--dim); white-space: nowrap; }
+.scan-progress { flex: 1 1 120px; max-width: 360px; height: 6px; accent-color: var(--amber); }
+.scan-chip { color: var(--band-ham-text); border-color: rgba(79, 200, 164, 0.45); white-space: nowrap; }
 
 /* whole dial: marks, then two lanes of band bars (broadcast; ham, CB and utility), the scale,
    and a row of labels per lane (only those that fit: dial.ts fitLabels) */
@@ -700,7 +736,7 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
   .dock-more { order: 1; }
   .seg { order: 2; }
   .seg button { padding: 0 10px; }
-  .bdial, .dial-row { grid-template-columns: auto minmax(0, 1fr); gap: 10px; }
+  .bdial, .dial-row, .scan-bar { grid-template-columns: auto minmax(0, 1fr); gap: 10px; }
   .bdial-range { display: none; }
   .bdial-name { min-width: 5ch; }
   .dial-row .sm .lab { display: none; }
@@ -791,6 +827,20 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .help-app { font: 700 20px/1.2 var(--font-display); letter-spacing: 0.03em; text-transform: uppercase; }
 .help-app .ver { margin-left: 6px; }
 .help-page .help-by { margin-top: -4px; color: var(--dim); font-size: 13px; }
+
+/* scans */
+.scan-index b small, .scan-detail h2 small { margin-left: 8px; font: 400 12px var(--font-mono); letter-spacing: 0.04em; text-transform: none; color: var(--dim); }
+.scan-detail .note .warn { color: var(--warn); }
+.scan-big { margin: 14px 0 0; }
+.scan-big svg { display: block; width: 100%; height: 84px; border-bottom: 1px solid var(--line-strong); }
+.scan-big .peaks { stroke: var(--amber); stroke-width: 1px; opacity: 0.45; }
+.scan-count { margin: 10px 0 16px; font: 500 12px var(--font-mono); }
+.scan-row { grid-template-columns: 64px minmax(0, 1fr) auto; }
+.scan-row b.v-unidentified { color: var(--dim); }
+.scan-missed-h { margin-top: 20px; }
+.scan-del { position: relative; margin: 20px 0 8px; }
+.scan-del .confirm-pop { left: 0; right: auto; top: auto; bottom: calc(100% + 8px); transform-origin: bottom left; }
+@media (max-width: 599px) { .scan-del .confirm-pop { left: 8px; right: 8px; top: calc(56px + env(safe-area-inset-top)); bottom: auto; } }
 
 /* ---------- Fingers ---------- */
 @media (pointer: coarse) {

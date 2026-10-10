@@ -16,7 +16,7 @@ export interface Names {
   region(id: Region): string;
   band(id: string): string;
   /** A dial band: `49m`, `Ham 40m`, `Mediumwave`. */
-  dialBand(b: Band): string;
+  dialBand(b: Pick<Band, 'id' | 'label' | 'kind'>): string;
 }
 
 function displayNames(locale: string): ((iso: string) => string | null) {

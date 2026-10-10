@@ -11,14 +11,16 @@ use atlas_core::api::{
 use atlas_core::bands::{Dial, ItuRegion};
 use atlas_core::audio::{default_tuning, diagnose_audio, validate_audio, AudioChoice};
 use atlas_core::platform::Os;
-use atlas_core::setup::{validate_choice, RigChoice, RigModel};
+use atlas_core::scan::{plan, ScanRequest, ScanStatus};
+use atlas_core::setup::{validate_choice, BackendKind, RigChoice, RigModel};
 use atlas_core::stations::{Catalog, LOOKUP_TOLERANCE_HZ};
-use atlas_rig::{discover, Rig, RigConfig};
+use atlas_rig::{discover, Rig, RigConfig, ScanStop};
 use serde_json::Value;
 use tokio::sync::OnceCell;
 
 use crate::audio::{backend, sound_cards, AudioHub};
 use crate::config::{save_audio, save_rig, save_update, AppConfig};
+use crate::scan::{Context, ScanService};
 use crate::update::{InstallRefused, UpdateService, Updater};
 
 pub struct Atlas {
@@ -38,6 +40,8 @@ pub struct Atlas {
     models: OnceCell<Vec<RigModel>>,
     /// "Update available": checks, and installs on the desktop.
     pub update: Arc<UpdateService>,
+    /// Band scans and the logbook.
+    pub scan: Arc<ScanService>,
     /// Ourselves, for the background install task.
     me: Weak<Atlas>,
 }
@@ -47,12 +51,13 @@ fn invalid(message: impl Into<String>) -> ApiError {
 }
 
 impl Atlas {
-    /// Load stations and the saved QTH, and start the rig and the update checks. Needs a
-    /// tokio runtime. `updater` is the desktop shell's, or a `ManifestUpdater`.
+    /// Load stations, the saved QTH and scans (`scans_dir`), and start the rig and the update
+    /// checks. Needs a tokio runtime. `updater` is the desktop shell's, or a `ManifestUpdater`.
     pub fn start(
         config: AppConfig,
         config_path: Option<PathBuf>,
         qth_file: Option<PathBuf>,
+        scans_dir: Option<PathBuf>,
         updater: Arc<dyn Updater>,
     ) -> Result<Arc<Self>, String> {
         if let Some(p) = &config.stations {
@@ -72,6 +77,7 @@ impl Atlas {
         let audio = AudioHub::new(config.audio.choice());
         let update = UpdateService::new(updater, &config.update, config.update_locked.clone());
         update.spawn_checks();
+        let scan = ScanService::new(scans_dir, stations.clone());
         Ok(Arc::new_cyclic(|me| Self {
             rig,
             audio,
@@ -83,6 +89,7 @@ impl Atlas {
             qth_file,
             models: OnceCell::new(),
             update,
+            scan,
             me: me.clone(),
         }))
     }
@@ -189,6 +196,23 @@ impl Atlas {
         Ok(())
     }
 
+    /// Check the request against the rig's dial, take the rig from the poller and start sweeping.
+    async fn start_scan(&self, req: ScanRequest) -> Result<ScanStatus, ApiError> {
+        let coverage = self.rig.coverage().await;
+        let dial = Dial::new(ItuRegion::of(self.qth().pos()), coverage.clone());
+        let band = dial.bands.iter().find(|b| b.id == req.band_id).ok_or_else(|| invalid("That band is not on this rig's dial"))?;
+        let plan = plan(band, req.step_hz, req.dwell_ms, &coverage).map_err(invalid)?;
+        let link = self.rig.begin_scan()?;
+        let state = self.rig.state();
+        let cfg = self.rig_config();
+        let rig = match cfg.backend {
+            BackendKind::Spawn => format!("spawn, Hamlib model {}", cfg.model),
+            b => b.as_str().to_string(),
+        };
+        let ctx = Context { qth: self.qth(), rig, mode: state.mode, back_hz: state.freq_hz };
+        Ok(self.scan.start(link, plan, ctx))
+    }
+
     pub fn qth(&self) -> Qth {
         self.qth.read().expect("qth lock").clone()
     }
@@ -241,7 +265,10 @@ impl Atlas {
                 let c = self.stations.lookup(freq_hz, now, self.qth().pos(), LOOKUP_TOLERANCE_HZ);
                 json(serde_json::to_value(c))
             }
-            Call::Search(q) => json(serde_json::to_value(self.stations.search(&q, now))),
+            Call::Search(q) => {
+                let logged = q.logged.then(|| self.scan.logged());
+                json(serde_json::to_value(self.stations.search_in(&q, now, logged.as_deref())))
+            }
             Call::Overview => json(serde_json::to_value(self.stations.overview(now))),
             Call::StationsMeta => json(serde_json::to_value(self.stations.meta(now))),
             Call::SetQth(q) => {
@@ -281,6 +308,23 @@ impl Atlas {
                 self.set_update_prefs(p)?;
                 Ok(Value::Null)
             }
+            Call::StartScan(req) => json(serde_json::to_value(self.start_scan(req).await?)),
+            Call::StopScan => {
+                self.rig.stop_scan(ScanStop::User).await;
+                Ok(Value::Null)
+            }
+            Call::ScanStatus => json(serde_json::to_value(self.scan.status())),
+            Call::Scans => json(serde_json::to_value(self.scan.summaries())),
+            Call::Scan { id } => match self.scan.scan(&id) {
+                Some(s) => json(serde_json::to_value(s)),
+                None => Err(invalid("No such scan")),
+            },
+            Call::DeleteScan { id } => match self.scan.delete(&id) {
+                Ok(true) => Ok(Value::Null),
+                Ok(false) => Err(invalid("No such scan")),
+                Err(e) => Err(ApiError::internal(format!("Could not delete the scan: {e}"))),
+            },
+            Call::Logbook => json(serde_json::to_value(self.scan.logbook())),
         }
     }
 }
@@ -304,7 +348,7 @@ pub(crate) mod tests {
     async fn lookup_and_qth_round_trip() {
         let dir = std::env::temp_dir().join(format!("swatlas-test-{}", std::process::id()));
         let qth_file = dir.join("qth.json");
-        let atlas = Atlas::start(AppConfig::default(), None, Some(qth_file.clone()), no_updates()).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), None, Some(qth_file.clone()), None, no_updates()).unwrap();
 
         // the first station in the list is found again by its frequency
         let page = atlas.call(Call::Search(StationQuery { limit: 1, ..Default::default() })).await.unwrap();
@@ -316,7 +360,7 @@ pub(crate) mod tests {
         atlas.call(Call::SetQth(madrid.clone())).await.unwrap();
         assert_eq!(atlas.qth(), madrid);
         // a new instance picks the saved QTH up
-        let again = Atlas::start(AppConfig::default(), None, Some(qth_file), no_updates()).unwrap();
+        let again = Atlas::start(AppConfig::default(), None, Some(qth_file), None, no_updates()).unwrap();
         assert_eq!(again.qth(), madrid);
         let _ = std::fs::remove_dir_all(dir);
 
@@ -333,7 +377,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn sim_rig_is_driven_through_calls() {
-        let atlas = Atlas::start(AppConfig::default(), None, None, no_updates()).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), None, None, None, no_updates()).unwrap();
         let mut rx = atlas.rig.subscribe();
         while atlas.rig.state().power != Power::On {
             rx.changed().await.unwrap();
@@ -347,12 +391,106 @@ pub(crate) mod tests {
         assert_eq!(info["audio"], false);
     }
 
+    /// Poll the scan status until `f` holds (10 s at most).
+    async fn scan_until(atlas: &Atlas, f: impl Fn(&ScanStatus) -> bool) -> ScanStatus {
+        for _ in 0..1000 {
+            let s = atlas.scan.status();
+            if f(&s) {
+                return s;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("scan status stuck at {:?}", atlas.scan.status());
+    }
+
+    async fn tuned(atlas: &Atlas, hz: u32) {
+        let mut rx = atlas.rig.subscribe();
+        while atlas.rig.state().freq_hz != Some(hz) {
+            rx.changed().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn scans_run_save_stop_and_delete() {
+        let dir = std::env::temp_dir().join(format!("swatlas-scan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let atlas = Atlas::start(AppConfig::default(), None, None, Some(dir.clone()), no_updates()).unwrap();
+        let mut rx = atlas.rig.subscribe();
+        while atlas.rig.state().power != Power::On {
+            rx.changed().await.unwrap();
+        }
+        atlas.call(Call::Rig(RigCommand::SetFreq { hz: 5_025_000 })).await.unwrap();
+        tuned(&atlas, 5_025_000).await;
+        let req = |band: &str, step_hz| ScanRequest { band_id: band.into(), step_hz, dwell_ms: Some(100) };
+
+        // checked against the dial
+        let e = atlas.call(Call::StartScan(req("nope", None))).await.unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Invalid);
+        let e = atlas.call(Call::StartScan(req("ham-10m", Some(500)))).await.unwrap_err();
+        assert!(e.message.contains("too many"), "{}", e.message);
+
+        // 2200 m: three 1 kHz steps, then back to 5025 kHz
+        let s = atlas.call(Call::StartScan(req("ham-2200m", None))).await.unwrap();
+        assert_eq!((s["state"].as_str(), s["total"].as_u64()), (Some("running"), Some(3)));
+        let e = atlas.call(Call::StartScan(req("ham-630m", None))).await.unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Conflict);
+        // each step measured is a ping, newest last
+        let ScanStatus::Running { pings, .. } = scan_until(&atlas, |s| matches!(s, ScanStatus::Running { done, .. } if *done >= 2)).await
+        else {
+            panic!("{:?}", atlas.scan.status())
+        };
+        let ix: Vec<u32> = pings.iter().map(|p| p.index).collect();
+        assert!(ix.len() >= 2 && ix.windows(2).all(|w| w[0] < w[1]), "{ix:?}");
+        let ScanStatus::Done { id, sites } = scan_until(&atlas, |s| !matches!(s, ScanStatus::Running { .. })).await else {
+            panic!("{:?}", atlas.scan.status())
+        };
+        assert!(sites.is_empty(), "nothing broadcasts on 2200 m");
+        tuned(&atlas, 5_025_000).await;
+        let list = atlas.call(Call::Scans).await.unwrap();
+        assert_eq!(list.as_array().unwrap().len(), 1);
+        let first = &list[0];
+        assert_eq!((first["id"].as_str(), first["band_id"].as_str()), (Some(id.as_str()), Some("ham-2200m")));
+        assert_eq!((first["first_hz"].as_u64(), first["measured"].as_u64()), (Some(136_000), Some(3)));
+        assert_eq!((first["outcome"]["kind"].as_str(), first["rig"].as_str()), (Some("complete"), Some("sim")));
+        let scan = atlas.call(Call::Scan { id: id.clone() }).await.unwrap();
+        assert!(scan["samples"].as_array().unwrap().iter().all(|v| v.is_i64()), "{scan}");
+        assert!(dir.join(format!("{id}.json")).is_file());
+        assert!(atlas.call(Call::Logbook).await.unwrap().is_array());
+
+        // stopped by hand after a step: kept, and back where it was
+        atlas.call(Call::StartScan(req("ham-630m", None))).await.unwrap();
+        scan_until(&atlas, |s| matches!(s, ScanStatus::Running { done, .. } if *done >= 1)).await;
+        atlas.call(Call::StopScan).await.unwrap();
+        scan_until(&atlas, |s| matches!(s, ScanStatus::Done { .. })).await;
+        tuned(&atlas, 5_025_000).await;
+        let stopped = atlas.scan.summaries()[0].clone();
+        assert_eq!((stopped.band_id.as_str(), stopped.outcome.clone()), ("ham-630m", atlas_core::scan::ScanOutcome::Stopped));
+        assert!(stopped.measured < 8);
+
+        // tuning takes the rig over and it stays there
+        atlas.call(Call::StartScan(req("ham-630m", None))).await.unwrap();
+        scan_until(&atlas, |s| matches!(s, ScanStatus::Running { done, .. } if *done >= 1)).await;
+        atlas.call(Call::Rig(RigCommand::SetFreq { hz: 9_500_000 })).await.unwrap();
+        tuned(&atlas, 9_500_000).await;
+        scan_until(&atlas, |s| matches!(s, ScanStatus::Done { .. })).await;
+        assert_eq!(atlas.rig.state().freq_hz, Some(9_500_000));
+
+        // a new instance reads them back; deleting removes the file
+        let again = Atlas::start(AppConfig::default(), None, None, Some(dir.clone()), no_updates()).unwrap();
+        assert_eq!(again.call(Call::Scans).await.unwrap().as_array().unwrap().len(), 3);
+        again.call(Call::DeleteScan { id: id.clone() }).await.unwrap();
+        assert!(!dir.join(format!("{id}.json")).exists());
+        assert_eq!(again.call(Call::DeleteScan { id }).await.unwrap_err().kind, ErrorKind::Invalid);
+        assert_eq!(again.call(Call::Scans).await.unwrap().as_array().unwrap().len(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[tokio::test]
     async fn apply_audio_validates_switches_and_saves() {
         let dir = std::env::temp_dir().join(format!("swatlas-audio-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("swatlas.toml");
-        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, no_updates()).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, None, no_updates()).unwrap();
 
         let tuning = default_tuning(Os::CURRENT);
         let bad = AudioChoice { enabled: true, device: "-f lavfi".into(), rate: 16_000, tuning };
@@ -384,7 +522,7 @@ pub(crate) mod tests {
         let dir = std::env::temp_dir().join(format!("swatlas-apply-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("swatlas.toml");
-        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, no_updates()).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, None, no_updates()).unwrap();
         assert_eq!(atlas.call(Call::Info).await.unwrap()["configured"], false);
 
         let bad = RigChoice {
@@ -433,7 +571,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("swatlas.toml");
         let fake = FakeUpdater::new(Packaging::Desktop { appimage: true }, Some("9.0.0"));
-        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, fake.clone()).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, None, fake.clone()).unwrap();
 
         let s = atlas.call(Call::UpdateStatus).await.unwrap();
         assert_eq!((s["state"]["state"].as_str(), s["install"]["kind"].as_str()), (Some("idle"), Some("auto")));

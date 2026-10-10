@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { angleDeg, fitAltitude, greatCircle, midpoint, slerp, sunPos, toVec } from './geo';
+import { angleDeg, fitAltitude, frame, frameAltitude, frameWithHome, greatCircle, midpoint, pingAlpha, pingRadius, slerp, sunPos, toVec } from './geo';
 
 const SANTIAGO = { lat: -33.45, lon: -70.67 };
 const GREENVILLE = { lat: 35.47, lon: -77.19 };
@@ -52,5 +52,44 @@ describe('geo (mirrors atlas-core)', () => {
       expect(share(alt) / aspect).toBeCloseTo(share(2.6), 9);
     }
     expect(fitAltitude(1.5, 0.5)).toBeLessThan(fitAltitude(2.6, 0.5));
+  });
+
+  it('sizes scan pings by the S-meter', () => {
+    expect(pingRadius(null)).toBe(2.5);
+    expect(pingRadius(-54)).toBe(2.5);
+    expect(pingRadius(0)).toBe(6);
+    expect(pingRadius(30)).toBe(9);
+    expect(pingRadius(60)).toBe(9);
+    expect(pingRadius(-24)).toBeCloseTo(4.44, 2);
+    expect(pingAlpha(null)).toBe(0.7);
+    expect(pingAlpha(30)).toBe(1);
+    expect(pingAlpha(0)).toBeGreaterThan(pingAlpha(-30));
+  });
+
+  it('frames a set of points', () => {
+    const one = frame([SANTIAGO]);
+    expect(one.center.lat).toBeCloseTo(SANTIAGO.lat, 9);
+    expect(one.spreadDeg).toBeCloseTo(0, 6);
+    const two = frame([SANTIAGO, GREENVILLE]);
+    const mid = midpoint(SANTIAGO, GREENVILLE);
+    expect(two.center.lat).toBeCloseTo(mid.lat, 6);
+    expect(two.center.lon).toBeCloseTo(mid.lon, 6);
+    expect(two.spreadDeg).toBeCloseTo(angleDeg(SANTIAGO, GREENVILLE) / 2, 6);
+    // antipodes have no mean direction: frame from the first
+    const anti = frame([{ lat: 0, lon: 0 }, { lat: 0, lon: 180 }]);
+    expect(anti.center).toEqual({ lat: 0, lon: 0 });
+    expect(anti.spreadDeg).toBeCloseTo(180, 6);
+  });
+
+  it('frames home with the points only when they fit in one view', () => {
+    const near = frameWithHome([GREENVILLE], SANTIAGO);
+    expect(near.spreadDeg).toBeCloseTo(angleDeg(SANTIAGO, GREENVILLE) / 2, 6);
+    // Tokyo and Beijing seen from Santiago: home would be beyond the horizon
+    const asia = [{ lat: 35.7, lon: 139.7 }, { lat: 39.9, lon: 116.4 }];
+    const far = frameWithHome(asia, SANTIAGO);
+    expect(far).toEqual(frame(asia));
+    expect(frameWithHome([], SANTIAGO).center.lat).toBeCloseTo(SANTIAGO.lat, 9);
+    expect(frameAltitude(0)).toBe(1.5);
+    expect(frameAltitude(90)).toBe(3.4);
   });
 });

@@ -8,6 +8,7 @@ use ts_rs::TS;
 use crate::eibi::names::BANDS;
 use crate::geo::LatLon;
 use crate::rig::RxRange;
+use crate::scan::default_step_hz;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -30,16 +31,21 @@ pub struct Band {
     pub kind: BandKind,
     pub lo_khz: u32,
     pub hi_khz: u32,
+    /// The step a scan of this band takes unless the listener picks another (see
+    /// `scan::default_step_hz`).
+    pub scan_step_hz: u32,
 }
 
 impl Band {
-    fn new(id: &str, label: &str, kind: BandKind, lo_khz: u32, hi_khz: u32) -> Self {
-        Self { id: id.into(), label: label.into(), kind, lo_khz, hi_khz }
+    /// `step_hz`: the band's channel spacing, 0 = not channelised.
+    fn new(id: &str, label: &str, kind: BandKind, lo_khz: u32, hi_khz: u32, step_hz: u32) -> Self {
+        let scan_step_hz = default_step_hz(step_hz, lo_khz, hi_khz);
+        Self { id: id.into(), label: label.into(), kind, lo_khz, hi_khz, scan_step_hz }
     }
 
-    /// An EiBi broadcast band (`49m` -> label `49`).
+    /// An EiBi broadcast band (`49m` -> label `49`), on the 5 kHz HF broadcast raster.
     pub fn broadcast(id: &str, lo_khz: u32, hi_khz: u32) -> Self {
-        Self::new(id, id.trim_end_matches('m'), BandKind::Broadcast, lo_khz, hi_khz)
+        Self::new(id, id.trim_end_matches('m'), BandKind::Broadcast, lo_khz, hi_khz, 5_000)
     }
 }
 
@@ -120,47 +126,49 @@ pub fn spans_for(coverage: &[RxRange]) -> Vec<Span> {
 use BandKind::{Broadcast, Cb, Ham, Utility};
 use ItuRegion::{R1, R2, R3};
 
-/// One row of `OTHER_BANDS`: the regions it applies to (empty = all).
-type Row = (&'static str, &'static str, BandKind, &'static [ItuRegion], u32, u32);
+/// One row of `OTHER_BANDS`: the regions it applies to (empty = all), the edges in kHz and the
+/// channel spacing in Hz (0 = not channelised).
+type Row = (&'static str, &'static str, BandKind, &'static [ItuRegion], u32, u32, u32);
 
-/// Bands besides EiBi's shortwave ones, in kHz. A band that differs by region has one row per
-/// variant. Amateur edges are the ITU allocations; national rules may be narrower.
+/// Bands besides EiBi's shortwave ones. A band that differs by region has one row per variant.
+/// Amateur edges are the ITU allocations; national rules may be narrower. AIR and marine are
+/// scanned on their 25 kHz plan (8.33 kHz would take three times as long).
 const OTHER_BANDS: &[Row] = &[
-    ("ham-2200m", "2200", Ham, &[], 136, 138),
-    ("lw", "LW", Broadcast, &[R1], 148, 284),
-    ("ham-630m", "630", Ham, &[], 472, 479),
-    ("mw", "MW", Broadcast, &[R1, R3], 526, 1_606),
-    ("mw", "MW", Broadcast, &[R2], 525, 1_705),
-    ("ham-160m", "160", Ham, &[R1], 1_810, 2_000),
-    ("ham-160m", "160", Ham, &[R2, R3], 1_800, 2_000),
-    ("ham-80m", "80", Ham, &[R1], 3_500, 3_800),
-    ("ham-80m", "80", Ham, &[R2], 3_500, 4_000),
-    ("ham-80m", "80", Ham, &[R3], 3_500, 3_900),
-    ("ham-60m", "60", Ham, &[R1, R3], 5_351, 5_367),
-    ("ham-60m", "60", Ham, &[R2], 5_330, 5_407),
-    ("ham-40m", "40", Ham, &[R1, R3], 7_000, 7_200),
-    ("ham-40m", "40", Ham, &[R2], 7_000, 7_300),
-    ("ham-30m", "30", Ham, &[], 10_100, 10_150),
-    ("ham-20m", "20", Ham, &[], 14_000, 14_350),
-    ("ham-17m", "17", Ham, &[], 18_068, 18_168),
-    ("ham-15m", "15", Ham, &[], 21_000, 21_450),
-    ("ham-12m", "12", Ham, &[], 24_890, 24_990),
-    ("cb", "CB", Cb, &[], 26_965, 27_405),
-    ("ham-10m", "10", Ham, &[], 28_000, 29_700),
-    ("ham-6m", "6", Ham, &[R1], 50_000, 52_000),
-    ("ham-6m", "6", Ham, &[R2, R3], 50_000, 54_000),
-    ("ham-4m", "4", Ham, &[R1], 70_000, 70_500),
-    ("fm", "FM", Broadcast, &[], 87_500, 108_000),
-    ("air", "AIR", Utility, &[], 118_000, 137_000),
-    ("ham-2m", "2", Ham, &[R1], 144_000, 146_000),
-    ("ham-2m", "2", Ham, &[R2, R3], 144_000, 148_000),
-    ("marine", "MAR", Utility, &[], 156_000, 162_025),
-    ("ham-1.25m", "1.25", Ham, &[R2], 222_000, 225_000),
-    ("ham-70cm", "70cm", Ham, &[R1, R3], 430_000, 440_000),
-    ("ham-70cm", "70cm", Ham, &[R2], 420_000, 450_000),
-    ("pmr446", "PMR", Utility, &[R1], 446_000, 446_200),
-    ("frs", "FRS", Utility, &[R2], 462_550, 467_725),
-    ("ham-33cm", "33cm", Ham, &[R2], 902_000, 928_000),
+    ("ham-2200m", "2200", Ham, &[], 136, 138, 0),
+    ("lw", "LW", Broadcast, &[R1], 148, 284, 9_000),
+    ("ham-630m", "630", Ham, &[], 472, 479, 0),
+    ("mw", "MW", Broadcast, &[R1, R3], 526, 1_606, 9_000),
+    ("mw", "MW", Broadcast, &[R2], 525, 1_705, 10_000),
+    ("ham-160m", "160", Ham, &[R1], 1_810, 2_000, 0),
+    ("ham-160m", "160", Ham, &[R2, R3], 1_800, 2_000, 0),
+    ("ham-80m", "80", Ham, &[R1], 3_500, 3_800, 0),
+    ("ham-80m", "80", Ham, &[R2], 3_500, 4_000, 0),
+    ("ham-80m", "80", Ham, &[R3], 3_500, 3_900, 0),
+    ("ham-60m", "60", Ham, &[R1, R3], 5_351, 5_367, 0),
+    ("ham-60m", "60", Ham, &[R2], 5_330, 5_407, 0),
+    ("ham-40m", "40", Ham, &[R1, R3], 7_000, 7_200, 0),
+    ("ham-40m", "40", Ham, &[R2], 7_000, 7_300, 0),
+    ("ham-30m", "30", Ham, &[], 10_100, 10_150, 0),
+    ("ham-20m", "20", Ham, &[], 14_000, 14_350, 0),
+    ("ham-17m", "17", Ham, &[], 18_068, 18_168, 0),
+    ("ham-15m", "15", Ham, &[], 21_000, 21_450, 0),
+    ("ham-12m", "12", Ham, &[], 24_890, 24_990, 0),
+    ("cb", "CB", Cb, &[], 26_965, 27_405, 10_000),
+    ("ham-10m", "10", Ham, &[], 28_000, 29_700, 0),
+    ("ham-6m", "6", Ham, &[R1], 50_000, 52_000, 0),
+    ("ham-6m", "6", Ham, &[R2, R3], 50_000, 54_000, 0),
+    ("ham-4m", "4", Ham, &[R1], 70_000, 70_500, 0),
+    ("fm", "FM", Broadcast, &[], 87_500, 108_000, 100_000),
+    ("air", "AIR", Utility, &[], 118_000, 137_000, 25_000),
+    ("ham-2m", "2", Ham, &[R1], 144_000, 146_000, 0),
+    ("ham-2m", "2", Ham, &[R2, R3], 144_000, 148_000, 0),
+    ("marine", "MAR", Utility, &[], 156_000, 162_025, 25_000),
+    ("ham-1.25m", "1.25", Ham, &[R2], 222_000, 225_000, 0),
+    ("ham-70cm", "70cm", Ham, &[R1, R3], 430_000, 440_000, 0),
+    ("ham-70cm", "70cm", Ham, &[R2], 420_000, 450_000, 0),
+    ("pmr446", "PMR", Utility, &[R1], 446_000, 446_200, 12_500),
+    ("frs", "FRS", Utility, &[R2], 462_550, 467_725, 25_000),
+    ("ham-33cm", "33cm", Ham, &[R2], 902_000, 928_000, 0),
 ];
 
 /// Every band for a region, sorted by lower edge.
@@ -170,7 +178,7 @@ pub fn dial_bands(region: ItuRegion) -> Vec<Band> {
         OTHER_BANDS
             .iter()
             .filter(|r| r.3.is_empty() || r.3.contains(&region))
-            .map(|&(id, label, kind, _, lo, hi)| Band::new(id, label, kind, lo, hi)),
+            .map(|&(id, label, kind, _, lo, hi, step)| Band::new(id, label, kind, lo, hi, step)),
     );
     v.sort_by_key(|b| (b.lo_khz, b.hi_khz));
     v

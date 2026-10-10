@@ -2,9 +2,11 @@
 // by kHz); the S-meter and span switch beside the whole dial (one span of what the rig
 // receives: LW/MW, HF, VHF or UHF), which shows broadcast bands on one lane and ham, CB and
 // utility bands on another, with a lens over where the band dial looks; and the dual tuning
-// knob at the right. `rx-x` parts fold away on small screens until expanded.
+// knob at the right; under the band dial, the scan controls, and over it the strength profile of
+// the band's last scan (or the one running) with the scan before it as a ghost. `rx-x` parts fold
+// away on small screens until expanded.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNames } from '../catalog/names';
 import { sLabel, useT } from '../i18n';
 import { altName, isMac } from '../keys/keymap';
@@ -17,6 +19,7 @@ import {
   tickLabel, uncovered, windowOf, windowPct, windowTicks, type DialWindow,
 } from './dial';
 import { Knob } from './Knob';
+import { profilePath, type Profile } from './scan';
 
 const MODES: Mode[] = ['AM', 'USB', 'LSB', 'CW', 'AMN', 'FM'];
 /** Button labels that differ from the Hamlib mode name. */
@@ -115,6 +118,10 @@ interface Props {
   coverage: readonly RxRange[];
   /** From `useBandWindow`. */
   win: ReturnType<typeof useBandWindow>;
+  /** Scan profiles to draw over the band dial: the latest (or running) scan and the one before. */
+  profiles: { now: Profile | null; ghost: Profile | null };
+  /** The scan controls (`ScanBar`). */
+  scanBar: ReactNode;
   /** Phones: the folded controls are showing. */
   expanded: boolean;
   onExpand: () => void;
@@ -122,7 +129,7 @@ interface Props {
   onMode: (m: Mode) => void;
 }
 
-export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, spans, coverage, win, expanded, onExpand, onTune, onMode }: Props) {
+export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, spans, coverage, win, profiles, scanBar, expanded, onExpand, onTune, onMode }: Props) {
   const t = useT();
   const names = useNames();
   const shown = freqHz === null ? '' : fmtReadout(freqHz);
@@ -160,6 +167,11 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
 
   const wMarks = useMemo(() => markPaths(freqsHz, onAirHz, w.lo, w.hi), [freqsHz, onAirHz, w.lo, w.hi]);
   const wTicks = useMemo(() => windowTicks(w), [w.lo, w.hi]);
+  const prof = useMemo(() => ({
+    now: profiles.now ? profilePath(profiles.now, w.lo, w.hi, true) : '',
+    ghost: profiles.ghost ? profilePath(profiles.ghost, w.lo, w.hi) : '',
+  }), [profiles, w.lo, w.hi]);
+  const hasProf = prof.now !== '' || prof.ghost !== '';
   const prev = win.step(-1), next = win.step(1);
   const jump = (dir: 1 | -1) => {
     const hz = win.jump(dir);
@@ -217,7 +229,13 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
             </span>
             <button className="icon-btn" type="button" disabled={!on || !next} aria-label={t.nextBand} title={t.keyHint(t.nextBand, t.keyPgUp)} onClick={() => jump(1)}>›</button>
           </div>
-          <div className="bdial-scale">
+          <div className={'bdial-scale' + (hasProf ? ' has-prof' : '')}>
+            {hasProf && (
+              <svg className="scan-prof" viewBox={`0 0 ${MARKS_W} 1`} preserveAspectRatio="none" role="img" aria-label={t.scanProfile}>
+                <path className="ghost" d={prof.ghost} />
+                <path className="now" d={prof.now} />
+              </svg>
+            )}
             <Marks off={wMarks.off} on={wMarks.on} />
             <div className="dial-scale" aria-hidden="true">
               {wTicks.minor.map((k) => <i key={k} className="tk" style={{ left: windowPct(k, w) + '%' }} />)}
@@ -242,6 +260,8 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
             />
           </div>
         </div>
+
+        {scanBar}
 
         <div className="dial-row rx-x">
           <div className="dial-side">

@@ -3,10 +3,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useNames } from '../catalog/names';
-import { compass, fmtDate, fmtDays, fmtDur, fmtKhz, fmtKm, fmtMonth, hhmm, useT, weekdayName, type Messages } from '../i18n';
+import { compass, fmtDate, fmtDays, fmtDur, fmtKhz, fmtKm, fmtMonth, fmtStamp, hhmm, sLabel, useT, weekdayName, type Messages } from '../i18n';
 import type { AirStatus } from '../types/generated/AirStatus';
 import type { Candidate } from '../types/generated/Candidate';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
+import type { Logged } from '../types/generated/Logged';
 import type { Slot } from '../types/generated/Slot';
 import { Flag } from './Flag';
 import { FlagBackdrop } from './FlagBackdrop';
@@ -61,10 +62,12 @@ interface Props {
   others: Candidate[];
   meta: CatalogMeta | null;
   now: Date;
+  /** Stations a band scan logged, by id. */
+  logged: ReadonlyMap<number, Logged>;
   onChoose: (c: Candidate) => void;
 }
 
-export function Dossier({ on, freqHz, sel, others, meta, now, onChoose }: Props) {
+export function Dossier({ on, freqHz, sel, others, meta, now, logged, onChoose }: Props) {
   const t = useT();
   const names = useNames();
   const [allCands, setAllCands] = useState(false);
@@ -101,6 +104,7 @@ export function Dossier({ on, freqHz, sel, others, meta, now, onChoose }: Props)
   const country = names.country(st.itu);
   const siteCountry = names.country(site.itu);
   const shownCands = allCands ? others : others.slice(0, FEW_CANDS);
+  const lg = logged.get(st.id);
   return (
     <div className="dossier">
       <FlagBackdrop key={st.flag ?? ''} flag={st.flag} />
@@ -111,6 +115,7 @@ export function Dossier({ on, freqHz, sel, others, meta, now, onChoose }: Props)
           {country}
           {slot && <> · {slot.lang ? names.lang(slot.lang) : ''}{slot.target && ` → ${names.target(slot.target)}`}</>}
         </p>
+        {lg && <p className="d-logged"><span aria-hidden="true">✓ </span>{t.loggedLine(lg.count, fmtStamp(t, lg.last), sLabel(lg.best_db))}</p>}
         <dl className="d-grid">
           <div className="wide">
             <dt>{t.transmitter}</dt>
