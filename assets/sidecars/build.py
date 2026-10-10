@@ -35,6 +35,8 @@ HAMLIB_SRC = (f"https://github.com/Hamlib/Hamlib/releases/download/{HAMLIB}/haml
               "ae1fcf2dbc80ea0786ea8f047b09399c3f7737d1930442f61a031708ed33e88f")
 HAMLIB_W64 = (f"https://github.com/Hamlib/Hamlib/releases/download/{HAMLIB}/hamlib-w64-{HAMLIB}.zip",
               "8553bc6c5c6032e8debf99c017e98f58fed7e07e7c25d04815dc3e8bbe3304c7")
+MACOS_MIN = "11.0"  # matches minimumSystemVersion in src-tauri/tauri.macos.conf.json
+
 # Hamlib: just the library and rigctld, no bindings or optional libraries, static.
 HAMLIB_CONFIGURE = [
     "--disable-shared", "--enable-static", "--without-readline", "--without-libusb",
