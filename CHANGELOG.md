@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.4.0...v0.5.0) (2026-10-10)
+
+
+### Features
+
+* band scan with a logbook, a dial profile and a globe animation ([134cb72](https://github.com/juantoledo/shortwave-atlas/commit/134cb725bc18e4d15c3c57704d237db230a462b9))
+* dial bands and spans from the rig's coverage, with a dual tuning knob ([d02b1aa](https://github.com/juantoledo/shortwave-atlas/commit/d02b1aa608dbbfbf8da9cc30a88e78a85b448fd1))
+* rig-coverage dial and band scan with a logbook ([8e898d2](https://github.com/juantoledo/shortwave-atlas/commit/8e898d26ff083cbf3be8caa25d30f397053490e3))
+
 ## [0.4.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.3.0...v0.4.0) (2026-10-10)
 
 
