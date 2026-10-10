@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.3.0...v0.4.0) (2026-10-10)
+
+
+### Features
+
+* rename the app to Shortwave Atlas ([b05823b](https://github.com/juantoledo/shortwave-atlas/commit/b05823b89cbb7134e7b9a5f96c389ba26b5e74cf))
+* rename the app to Shortwave Atlas ([6dfbcb3](https://github.com/juantoledo/shortwave-atlas/commit/6dfbcb32cea9d2776dd5fb2f67a2f4d0fbba020e))
+
 ## [0.3.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.2.2...v0.3.0) (2026-10-10)
 
 
