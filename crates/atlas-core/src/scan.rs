@@ -94,10 +94,19 @@ impl ScanPlan {
 
 /// The grid for scanning `band` at `step_hz` (default: the band's), checked against the limits
 /// and the rig's `coverage`.
-pub fn plan(band: &Band, step_hz: Option<u32>, dwell_ms: Option<u32>, coverage: &[RxRange]) -> Result<ScanPlan, String> {
+pub fn plan(
+    band: &Band,
+    step_hz: Option<u32>,
+    dwell_ms: Option<u32>,
+    coverage: &[RxRange],
+) -> Result<ScanPlan, String> {
     let step = step_hz.unwrap_or(band.scan_step_hz);
     if !(MIN_STEP_HZ..=MAX_STEP_HZ).contains(&step) {
-        return Err(format!("The step must be between {} and {} kHz", f64::from(MIN_STEP_HZ) / 1000.0, MAX_STEP_HZ / 1000));
+        return Err(format!(
+            "The step must be between {} and {} kHz",
+            f64::from(MIN_STEP_HZ) / 1000.0,
+            MAX_STEP_HZ / 1000
+        ));
     }
     let dwell_ms = dwell_ms.unwrap_or(DEFAULT_DWELL_MS);
     if !(MIN_DWELL_MS..=MAX_DWELL_MS).contains(&dwell_ms) {
@@ -209,7 +218,9 @@ pub enum ScanOutcome {
     /// Stopped, or the listener tuned away: what was measured is kept.
     Stopped,
     /// The rig stopped answering.
-    Failed { message: String },
+    Failed {
+        message: String,
+    },
 }
 
 /// A scan without its samples: what the history and the logbook need.
@@ -288,8 +299,13 @@ pub enum ScanStatus {
         pings: Vec<ScanPing>,
     },
     /// The last scan finished and was saved as `id`; `sites` are those of the stations it logged.
-    Done { id: String, sites: Vec<u32> },
-    Failed { message: String },
+    Done {
+        id: String,
+        sites: Vec<u32>,
+    },
+    Failed {
+        message: String,
+    },
 }
 
 /// One measured step of a running scan: its reading and the transmitter sites on the air there.
@@ -391,7 +407,8 @@ pub fn analyse(cat: &Catalog, first_hz: u32, step_hz: u32, samples: &[Option<i16
     let hi = freq(n - 1).saturating_add(peak_tol);
     for st in cat.between(lo, hi) {
         // the grid point nearest the station, and the peak nearest it
-        let j = ((f64::from(st.freq_hz) - f64::from(first_hz)) / f64::from(step_hz)).round().clamp(0.0, (n - 1) as f64) as usize;
+        let j = ((f64::from(st.freq_hz) - f64::from(first_hz)) / f64::from(step_hz)).round().clamp(0.0, (n - 1) as f64)
+            as usize;
         if samples[j].is_none() || !st.slots.iter().any(|s| slot_on(s, at(j))) {
             continue;
         }
@@ -400,7 +417,8 @@ pub fn analyse(cat: &Catalog, first_hz: u32, step_hz: u32, samples: &[Option<i16
             .copied()
             .filter(|&k| freq(k).abs_diff(st.freq_hz) <= peak_tol)
             .min_by_key(|&k| freq(k).abs_diff(st.freq_hz));
-        let own = (freq(j).abs_diff(st.freq_hz) <= own_tol && samples[j].is_some_and(|v| i32::from(v) >= thr)).then_some(j);
+        let own =
+            (freq(j).abs_diff(st.freq_hz) <= own_tol && samples[j].is_some_and(|v| i32::from(v) >= thr)).then_some(j);
         match near_peak.or(own) {
             Some(k) => hits.entry(k).or_default().push(StationRef::of(cat, st, at(k))),
             None => missed.push(StationRef::of(cat, st, at(j))),
@@ -428,7 +446,10 @@ fn rows_by_key(cat: &Catalog) -> HashMap<Key<'_>, (u32, u32)> {
     cat.stations()
         .filter_map(|st| {
             let site = cat.site(st.site)?;
-            Some(((st.freq_hz, st.name.as_str(), st.itu.as_str(), site.itu.as_str(), site.name.as_str()), (st.id, site.id)))
+            Some((
+                (st.freq_hz, st.name.as_str(), st.itu.as_str(), site.itu.as_str(), site.name.as_str()),
+                (st.id, site.id),
+            ))
         })
         .collect()
 }
@@ -522,7 +543,10 @@ mod tests {
         assert_eq!((step(R2, "ham-40m"), step(R2, "ham-10m")), (1_000, 1_000));
         // 50-52 MHz at 1 kHz would be 2001 points, 50-54 MHz 4001
         assert_eq!((step(R1, "ham-4m"), step(R1, "ham-6m"), step(R2, "ham-6m")), (1_000, 2_500, 2_500));
-        assert_eq!((step(R2, "cb"), step(R2, "fm"), step(R2, "air"), step(R2, "marine")), (10_000, 100_000, 25_000, 25_000));
+        assert_eq!(
+            (step(R2, "cb"), step(R2, "fm"), step(R2, "air"), step(R2, "marine")),
+            (10_000, 100_000, 25_000, 25_000)
+        );
         assert_eq!((step(R1, "ham-2m"), step(R1, "pmr446"), step(R2, "frs")), (12_500, 12_500, 25_000));
         assert_eq!(step(R2, "ham-33cm"), 25_000);
         // every band's default fits
@@ -679,7 +703,13 @@ mod tests {
         let c = catalog();
         let st = c.station(0).unwrap();
         let r = StationRef::of(&c, st, at(10, 0));
-        let peak = |at: i64, db: i16, verdict: Verdict, stations: Vec<StationRef>| Peak { freq_hz: st.freq_hz, db, at, verdict, stations };
+        let peak = |at: i64, db: i16, verdict: Verdict, stations: Vec<StationRef>| Peak {
+            freq_hz: st.freq_hz,
+            db,
+            at,
+            verdict,
+            stations,
+        };
         let mut gone = r.clone();
         gone.name = "Radio Nowhere".into();
         let scans = [
@@ -735,7 +765,8 @@ mod tests {
 
     #[test]
     fn ids_and_json() {
-        let id = scan_id(i64::from(days_from_civil(2026, 10, 10)) * SECS_PER_DAY + 14 * 3600 + 32 * 60 + 5, "ham-1.25m");
+        let id =
+            scan_id(i64::from(days_from_civil(2026, 10, 10)) * SECS_PER_DAY + 14 * 3600 + 32 * 60 + 5, "ham-1.25m");
         assert_eq!(id, "2026-10-10T143205Z-ham-1.25m");
         assert!(valid_id(&id));
         for bad in ["", "..", ".hidden", "a/b", "a\\b", "c:x", "x y"] {

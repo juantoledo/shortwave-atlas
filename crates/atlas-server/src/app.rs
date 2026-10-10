@@ -8,8 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use atlas_core::api::{
     ApiError, AudioDiagnostics, AudioSettings, Call, ErrorKind, Info, Qth, RigSettings, UpdatePrefs,
 };
-use atlas_core::bands::{Dial, ItuRegion};
 use atlas_core::audio::{default_tuning, diagnose_audio, validate_audio, AudioChoice};
+use atlas_core::bands::{Dial, ItuRegion};
 use atlas_core::platform::Os;
 use atlas_core::scan::{plan, ScanRequest, ScanStatus};
 use atlas_core::setup::{validate_choice, BackendKind, RigChoice, RigModel};
@@ -200,7 +200,11 @@ impl Atlas {
     async fn start_scan(&self, req: ScanRequest) -> Result<ScanStatus, ApiError> {
         let coverage = self.rig.coverage().await;
         let dial = Dial::new(ItuRegion::of(self.qth().pos()), coverage.clone());
-        let band = dial.bands.iter().find(|b| b.id == req.band_id).ok_or_else(|| invalid("That band is not on this rig's dial"))?;
+        let band = dial
+            .bands
+            .iter()
+            .find(|b| b.id == req.band_id)
+            .ok_or_else(|| invalid("That band is not on this rig's dial"))?;
         let plan = plan(band, req.step_hz, req.dwell_ms, &coverage).map_err(invalid)?;
         let link = self.rig.begin_scan()?;
         let state = self.rig.state();
@@ -435,13 +439,15 @@ pub(crate) mod tests {
         let e = atlas.call(Call::StartScan(req("ham-630m", None))).await.unwrap_err();
         assert_eq!(e.kind, ErrorKind::Conflict);
         // each step measured is a ping, newest last
-        let ScanStatus::Running { pings, .. } = scan_until(&atlas, |s| matches!(s, ScanStatus::Running { done, .. } if *done >= 2)).await
+        let ScanStatus::Running { pings, .. } =
+            scan_until(&atlas, |s| matches!(s, ScanStatus::Running { done, .. } if *done >= 2)).await
         else {
             panic!("{:?}", atlas.scan.status())
         };
         let ix: Vec<u32> = pings.iter().map(|p| p.index).collect();
         assert!(ix.len() >= 2 && ix.windows(2).all(|w| w[0] < w[1]), "{ix:?}");
-        let ScanStatus::Done { id, sites } = scan_until(&atlas, |s| !matches!(s, ScanStatus::Running { .. })).await else {
+        let ScanStatus::Done { id, sites } = scan_until(&atlas, |s| !matches!(s, ScanStatus::Running { .. })).await
+        else {
             panic!("{:?}", atlas.scan.status())
         };
         assert!(sites.is_empty(), "nothing broadcasts on 2200 m");
@@ -464,7 +470,10 @@ pub(crate) mod tests {
         scan_until(&atlas, |s| matches!(s, ScanStatus::Done { .. })).await;
         tuned(&atlas, 5_025_000).await;
         let stopped = atlas.scan.summaries()[0].clone();
-        assert_eq!((stopped.band_id.as_str(), stopped.outcome.clone()), ("ham-630m", atlas_core::scan::ScanOutcome::Stopped));
+        assert_eq!(
+            (stopped.band_id.as_str(), stopped.outcome.clone()),
+            ("ham-630m", atlas_core::scan::ScanOutcome::Stopped)
+        );
         assert!(stopped.measured < 8);
 
         // tuning takes the rig over and it stays there

@@ -36,7 +36,13 @@ async fn main() -> ExitCode {
     let server_cfg = cfg.server.clone();
     // the server only says that an update exists: it is replaced by hand
     let updater = Arc::new(ManifestUpdater::new(Packaging::Server));
-    let atlas = match Atlas::start(cfg, Some(path), Some(config_dir().join("qth.json")), Some(config_dir().join("scans")), updater) {
+    let atlas = match Atlas::start(
+        cfg,
+        Some(path),
+        Some(config_dir().join("qth.json")),
+        Some(config_dir().join("scans")),
+        updater,
+    ) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("swatlas-server: {e}");

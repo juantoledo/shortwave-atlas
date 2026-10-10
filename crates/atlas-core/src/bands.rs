@@ -73,7 +73,8 @@ fn line(corners: &[(f64, f64)], lat: f64) -> f64 {
 /// Lines A, B and C of RR 5.2–5.9, straightened between their corners (west is negative;
 /// line C runs below -180 so it can cross the antimeridian).
 const LINE_A: [(f64, f64); 4] = [(90.0, 40.0), (40.0, 40.0), (23.5, 60.0), (-90.0, 60.0)];
-const LINE_B: [(f64, f64); 6] = [(90.0, -10.0), (72.0, -10.0), (65.0, -30.0), (40.0, -50.0), (-10.0, -20.0), (-90.0, -20.0)];
+const LINE_B: [(f64, f64); 6] =
+    [(90.0, -10.0), (72.0, -10.0), (65.0, -30.0), (40.0, -50.0), (-10.0, -20.0), (-90.0, -20.0)];
 const LINE_C: [(f64, f64); 6] =
     [(90.0, -169.0), (65.5, -169.0), (50.0, -195.0), (10.0, -170.0), (10.0, -120.0), (-90.0, -120.0)];
 
@@ -266,7 +267,10 @@ mod tests {
         assert!(hf.bands.iter().any(|b| b.id == "ham-6m"));
         assert!(!hf.bands.iter().any(|b| b.id == "ham-2m" || b.id == "fm"));
 
-        let vu = Dial::new(R1, vec![RxRange { lo_khz: 100_000, hi_khz: 180_000 }, RxRange { lo_khz: 400_000, hi_khz: 480_000 }]);
+        let vu = Dial::new(
+            R1,
+            vec![RxRange { lo_khz: 100_000, hi_khz: 180_000 }, RxRange { lo_khz: 400_000, hi_khz: 480_000 }],
+        );
         let spans: Vec<&str> = vu.spans.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(spans, ["vhf", "uhf"]);
         let ids: Vec<&str> = vu.bands.iter().map(|b| b.id.as_str()).collect();

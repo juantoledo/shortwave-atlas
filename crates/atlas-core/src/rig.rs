@@ -35,7 +35,8 @@ pub fn parse_dump_state(lines: &[String]) -> Vec<RxRange> {
     let mut out: Vec<RxRange> = vec![];
     let rows = lines.iter().map(|l| l.split_whitespace().collect::<Vec<_>>()).skip_while(|t| t.len() < 7);
     for t in rows {
-        let (Some(lo), Some(hi)) = (t.first().and_then(|v| v.parse::<f64>().ok()), t.get(1).and_then(|v| v.parse::<f64>().ok()))
+        let (Some(lo), Some(hi)) =
+            (t.first().and_then(|v| v.parse::<f64>().ok()), t.get(1).and_then(|v| v.parse::<f64>().ok()))
         else {
             break;
         };

@@ -117,7 +117,13 @@ impl ScanLink {
 
     /// Tune to `hz`, wait `dwell` for the AGC, then read the meter `reads` times `gap` apart:
     /// the strongest reading (`None` if the rig gave none).
-    pub async fn measure(&self, hz: u32, dwell: Duration, reads: u32, gap: Duration) -> Result<Option<i32>, CommandError> {
+    pub async fn measure(
+        &self,
+        hz: u32,
+        dwell: Duration,
+        reads: u32,
+        gap: Duration,
+    ) -> Result<Option<i32>, CommandError> {
         self.backend.set_freq(hz).await?;
         tokio::time::sleep(dwell).await;
         let mut best: Option<i32> = None;
@@ -377,7 +383,12 @@ impl Drop for Rig {
     }
 }
 
-async fn poll(backend: Arc<dyn RigBackend>, tx: Arc<watch::Sender<RigState>>, wake: Arc<Notify>, paused: Arc<AtomicBool>) {
+async fn poll(
+    backend: Arc<dyn RigBackend>,
+    tx: Arc<watch::Sender<RigState>>,
+    wake: Arc<Notify>,
+    paused: Arc<AtomicBool>,
+) {
     let mut last = RigState::down();
     loop {
         // while a scan has the rig, it publishes the state itself
