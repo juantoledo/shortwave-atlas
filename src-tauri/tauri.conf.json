@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SW Atlas",
+  "productName": "Shortwave Atlas",
   "identifier": "org.swatlas.app",
   "build": {
     "beforeDevCommand": "npm --prefix ui run dev",

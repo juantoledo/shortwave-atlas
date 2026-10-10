@@ -28,7 +28,7 @@ Hamlib model **1042** (needs Hamlib 4.5+; this machine has 4.5.5).
 | `\set_powerstat 0/1` | works; power-on takes several seconds (20 s timeout) |
 | Band scope / waterfall over CAT | **not available**: the FTDX10 doesn't send scope data over CAT |
 
-## To verify with SW Atlas (plan step 6)
+## To verify with Shortwave Atlas (plan step 6)
 - [ ] connecting from the settings page works; the status shows the frequency
 - [ ] spawn mode starts rigctld and the UI follows the VFO knob
 - [ ] unplugging the USB cable shows "The serial port is gone"; plugging it back in reconnects by itself

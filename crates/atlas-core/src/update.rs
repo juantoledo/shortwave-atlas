@@ -99,7 +99,7 @@ pub fn is_newer(current: &str, candidate: &str) -> bool {
     matches!((v(current), v(candidate)), (Some(c), Some(n)) if n > c)
 }
 
-/// How this copy of SW Atlas was installed.
+/// How this copy of Shortwave Atlas was installed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Packaging {
     /// The desktop app. `appimage`: running from an AppImage (the `APPIMAGE` variable is set).
@@ -272,9 +272,9 @@ mod tests {
       "notes": "Features:\n\n* update available banner",
       "pub_date": "2026-10-20T12:00:00.000Z",
       "platforms": {
-        "darwin-aarch64": { "signature": "dW50cnVzdGVk", "url": "https://github.com/juantoledo/shortwave-atlas/releases/download/v0.2.0/SW.Atlas_universal.app.tar.gz" },
-        "linux-x86_64": { "signature": "dW50cnVzdGVk", "url": "https://github.com/juantoledo/shortwave-atlas/releases/download/v0.2.0/SW.Atlas_0.2.0_amd64.AppImage" },
-        "windows-x86_64": { "signature": "dW50cnVzdGVk", "url": "https://github.com/juantoledo/shortwave-atlas/releases/download/v0.2.0/SW.Atlas_0.2.0_x64-setup.exe" }
+        "darwin-aarch64": { "signature": "dW50cnVzdGVk", "url": "https://github.com/juantoledo/shortwave-atlas/releases/download/v0.2.0/Shortwave.Atlas_universal.app.tar.gz" },
+        "linux-x86_64": { "signature": "dW50cnVzdGVk", "url": "https://github.com/juantoledo/shortwave-atlas/releases/download/v0.2.0/Shortwave.Atlas_0.2.0_amd64.AppImage" },
+        "windows-x86_64": { "signature": "dW50cnVzdGVk", "url": "https://github.com/juantoledo/shortwave-atlas/releases/download/v0.2.0/Shortwave.Atlas_0.2.0_x64-setup.exe" }
       }
     }"#;
 

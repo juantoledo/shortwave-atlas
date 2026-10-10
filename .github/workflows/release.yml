@@ -161,6 +161,12 @@ jobs:
         with:
           node-version: 22
       - run: npm --prefix ui ci && npm --prefix ui run build
+      # rig audio capture (cpal) links ALSA
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
       - run: cargo build --release --locked -p atlas-server --bin swatlas-server
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: matrix.sidecars
@@ -229,14 +235,19 @@ jobs:
           gh release download $env:TAG -R $env:GITHUB_REPOSITORY -D dist -p '*-setup.exe'
           $setup = Get-ChildItem dist -Filter *-setup.exe | Select-Object -First 1
           Start-Process $setup.FullName -ArgumentList '/S' -Wait
-          $dir = Join-Path $env:LOCALAPPDATA 'SW Atlas'
+          # Where the installer says it went (the folder is named after the product, which was
+          # "SW Atlas" up to 0.3, and this workflow also rebuilds older tags)
+          $entry = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+            Where-Object { $_.DisplayName -like '*Atlas' } | Select-Object -First 1
+          if (-not $entry) { throw 'the installer left no uninstall entry' }
+          $dir = $entry.InstallLocation.Trim('"')
           Get-ChildItem $dir
           & (Join-Path $dir 'rigctld.exe') --version
           if ($LASTEXITCODE) { throw 'rigctld does not run' }
           $app = Get-ChildItem $dir -Filter *.exe | Where-Object { $_.Name -notin 'rigctld.exe', 'uninstall.exe' } | Select-Object -First 1
           $p = Start-Process $app.FullName -PassThru
           Start-Sleep -Seconds 15
-          if ($p.HasExited) { throw "SW Atlas exited with code $($p.ExitCode)" }
+          if ($p.HasExited) { throw "$($entry.DisplayName) exited with code $($p.ExitCode)" }
           Stop-Process -Id $p.Id -Force
       - name: macOS disk image
         if: runner.os == 'macOS'
@@ -250,7 +261,7 @@ jobs:
           "$app/Contents/MacOS/$(defaults read "$app/Contents/Info" CFBundleExecutable)" &
           pid=$!
           sleep 15
-          kill -0 "$pid" || { echo "::error::SW Atlas exited"; exit 1; }
+          kill -0 "$pid" || { echo "::error::Shortwave Atlas exited"; exit 1; }
           kill "$pid"
           hdiutil detach /Volumes/swatlas
       - name: Linux AppImage and .deb

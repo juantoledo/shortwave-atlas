@@ -1,6 +1,6 @@
-# Third-party software in SW Atlas installers
+# Third-party software in Shortwave Atlas installers
 
-The Windows and macOS installers include one program that SW Atlas runs as a separate
+The Windows and macOS installers include one program that Shortwave Atlas runs as a separate
 process. It is built by `assets/sidecars/build.py`, from the sources below, and its license
 texts are installed in the `licenses/` folder next to this file.
 
@@ -23,7 +23,7 @@ Talks to the radio over its CAT serial port.
   --without-xml-support --without-indi --disable-winradio`.
 
 To rebuild it, or to build it from modified sources, run
-`python3 assets/sidecars/build.py <target>` from the SW Atlas source tree.
+`python3 assets/sidecars/build.py <target>` from the Shortwave Atlas source tree.
 
 # Data and artwork in every build
 

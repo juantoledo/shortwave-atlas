@@ -2,6 +2,12 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "targets": ["deb", "appimage"],
-    "linux": { "deb": { "depends": ["libhamlib-utils", "libasound2"] } }
+    "linux": {
+      "deb": {
+        "depends": ["libhamlib-utils", "libasound2"],
+        "conflicts": ["sw-atlas"],
+        "replaces": ["sw-atlas"]
+      }
+    }
   }
 }

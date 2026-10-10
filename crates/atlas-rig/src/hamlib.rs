@@ -22,7 +22,7 @@ const POWERSTAT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Powering on makes Hamlib wake the rig first.
 const SET_POWERSTAT_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Every command SW Atlas may send. Being a closed enum, it is also the "no TX" whitelist.
+/// Every command Shortwave Atlas may send. Being a closed enum, it is also the "no TX" whitelist.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cmd {
     GetFreq,

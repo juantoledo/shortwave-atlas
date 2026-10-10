@@ -1,6 +1,6 @@
-"""Copy the EiBi schedule from a radiomap checkout into SW Atlas's data/eibi.
+"""Copy the EiBi schedule from a radiomap checkout into Shortwave Atlas's data/eibi.
 
-usage, from the SW Atlas repo root (standard library only):
+usage, from the Shortwave Atlas repo root (standard library only):
   git clone --depth 1 https://github.com/juantoledo/radiomap /tmp/radiomap
   python3 assets/sync_eibi.py /tmp/radiomap
 

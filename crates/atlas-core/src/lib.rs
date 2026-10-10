@@ -1,4 +1,4 @@
-//! SW Atlas core: pure logic with no IO (geo, schedules, station lookup, rig types,
+//! Shortwave Atlas core: pure logic with no IO (geo, schedules, station lookup, rig types,
 //! and the per-OS rules, which take an `Os` argument so every variant is unit-tested).
 
 pub mod api;

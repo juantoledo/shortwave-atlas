@@ -1,6 +1,6 @@
 [package]
 name = "swatlas"
-description = "SW Atlas desktop app"
+description = "Shortwave Atlas desktop app"
 edition.workspace = true
 license.workspace = true
 version.workspace = true

@@ -1,4 +1,4 @@
-# Releasing SW Atlas
+# Releasing Shortwave Atlas
 
 Nothing reaches users until a person publishes a release. The path is:
 
