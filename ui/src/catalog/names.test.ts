@@ -29,6 +29,10 @@ describe('names', () => {
     expect(n.region('oc')).toBe('Oceania');
     expect(n.band('49m')).toBe('49m');
     expect(n.band('oob')).toBe(en.bandOob);
+    expect(n.dialBand({ id: '49m', label: '49', kind: 'broadcast' })).toBe('49m');
+    expect(n.dialBand({ id: 'ham-40m', label: '40', kind: 'ham' })).toBe('Ham 40m');
+    expect(n.dialBand({ id: 'ham-70cm', label: '70cm', kind: 'ham' })).toBe('Ham 70cm');
+    expect(n.dialBand({ id: 'mw', label: 'MW', kind: 'broadcast' })).toBe('Mediumwave');
   });
 
   it('uses Spanish names, then the browser, then English', () => {

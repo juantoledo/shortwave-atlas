@@ -8,6 +8,7 @@ use crate::audio::{AudioChoice, AudioHint, AudioStatus, AudioTuning};
 use crate::geo::LatLon;
 use crate::platform::Os;
 use crate::rig::{CommandError, RigCommand, RigState};
+use crate::scan::ScanRequest;
 use crate::setup::{BackendKind, Hint, RigChoice, RigctldStatus};
 use crate::stations::StationQuery;
 use crate::update::Channel;
@@ -54,6 +55,9 @@ pub enum Call {
     /// Code tables and facts about the station data (result: `CatalogMeta`).
     StationsMeta,
     SetQth(Qth),
+    /// The rig's coverage and the bands and spans on its dial, for the QTH's ITU region
+    /// (result: `Dial`).
+    Dial,
     /// Current rig choice and what the page needs around it (result: `RigSettings`).
     RigSettings,
     /// Hamlib models (result: `RigModel[]`, empty if `rigctl` is missing).
@@ -83,6 +87,24 @@ pub enum Call {
     InstallUpdate,
     /// Turn automatic checks on or off, pick the channel, and save both.
     SetUpdatePrefs(UpdatePrefs),
+    /// Sweep a band on the dial, reading the S-meter at each step; returns at once (result:
+    /// `ScanStatus`). Follow it with `ScanStatus`. Any other rig command stops it.
+    StartScan(ScanRequest),
+    /// Stop the scan; what it measured is kept and the rig goes back where it was.
+    StopScan,
+    /// The running scan's progress, or how the last one ended (result: `ScanStatus`).
+    ScanStatus,
+    /// Saved scans, newest first, without their samples (result: `ScanSummary[]`).
+    Scans,
+    /// One saved scan (result: `Scan`).
+    Scan {
+        id: String,
+    },
+    DeleteScan {
+        id: String,
+    },
+    /// Every station a saved scan logged, by current station id (result: `Logged[]`).
+    Logbook,
 }
 
 /// Argument of `Call::SetUpdatePrefs`.
@@ -235,6 +257,12 @@ mod tests {
         assert_eq!(c, Call::Overview);
         let c: Call = serde_json::from_str(r#"{"cmd":"stations_meta"}"#).unwrap();
         assert_eq!(c, Call::StationsMeta);
+        let c: Call =
+            serde_json::from_str(r#"{"cmd":"start_scan","args":{"band_id":"49m","step_hz":null,"dwell_ms":null}}"#)
+                .unwrap();
+        assert_eq!(c, Call::StartScan(ScanRequest { band_id: "49m".into(), step_hz: None, dwell_ms: None }));
+        let c: Call = serde_json::from_str(r#"{"cmd":"delete_scan","args":{"id":"x"}}"#).unwrap();
+        assert_eq!(c, Call::DeleteScan { id: "x".into() });
         let c: Call = serde_json::from_str(r#"{"cmd":"rig","args":{"cmd":"set_power","on":false}}"#).unwrap();
         assert_eq!(c, Call::Rig(RigCommand::SetPower { on: false }));
         let c: Call = serde_json::from_str(

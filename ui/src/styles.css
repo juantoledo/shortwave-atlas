@@ -23,6 +23,14 @@
   --warn: #ff8a7a;
   --site-on: #ffe2a0;
   --site-quiet: rgba(150, 185, 220, 0.6);
+  /* band bars on the whole dial, and their labels */
+  --band-bc: rgba(140, 185, 230, 0.34);
+  --band-bc-text: #a9bdd2;
+  --band-ham: #4fc8a4;
+  --band-ham-text: #7fdcbf;
+  --band-util: #b48cf0;
+  --band-util-text: #c9aef5;
+  --band-gap: repeating-linear-gradient(135deg, rgba(140, 185, 230, 0.13) 0 2px, transparent 2px 6px);
   --gap: 12px;
   --radius: 14px;
   --hit: 32px;
@@ -171,7 +179,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .update-pill.warn .lamp { background: var(--warn); box-shadow: none; }
 .pill-short { display: none; }
 @media (max-width: 1100px) { .pill-long { display: none; } .pill-short { display: inline; } }
-.update-panel {
+.update-panel, .confirm-pop {
   position: absolute; z-index: 15; right: 0; top: calc(100% + 8px); width: min(360px, calc(100vw - 24px));
   max-height: min(70vh, 520px); overflow: auto; padding: 14px 16px;
   background: rgba(8, 14, 23, 0.97); border: 1px solid var(--line-strong); border-radius: 10px;
@@ -184,8 +192,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .update-panel a.btn { text-decoration: none; }
 .update-panel progress { width: 100%; margin-top: 12px; accent-color: var(--amber); }
 .note.url { overflow-wrap: anywhere; user-select: text; }
+/* the "turn the radio off?" popover under the power button (components/Confirm.tsx) */
+.power-wrap { position: relative; flex: none; }
+.confirm-pop { width: min(280px, calc(100vw - 24px)); }
+.confirm-pop p { margin: 0; }
+.confirm-pop .actions { margin-top: 14px; }
 @media (max-width: 599px) {
-  .update-panel { position: fixed; left: 8px; right: 8px; top: calc(56px + env(safe-area-inset-top)); width: auto; }
+  .update-panel, .confirm-pop { position: fixed; left: 8px; right: 8px; top: calc(56px + env(safe-area-inset-top)); width: auto; }
 }
 
 /* ---------- Stage (globe) ---------- */
@@ -217,6 +230,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .lg.on { background: var(--site-on); box-shadow: 0 0 6px rgba(255, 226, 160, 0.7); }
 .lg.quiet { width: 6px; height: 6px; margin: 0 1px; background: var(--site-quiet); }
 .lg.qth { background: var(--cool); box-shadow: 0 0 6px rgba(127, 208, 255, 0.65); }
+.lg.logged { background: var(--band-ham); box-shadow: 0 0 6px rgba(79, 200, 164, 0.6); }
+.lg.band { width: 16px; height: 5px; border-radius: 1px; background: var(--band-bc); }
+.lg.band.k-ham { background: var(--band-ham); }
+.lg.band.k-utility { background: var(--band-util); }
+.lg.band.gap { height: 10px; background: var(--band-gap); border: 1px solid var(--line); }
 .lg-term { margin-top: 2px; opacity: 0.8; }
 .globe-ctl { position: absolute; z-index: 2; right: 12px; bottom: 12px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .globe-ctl .zoom { display: flex; flex-direction: column; gap: 6px; }
@@ -229,6 +247,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 
 /* pins on the globe */
 .pin { position: relative; width: 0; height: 0; pointer-events: none; }
+/* scan pulses on the globe (Globe.tsx mkPulse): a glow and a ring that spreads and fades once;
+   --s is the size, --a the opacity. A finale pulse is green and beats three times. */
+.pulse { position: relative; width: 0; height: 0; pointer-events: none; }
+.pulse::before, .pulse::after {
+  content: ""; position: absolute; left: calc(var(--s) / -2); top: calc(var(--s) / -2); width: var(--s); height: var(--s);
+  border-radius: 50%; opacity: var(--a);
+}
+.pulse::before { background: radial-gradient(circle, rgba(255, 244, 215, 1), rgba(255, 200, 110, 0.6) 32%, transparent 68%); animation: pulse-glow 1.6s ease-out both; }
+.pulse::after { border: 2px solid rgba(255, 224, 160, 0.95); animation: pulse-ring 1.6s ease-out both; }
+.pulse.sig::after { border-width: 2.5px; box-shadow: 0 0 10px rgba(255, 200, 110, 0.6); }
+.pulse.finale::before { background: radial-gradient(circle, rgba(170, 245, 220, 0.95), rgba(79, 200, 164, 0.45) 30%, transparent 65%); animation: pulse-glow 1.3s ease-out 3; }
+.pulse.finale::after { border: 2px solid var(--band-ham); animation: pulse-ring 1.3s ease-out 3; }
+@keyframes pulse-glow { from { transform: scale(0.2); } 25% { transform: scale(0.55); } to { transform: scale(0.55); opacity: 0; } }
+@keyframes pulse-ring { from { transform: scale(0.1); } to { transform: scale(1); opacity: 0; } }
 .pin-dot {
   position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 50%;
   background: var(--amber); box-shadow: 0 0 0 2px rgba(7, 13, 21, 0.85), 0 0 14px 3px rgba(255, 179, 63, 0.7);
@@ -343,6 +375,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 }
 .d-name .flag { height: 0.62em; width: 0.83em; vertical-align: 0.06em; }
 .d-meta { margin: 4px 0 0; color: var(--dim); font-size: 13px; }
+.d-logged { margin: 4px 0 0; font: 500 11.5px var(--font-mono); color: var(--band-ham-text); }
 .d-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; margin: 12px 0 0; }
 .d-grid > div { min-width: 0; }
 .d-grid .wide { grid-column: 1 / -1; }
@@ -493,6 +526,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .rn b { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rn em { display: block; font-style: normal; font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rn em .flag { margin-left: 0.25em; margin-right: 0.3em; }
+.rn b .logged { margin-left: 6px; font: 500 12px var(--font-mono); color: var(--band-ham-text); }
 .dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #5b6c7f; }
 .dot.on { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 8px rgba(255, 179, 63, 0.7); }
 .btn.more { width: 100%; margin: 10px 0 4px; }
@@ -504,8 +538,8 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 /* ---------- Dock (the faceplate) ---------- */
 .dock { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: var(--gap); min-width: 0; }
 .rx, .audio { min-width: 0; padding: 12px 16px; background: var(--panel-bg); border: 1px solid var(--line); border-radius: var(--radius); }
-.rx { display: flex; flex-direction: column; gap: 10px; container-type: inline-size; }
-@container (max-width: 720px) { .steps .rx-x { display: none; } }
+.rx { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 20px; container-type: inline-size; }
+.rx-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .rx-top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
 .readout { display: flex; align-items: baseline; gap: 6px; }
 .freq {
@@ -515,7 +549,7 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 }
 .unit { font: 500 13px var(--font-mono); letter-spacing: 0.1em; color: var(--dim); }
 .rx.off .freq { color: #4b5b6c; text-shadow: none; }
-.rx.off .dial, .rx.off .bdial, .rx.off .steps { opacity: 0.45; }
+.rx.off .dial, .rx.off .bdial, .rx.off .knob { opacity: 0.45; }
 .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; }
 .seg button { padding: 5px 11px; background: transparent; border: 0; font: 500 11px var(--font-mono); letter-spacing: 0.08em; color: var(--dim); }
 .seg button + button { border-left: 1px solid var(--line); }
@@ -526,10 +560,29 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .segs i { width: 7px; height: 14px; border-radius: 1px; background: rgba(140, 185, 230, 0.14); transition: background 0.12s; }
 .segs i.on { background: var(--amber); }
 .sval { min-width: 4.5ch; font: 500 12px var(--font-mono); font-variant-numeric: tabular-nums; }
-.steps { display: flex; gap: 6px; margin-left: auto; }
-.steps button { min-width: 44px; padding: 6px 8px; background: transparent; border: 1px solid var(--line-strong); border-radius: 6px; font: 500 12px var(--font-mono); font-variant-numeric: tabular-nums; }
-.steps button:hover:not(:disabled) { background: rgba(140, 185, 230, 0.08); }
-.dock-more { display: none; }
+.dock-more { display: none; margin-left: auto; }
+
+/* the dual tuning knob: a knurled outer ring (fast) round a smooth cap (slow); --a turns each */
+.knob { --k: 168px; position: relative; width: var(--k); height: var(--k); flex: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+.knob-outer, .knob-inner { position: absolute; border-radius: 50%; cursor: grab; transform: rotate(var(--a, 0deg)); transition: transform 0.06s linear; }
+.knob-outer:active, .knob-inner:active { cursor: grabbing; }
+.knob-outer[aria-disabled], .knob-inner[aria-disabled] { cursor: default; }
+.knob-outer {
+  inset: 0;
+  background:
+    radial-gradient(circle, transparent 60%, rgba(0, 0, 0, 0.35) 71%),
+    repeating-conic-gradient(#2b3847 0deg 2.5deg, #121a24 2.5deg 6deg);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.knob-outer::after { content: ''; position: absolute; left: 50%; top: 2px; width: 2px; height: 14%; margin-left: -1px; border-radius: 1px; background: var(--amber); box-shadow: 0 0 6px rgba(255, 179, 63, 0.7); }
+.knob-inner {
+  inset: 21%;
+  background: radial-gradient(circle at 38% 30%, #3a4858, #1a2430 62%, #111821);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+.knob-inner::after { content: ''; position: absolute; left: 50%; top: 14%; width: 18%; height: 18%; transform: translateX(-50%); border-radius: 50%; background: radial-gradient(circle at 40% 35%, #0a0f15, #1d2834); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 255, 255, 0.08); }
 
 /* dials: shared parts */
 .dial-marks { position: absolute; left: 0; top: 0; width: 100%; height: 14px; overflow: visible; }
@@ -540,7 +593,7 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .dial-scale { position: absolute; left: 0; right: 0; top: 22px; height: 26px; border-top: 1px solid var(--line-strong); }
 .tk { position: absolute; top: 0; width: 1px; height: 5px; background: var(--line-strong); }
 .tk.maj { height: 10px; background: var(--dim); }
-.tl { position: absolute; top: 12px; transform: translateX(-50%); font: 400 10px var(--font-mono); color: var(--dim); white-space: nowrap; }
+.tl { position: absolute; top: 12px; transform: translateX(-50%); font: 400 11.5px var(--font-mono); color: var(--dim); white-space: nowrap; }
 .tune {
   position: absolute; left: 0; top: 0; width: 100%; height: 100%; margin: 0; padding: 0;
   -webkit-appearance: none; appearance: none; background: transparent; cursor: ew-resize; touch-action: pan-y;
@@ -559,23 +612,59 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .bdial-name { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; font: 500 11px/1.25 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
 .bdial-name b { font-weight: 500; }
 .bdial-name.in b { color: var(--amber); }
+.bdial-name.k-ham b { color: var(--band-ham-text); }
+.bdial-name.k-cb b, .bdial-name.k-utility b { color: var(--band-util-text); }
 .bdial-range { font-size: 10px; letter-spacing: 0.04em; }
-.bdial-scale { position: relative; height: 48px; container-type: inline-size; }
+.bdial-scale { position: relative; height: 56px; container-type: inline-size; }
+.bdial-scale .tl { font-size: 12px; }
 @container (max-width: 520px) { .bdial-scale .tl.alt2 { display: none; } }
 @container (max-width: 260px) { .bdial-scale .tl.alt4 { display: none; } }
 .bdial-scale .dial-marks { height: 16px; }
 .bdial-scale .dial-marks .off { opacity: 0.55; transform: none; }
 
-/* whole dial, with the bands and the lens */
-.dial { position: relative; height: 60px; container-type: inline-size; }
-.band-bars { position: absolute; left: 0; right: 0; top: 16px; height: 4px; }
-.band-bar { position: absolute; top: 0; height: 4px; min-width: 2px; border-radius: 1px; background: rgba(140, 185, 230, 0.22); }
-.band-lab { position: absolute; top: 34px; left: 50%; transform: translateX(-50%); font: 400 9px var(--font-mono); color: rgba(132, 152, 173, 0.75); }
+/* band scans: the profile over the band dial (a strip above the marks), and the controls under it */
+.bdial-scale.has-prof { height: 82px; }
+.bdial-scale.has-prof .dial-marks { top: 26px; }
+.bdial-scale.has-prof .dial-scale { top: 48px; }
+.scan-prof { position: absolute; left: 0; top: 0; width: 100%; height: 24px; overflow: visible; pointer-events: none; }
+.scan-prof path, .scan-big path { vector-effect: non-scaling-stroke; }
+.scan-prof .now, .scan-big .now { fill: rgba(79, 200, 164, 0.2); stroke: var(--band-ham); stroke-width: 1px; }
+.scan-prof .ghost { fill: none; stroke: var(--dim); stroke-width: 1px; stroke-dasharray: 3 3; opacity: 0.75; }
+.scan-bar { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: center; gap: 14px; }
+.scan-go { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.scan-btn { flex: none; min-height: 30px; padding: 4px 12px; }
+.scan-btn.on { color: var(--amber); border-color: rgba(255, 179, 63, 0.6); background: var(--amber-soft); }
+.scan-step { flex: 1; min-width: 0; }
+.scan-step .drop { min-height: 30px; padding: 3px 8px; font: 12px var(--font-mono); }
+.scan-info { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-width: 0; }
+.scan-est { font: 400 11px var(--font-mono); color: var(--dim); white-space: nowrap; }
+.scan-progress { flex: 1 1 120px; max-width: 360px; height: 6px; accent-color: var(--amber); }
+.scan-chip { color: var(--band-ham-text); border-color: rgba(79, 200, 164, 0.45); white-space: nowrap; }
+
+/* whole dial: marks, then two lanes of band bars (broadcast; ham, CB and utility), the scale,
+   and a row of labels per lane (only those that fit: dial.ts fitLabels) */
+.dial { position: relative; height: 88px; }
+.dial .dial-scale { top: 28px; }
+.dial-side { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
+.seg.spans button { padding: 3px 8px; font-size: 10.5px; }
+.seg.spans button.here:not([aria-checked="true"]) { color: var(--text); }
+.dial-gap { position: absolute; top: 0; height: 28px; background: var(--band-gap); pointer-events: none; }
+.band-bars { position: absolute; left: 0; right: 0; top: 16px; height: 10px; }
+.band-bar { position: absolute; top: 0; height: 4px; min-width: 2px; border-radius: 1px; background: var(--band-bc); }
+.band-bar.lane1 { top: 6px; }
+.band-bar.k-ham { background: var(--band-ham); opacity: 0.6; }
+.band-bar.k-cb, .band-bar.k-utility { background: var(--band-util); opacity: 0.6; }
+.band-lab { position: absolute; top: 42px; left: 50%; transform: translateX(-50%); font: 500 12px var(--font-mono); color: var(--band-bc-text); white-space: nowrap; }
+.band-bar.lane1 .band-lab { top: 51px; }
+.band-bar.k-ham .band-lab { color: var(--band-ham-text); }
+.band-bar.k-cb .band-lab, .band-bar.k-utility .band-lab { color: var(--band-util-text); }
 .lens {
-  position: absolute; top: -3px; height: 26px; min-width: 4px; border: 1px solid rgba(255, 179, 63, 0.6); border-radius: 2px;
+  position: absolute; top: -3px; height: 32px; min-width: 4px; border: 1px solid rgba(255, 179, 63, 0.6); border-radius: 2px;
   background: rgba(255, 179, 63, 0.08); pointer-events: none; transition: left 0.22s ease-out, width 0.22s ease-out;
 }
-@container (max-width: 560px) { .band-lab { display: none; } }
+/* looking at another span than the frequency's: no thumb until you tune there */
+.dial.away .tune::-webkit-slider-thumb { opacity: 0; }
+.dial.away .tune::-moz-range-thumb { opacity: 0; }
 
 /* audio cell */
 .audio { display: flex; flex-direction: column; gap: 8px; }
@@ -617,16 +706,18 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
   .audio.off .h { margin: 0; }
 }
 
-/* short windows, phones: the faceplate folds (whole dial, S-meter, ±5, audio extras); ⌃ unfolds it */
+/* short windows, phones: the faceplate folds (whole dial, S-meter, audio extras); ⌃ unfolds it */
 @media (max-height: 700px), (max-width: 599px) {
   .dock-more { display: inline-grid; }
   .app:not([data-dock="open"]) .rx-x, .app:not([data-dock="open"]) .audio-x { display: none; }
   .freq { font-size: 30px; width: 11ch; }
   .rx { gap: 8px; padding: 10px 14px; }
   .rx-top { gap: 8px 12px; }
+  .rx-main { gap: 8px; }
+  .rx { column-gap: 14px; }
+  .knob { --k: 88px; }
   .seg button { padding-left: 9px; padding-right: 9px; }
   .audio { padding: 10px 14px; }
-  .band-lab { display: none; }
   .audio.off { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
   .audio.off .h { margin: 0; }
   .audio-row { flex-wrap: nowrap; }
@@ -636,14 +727,16 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
   .dock { gap: var(--gap); }
   .rx, .audio { padding: 10px 12px; }
   .freq { font-size: 30px; }
-  /* line 1: readout and ⌃; line 2: modes and ±1 */
+  /* line 1: readout and ⌃; line 2: modes; then the band dial with the knob beside it */
+  .rx-main { display: contents; }
+  .rx-top, .dial-row { grid-column: 1 / -1; }
+  .knob { --k: 76px; grid-column: 2; grid-row: 2; }
   .rx-top { gap: 8px; }
   .readout { flex: 1 1 auto; }
   .dock-more { order: 1; }
   .seg { order: 2; }
-  .steps { order: 3; }
   .seg button { padding: 0 10px; }
-  .bdial, .dial-row { grid-template-columns: auto minmax(0, 1fr); gap: 10px; }
+  .bdial, .dial-row, .scan-bar { grid-template-columns: auto minmax(0, 1fr); gap: 10px; }
   .bdial-range { display: none; }
   .bdial-name { min-width: 5ch; }
   .dial-row .sm .lab { display: none; }
@@ -661,7 +754,10 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
   .dock { grid-template-columns: minmax(0, 1fr) auto; }
   .audio { flex-direction: row; }
   .rx, .audio { padding: 8px 12px; }
+  .rx { column-gap: 10px; }
+  .rx-top { gap: 6px; }
   .seg button { padding: 0 10px; }
+  .knob { --k: 52px; }
 }
 
 /* ---------- Sheets (Settings, Help) ---------- */
@@ -732,16 +828,29 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .help-app .ver { margin-left: 6px; }
 .help-page .help-by { margin-top: -4px; color: var(--dim); font-size: 13px; }
 
+/* scans */
+.scan-index b small, .scan-detail h2 small { margin-left: 8px; font: 400 12px var(--font-mono); letter-spacing: 0.04em; text-transform: none; color: var(--dim); }
+.scan-detail .note .warn { color: var(--warn); }
+.scan-big { margin: 14px 0 0; }
+.scan-big svg { display: block; width: 100%; height: 84px; border-bottom: 1px solid var(--line-strong); }
+.scan-big .peaks { stroke: var(--amber); stroke-width: 1px; opacity: 0.45; }
+.scan-count { margin: 10px 0 16px; font: 500 12px var(--font-mono); }
+.scan-row { grid-template-columns: 64px minmax(0, 1fr) auto; }
+.scan-row b.v-unidentified { color: var(--dim); }
+.scan-missed-h { margin-top: 20px; }
+.scan-del { position: relative; margin: 20px 0 8px; }
+.scan-del .confirm-pop { left: 0; right: auto; top: auto; bottom: calc(100% + 8px); transform-origin: bottom left; }
+@media (max-width: 599px) { .scan-del .confirm-pop { left: 8px; right: 8px; top: calc(56px + env(safe-area-inset-top)); bottom: auto; } }
+
 /* ---------- Fingers ---------- */
 @media (pointer: coarse) {
   :root { --hit: 44px; }
   .seg button { min-height: 44px; padding: 0 12px; }
-  .steps button { min-height: 44px; min-width: 48px; }
   .chip { min-height: 40px; }
   .row { padding: 12px 6px; }
   .bdial-head .icon-btn { width: 40px; height: 40px; }
-  .bdial-scale { height: 56px; }
-  .dial { height: 64px; }
+  .bdial-scale { height: 64px; }
+  .dial { height: 92px; }
   .drop, .finder input[type="search"] { min-height: 44px; }
   .drop-o { padding: 10px 8px; }
   .chk input { width: 20px; height: 20px; }

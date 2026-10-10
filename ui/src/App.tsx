@@ -8,21 +8,26 @@ import { Dossier } from './components/Dossier';
 import { Globe } from './components/Globe';
 import { Help } from './components/Help';
 import { Hud } from './components/Hud';
+import { ScanBar } from './components/ScanBar';
+import { Scans } from './components/Scans';
 import { PanelHead, ViewTabs, type View } from './components/NavBar';
 import { Settings, type SettingsTab } from './components/settings/Settings';
 import { StationList } from './components/StationList';
 import { TopBar } from './components/TopBar';
-import { Tuner } from './components/Tuner';
-import { adjacentBand, bandEntryHz } from './components/dial';
+import { Tuner, useBandWindow } from './components/Tuner';
+import { DEFAULT_COVERAGE, HF_SPAN } from './components/dial';
+import { noiseFloor } from './components/scan';
 import { UpdateBanner } from './components/UpdateBanner';
 import { makeNames, NamesProvider } from './catalog/names';
-import { NO_FILTERS, useCandidates, useCore, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
+import { NO_FILTERS, useCandidates, useCore, useDial, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
 import { PHONE, useMedia } from './hooks/useMedia';
+import { useBandScans, useScan } from './hooks/useScan';
 import { useUpdate } from './hooks/useUpdate';
 import { I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
 import { stepIndex, type Action } from './keys/keymap';
 import { useKeys } from './keys/useKeys';
+import type { Band } from './types/generated/Band';
 import type { Candidate } from './types/generated/Candidate';
 import type { Mode } from './types/generated/Mode';
 import type { Qth } from './types/generated/Qth';
@@ -31,8 +36,14 @@ import type { StationRow } from './types/generated/StationRow';
 
 const MSG_MS = 6000;
 const NO_HZ: number[] = [];
+const NO_BANDS: Band[] = [];
+const HF_ONLY = [HF_SPAN];
 
-type SheetState = { kind: 'settings'; tab: SettingsTab } | { kind: 'help'; topic: HelpTopic | null } | null;
+type SheetState =
+  | { kind: 'settings'; tab: SettingsTab }
+  | { kind: 'help'; topic: HelpTopic | null }
+  | { kind: 'scans'; id: string | null }
+  | null;
 
 export function App() {
   const { api, info, reloadInfo, rig, status } = useCore();
@@ -60,16 +71,23 @@ export function App() {
   const onError = useCallback((e: unknown) => setMsg(e instanceof Error ? e.message : String(e)), []);
 
   const on = rig.power === 'on';
-  const { freqHz, tune } = useTuning(api, rig.freq_hz, onError);
+  // the rig's coverage and its dial's bands: asked again when the rig comes or goes
+  const { dial, reload: reloadDial } = useDial(api, `${rig.link},${rig.power}`);
+  const coverage = dial?.coverage ?? DEFAULT_COVERAGE;
+  const { freqHz, tune } = useTuning(api, rig.freq_hz, coverage, onError);
   const [qth, setQth] = useState<Qth | null>(null);
   useEffect(() => { if (info) setQth(info.qth); }, [info]);
 
   const now = useNow(20_000);
   const meta = useStationsMeta(api);
   const overview = useOverview(api);
+  const dialBands = dial?.bands ?? meta?.bands ?? NO_BANDS;
+  const win = useBandWindow(freqHz, dialBands, overview?.on_hz ?? NO_HZ);
   const names = useMemo(() => makeNames(meta, t), [meta, t]);
+  const scan = useScan(api, onError);
+  const bandScans = useBandScans(scan, win.w.band?.id ?? null);
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
-  const search = useStationSearch(api, filters);
+  const search = useStationSearch(api, filters, filters.logged ? scan.logged : null);
   const cands = useCandidates(api, on ? freqHz : null, `${qth?.lat},${qth?.lon},${now.getTime()}`);
 
   // Keep the chosen station while it is still a candidate; otherwise take the best one.
@@ -93,7 +111,8 @@ export function App() {
 
   const setMode = (mode: Mode) => api?.rig({ cmd: 'set_mode', mode }).catch(onError);
   const pick = (r: StationRow) => {
-    if (rig.mode !== r.mode) setMode(r.mode);
+    // AM-N is still AM: a broadcast keeps the narrow filter the listener chose
+    if (rig.mode !== r.mode && !(r.mode === 'AM' && rig.mode === 'AMN')) setMode(r.mode);
     tune(r.freq_hz);
     setWanted(r.id);
   };
@@ -101,12 +120,14 @@ export function App() {
     setWanted(c.station.id);
     setSel(c);
   };
-  const togglePower = async () => {
+  // turning off asks first (components/Confirm.tsx); a rig that goes off by itself drops the question
+  const [askOff, setAskOff] = useState(false);
+  useEffect(() => { if (!on) setAskOff(false); }, [on]);
+  const setPower = async (to: boolean) => {
     if (!api || powerBusy) return;
-    if (on && !window.confirm(t.confirmOff)) return;
     setPowerBusy(true);
     try {
-      await api.rig({ cmd: 'set_power', on: !on });
+      await api.rig({ cmd: 'set_power', on: to });
     } catch (e) {
       onError(e);
     }
@@ -114,9 +135,25 @@ export function App() {
   };
   const moveQth = (q: Qth) => {
     setQth(q);
-    api?.setQth(q).catch(onError);
+    // the QTH's ITU region sets some band edges
+    api?.setQth(q).then(reloadDial, onError);
   };
   const onGlobeTouched = useCallback(() => setTouchedGlobe(true), []);
+
+  // the band dial draws the running scan of its band, else the band's last scan, each over the
+  // scan before it
+  const running = scan.status.state === 'running' && scan.status.band_id === win.w.band?.id ? scan.status : null;
+  const { latest: last, ghost: before } = bandScans;
+  const latest = useMemo(() => last && { ...last.summary, samples: last.samples }, [last]);
+  const ghost = useMemo(() => before && { ...before.summary, samples: before.samples }, [before]);
+  const profiles = useMemo(() => (running ? { now: running, ghost: latest } : { now: latest, ghost }), [running, latest, ghost]);
+  // the globe's scan animation: the running scan's last steps, and the finale of one just ended
+  const st = scan.status;
+  const globeScan = useMemo(
+    () => (st.state === 'running' ? { pings: st.pings, floorDb: noiseFloor(st.samples) } : null),
+    [st],
+  );
+  const finale = useMemo(() => scan.finished && { key: scan.finished.id, sites: scan.finished.sites }, [scan.finished]);
 
   // the keyboard (keys/keymap.ts): typing anywhere starts a new search
   const searchRef = useRef<HTMLInputElement>(null);
@@ -132,7 +169,7 @@ export function App() {
     // on phones the panel only shows after the view change renders
     if (phone) requestAnimationFrame(go);
   };
-  useKeys(sheet !== null, (a: Action) => {
+  useKeys(sheet !== null || askOff, (a: Action) => {
     switch (a.kind) {
       case 'search':
         setFilters((f) => ({ ...f, q: a.text }));
@@ -149,8 +186,8 @@ export function App() {
       case 'nudge': return freqHz !== null && tune(freqHz + a.khz * 1000);
       case 'mode': return setMode(a.mode);
       case 'band': {
-        const b = freqHz === null ? null : adjacentBand(freqHz / 1000, meta?.bands ?? [], a.dir);
-        return b && tune(bandEntryHz(b, overview?.on_hz ?? NO_HZ));
+        const hz = freqHz === null ? null : win.jump(a.dir);
+        return hz !== null && tune(hz);
       }
       case 'station': {
         const rows = search.rows, cur = wanted ?? sel?.station.id;
@@ -185,7 +222,10 @@ export function App() {
           on={on}
           powerBusy={powerBusy}
           powerDisabled={status !== 'open' || rig.link === 'off'}
-          onPower={togglePower}
+          onPower={() => (on ? setAskOff(true) : setPower(true))}
+          askOff={askOff}
+          onConfirmOff={() => { setAskOff(false); setPower(false); }}
+          onCancelOff={() => setAskOff(false)}
           onSetup={() => openSettings('rig')}
           onHelp={() => openHelp()}
           onSettings={() => openSettings()}
@@ -205,6 +245,9 @@ export function App() {
               failedMsg={t.globeFailed}
               sites={sites}
               activeSite={filters.site}
+              loggedSites={scan.loggedSites}
+              scan={globeScan}
+              finale={finale}
               onSite={pickSite}
               siteLabel={siteLabel}
             />
@@ -225,6 +268,7 @@ export function App() {
             loading={search.loading}
             siteName={siteName}
             selId={sel?.station.id ?? null}
+            logged={scan.logged}
             onPick={pick}
             onTuneHz={tune}
             onMore={search.more}
@@ -241,6 +285,7 @@ export function App() {
             others={sel ? cands.filter((c) => c.station.id !== sel.station.id) : []}
             meta={meta}
             now={now}
+            logged={scan.logged}
             onChoose={choose}
           />
         </section>
@@ -253,7 +298,22 @@ export function App() {
             strengthDb={rig.strength_db}
             freqsHz={meta?.freqs_hz ?? NO_HZ}
             onAirHz={overview?.on_hz ?? NO_HZ}
-            bands={meta?.bands ?? []}
+            bands={dialBands}
+            spans={dial?.spans ?? HF_ONLY}
+            coverage={coverage}
+            win={win}
+            profiles={profiles}
+            scanBar={
+              <ScanBar
+                on={on}
+                band={win.w.band}
+                status={scan.status}
+                last={bandScans.summary}
+                onStart={scan.start}
+                onStop={scan.stop}
+                onOpen={(id) => setSheet({ kind: 'scans', id })}
+              />
+            }
             expanded={dockOpen}
             onExpand={() => setDockOpen((o) => !o)}
             onTune={tune}
@@ -282,6 +342,15 @@ export function App() {
             onClose={() => setSheet(null)}
             onError={onError}
             onApplied={reloadInfo}
+          />
+        )}
+        {sheet?.kind === 'scans' && (
+          <Scans
+            scan={scan}
+            openId={sheet.id}
+            onOpen={(id) => setSheet({ kind: 'scans', id })}
+            onTune={tune}
+            onClose={() => setSheet(null)}
           />
         )}
         {sheet?.kind === 'help' && (

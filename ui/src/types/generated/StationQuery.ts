@@ -25,7 +25,11 @@ countries: Array<string>,
 /**
  * Target regions.
  */
-regions: Array<Region>, site: number | null, offset: number, 
+regions: Array<Region>, site: number | null, 
+/**
+ * Only stations a band scan has logged (the server passes the logbook to `search_in`).
+ */
+logged: boolean, offset: number, 
 /**
  * 0 = `DEFAULT_LIMIT`; capped at `MAX_LIMIT`.
  */

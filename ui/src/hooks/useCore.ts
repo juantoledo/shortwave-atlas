@@ -3,17 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Api } from '../api/client';
 import { connect, type LinkStatus } from '../api/transport';
+import { clampToCoverage } from '../components/dial';
 import type { Candidate } from '../types/generated/Candidate';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
+import type { Dial } from '../types/generated/Dial';
 import type { Info } from '../types/generated/Info';
 import type { Overview } from '../types/generated/Overview';
 import type { RigState } from '../types/generated/RigState';
+import type { RxRange } from '../types/generated/RxRange';
 import type { StationPage } from '../types/generated/StationPage';
 import type { StationQuery } from '../types/generated/StationQuery';
 import type { StationRow } from '../types/generated/StationRow';
 
-export const FREQ_MIN_HZ = 30_000;
-export const FREQ_MAX_HZ = 56_000_000;
 /** Keep showing a frequency we just set for this long while the rig catches up. */
 const PENDING_MS = 1500;
 /** Wait for the dial to settle before looking stations up (prototype value). */
@@ -57,7 +58,8 @@ export function useCore() {
 }
 
 /** The displayed frequency: what we just asked for, until the rig reports it (or a timeout). */
-export function useTuning(api: Api | null, rigHz: number | null, onError: (e: unknown) => void) {
+/** Tuning, kept within what the rig receives (`coverage`). */
+export function useTuning(api: Api | null, rigHz: number | null, coverage: readonly RxRange[], onError: (e: unknown) => void) {
   const [pending, setPending] = useState<number | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -67,12 +69,12 @@ export function useTuning(api: Api | null, rigHz: number | null, onError: (e: un
 
   const tune = useCallback((hz: number) => {
     if (!api) return;
-    hz = Math.round(Math.min(FREQ_MAX_HZ, Math.max(FREQ_MIN_HZ, hz)) / 100) * 100;
+    hz = clampToCoverage(Math.round(hz / 100) * 100, coverage);
     setPending(hz);
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setPending(null), PENDING_MS);
     api.rig({ cmd: 'set_freq', hz }).catch(onError);
-  }, [api, onError]);
+  }, [api, coverage, onError]);
 
   return { freqHz: pending ?? rigHz, tune };
 }
@@ -104,6 +106,15 @@ export function useStationsMeta(api: Api | null) {
   return meta;
 }
 
+/** The rig's coverage and its dial's bands and spans, asked again when `key` changes (the rig
+ *  comes or goes) or on `reload` (the QTH moved). */
+export function useDial(api: Api | null, key: string) {
+  const [dial, setDial] = useState<Dial | null>(null);
+  const reload = useCallback(() => { api?.dial().then(setDial, () => {}); }, [api]);
+  useEffect(reload, [reload, key]);
+  return { dial, reload };
+}
+
 /** Every transmitter site and the frequencies on the air, refreshed each minute. */
 export function useOverview(api: Api | null) {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -118,7 +129,7 @@ export function useOverview(api: Api | null) {
 }
 
 export type Filters = Omit<StationQuery, 'offset' | 'limit' | 'facets'>;
-export const NO_FILTERS: Filters = { q: '', on_air: false, bands: [], langs: [], countries: [], regions: [], site: null };
+export const NO_FILTERS: Filters = { q: '', on_air: false, logged: false, bands: [], langs: [], countries: [], regions: [], site: null };
 
 interface SearchState {
   rows: StationRow[];
@@ -129,8 +140,8 @@ interface SearchState {
 }
 
 /** The station list for `filters`: first page on change (debounced), more on demand, and
- *  the loaded rows refreshed each minute (on-air dots). */
-export function useStationSearch(api: Api | null, filters: Filters) {
+ *  the loaded rows refreshed each minute (on-air dots) and when `refresh` changes. */
+export function useStationSearch(api: Api | null, filters: Filters, refresh: unknown = null) {
   const [st, setSt] = useState<SearchState>({ rows: [], total: 0, onAir: 0, facets: null, loading: true });
   const seq = useRef(0);
   const shown = useRef(0);
@@ -149,7 +160,7 @@ export function useStationSearch(api: Api | null, filters: Filters) {
       rows.push(...p.items);
     }
     if (my === seq.current) setSt({ rows, total: first.total, onAir: first.on_air, facets: first.facets, loading: false });
-  }, [api, key]); // `key` stands for `filters`
+  }, [api, key, refresh]); // `key` stands for `filters`
 
   useEffect(() => {
     setSt((s) => ({ ...s, loading: true }));

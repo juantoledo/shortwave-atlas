@@ -5,7 +5,9 @@ import type { AudioDiagnostics } from '../types/generated/AudioDiagnostics';
 import type { AudioSettings } from '../types/generated/AudioSettings';
 import type { Candidate } from '../types/generated/Candidate';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
+import type { Dial } from '../types/generated/Dial';
 import type { Info } from '../types/generated/Info';
+import type { Logged } from '../types/generated/Logged';
 import type { Overview } from '../types/generated/Overview';
 import type { Qth } from '../types/generated/Qth';
 import type { RigChoice } from '../types/generated/RigChoice';
@@ -14,6 +16,10 @@ import type { RigDiagnostics } from '../types/generated/RigDiagnostics';
 import type { RigModel } from '../types/generated/RigModel';
 import type { RigSettings } from '../types/generated/RigSettings';
 import type { RigState } from '../types/generated/RigState';
+import type { Scan } from '../types/generated/Scan';
+import type { ScanRequest } from '../types/generated/ScanRequest';
+import type { ScanStatus } from '../types/generated/ScanStatus';
+import type { ScanSummary } from '../types/generated/ScanSummary';
 import type { SerialPortInfo } from '../types/generated/SerialPortInfo';
 import type { SoundCard } from '../types/generated/SoundCard';
 import type { StationPage } from '../types/generated/StationPage';
@@ -33,6 +39,7 @@ export class Api {
   overview = () => this.transport.call({ cmd: 'overview' }) as Promise<Overview>;
   stationsMeta = () => this.transport.call({ cmd: 'stations_meta' }) as Promise<CatalogMeta>;
   setQth = (args: Qth) => this.transport.call({ cmd: 'set_qth', args }) as Promise<null>;
+  dial = () => this.transport.call({ cmd: 'dial' }) as Promise<Dial>;
 
   rigSettings = () => this.transport.call({ cmd: 'rig_settings' }) as Promise<RigSettings>;
   rigModels = () => this.transport.call({ cmd: 'rig_models' }) as Promise<RigModel[]>;
@@ -51,4 +58,12 @@ export class Api {
   /** Desktop window only: a remote browser gets an `invalid` error. */
   installUpdate = () => this.transport.call({ cmd: 'install_update' }) as Promise<null>;
   setUpdatePrefs = (args: UpdatePrefs) => this.transport.call({ cmd: 'set_update_prefs', args }) as Promise<null>;
+
+  startScan = (args: ScanRequest) => this.transport.call({ cmd: 'start_scan', args }) as Promise<ScanStatus>;
+  stopScan = () => this.transport.call({ cmd: 'stop_scan' }) as Promise<null>;
+  scanStatus = () => this.transport.call({ cmd: 'scan_status' }) as Promise<ScanStatus>;
+  scans = () => this.transport.call({ cmd: 'scans' }) as Promise<ScanSummary[]>;
+  scan = (id: string) => this.transport.call({ cmd: 'scan', args: { id } }) as Promise<Scan>;
+  deleteScan = (id: string) => this.transport.call({ cmd: 'delete_scan', args: { id } }) as Promise<null>;
+  logbook = () => this.transport.call({ cmd: 'logbook' }) as Promise<Logged[]>;
 }

@@ -1,9 +1,6 @@
 //! Display names and groupings Atlas adds to EiBi's codes: target areas, world regions,
 //! broadcast bands, and English/Spanish names for the common languages.
 
-use serde::{Deserialize, Serialize};
-use ts_rs::TS;
-
 use crate::country::{country, Region};
 
 /// A target-area code: English and Spanish names and its world region.
@@ -97,15 +94,7 @@ pub fn target_region(code: &str) -> Region {
     target(code).map(|t| t.region).or_else(|| country(code).map(|c| c.region)).unwrap_or(Region::Other)
 }
 
-/// A shortwave broadcast band.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
-pub struct Band {
-    /// `49m`
-    pub id: String,
-    pub lo_khz: u32,
-    pub hi_khz: u32,
-}
+pub use crate::bands::Band;
 
 /// Broadcast bands with the edges stations actually use (a little wider than the ITU
 /// allocations). Frequencies outside all of them are "out of band".
@@ -135,8 +124,9 @@ pub fn band_of(freq_hz: u32) -> &'static str {
     BANDS.iter().find(|b| khz >= b.1 && khz <= b.2).map_or(OUT_OF_BAND, |b| b.0)
 }
 
+/// The broadcast bands, for the station filter.
 pub fn bands() -> Vec<Band> {
-    BANDS.iter().map(|&(id, lo, hi)| Band { id: id.into(), lo_khz: lo, hi_khz: hi }).collect()
+    BANDS.iter().map(|&(id, lo, hi)| Band::broadcast(id, lo, hi)).collect()
 }
 
 /// English name override (when the README's is awkward) and Spanish name of a language.

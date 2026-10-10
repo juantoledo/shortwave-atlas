@@ -2,7 +2,7 @@
 //! with its schedule slots, plus the lookups the UI needs: candidates for a frequency,
 //! filtered and paged search, per-site on-air counts for the globe, and the code tables.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -119,6 +119,8 @@ pub struct StationQuery {
     /// Target regions.
     pub regions: Vec<Region>,
     pub site: Option<u32>,
+    /// Only stations a band scan has logged (the server passes the logbook to `search_in`).
+    pub logged: bool,
     pub offset: u32,
     /// 0 = `DEFAULT_LIMIT`; capped at `MAX_LIMIT`.
     pub limit: u32,
@@ -436,6 +438,23 @@ impl Catalog {
         self.rows.get(id as usize).map(|r| &r.station)
     }
 
+    /// Every station, by frequency.
+    pub fn stations(&self) -> impl Iterator<Item = &Station> {
+        self.rows.iter().map(|r| &r.station)
+    }
+
+    /// Stations from `lo_hz` to `hi_hz`, by frequency.
+    pub fn between(&self, lo_hz: u32, hi_hz: u32) -> impl Iterator<Item = &Station> {
+        let lo = self.rows.partition_point(|r| r.station.freq_hz < lo_hz);
+        let hi = self.rows.partition_point(|r| r.station.freq_hz <= hi_hz);
+        self.rows[lo..hi.max(lo)].iter().map(|r| &r.station)
+    }
+
+    /// The schedule file this catalog was built from (`sked-a26.csv`).
+    pub fn source_file(&self) -> &str {
+        &self.report.source_file
+    }
+
     /// Rows within `tol_hz` of `freq_hz` (rows are sorted by frequency).
     fn near(&self, freq_hz: u32, tol_hz: u32) -> &[Row] {
         let lo = self.rows.partition_point(|r| r.station.freq_hz < freq_hz.saturating_sub(tol_hz));
@@ -483,6 +502,11 @@ impl Catalog {
 
     /// Filtered, paged station list.
     pub fn search(&self, q: &StationQuery, unix: i64) -> StationPage {
+        self.search_in(q, unix, None)
+    }
+
+    /// `search`, where `q.logged` keeps only the station ids in `logged` (none without it).
+    pub fn search_in(&self, q: &StationQuery, unix: i64, logged: Option<&HashSet<u32>>) -> StationPage {
         let text = fold(q.q.trim());
         let terms: Vec<&str> = text.split_whitespace().collect();
         let khz_prefix = !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit() || b == b'.');
@@ -509,7 +533,9 @@ impl Catalog {
         let mut items = Vec::new();
         let mut facets = Facets::default();
         for r in &self.rows {
-            let base = q.site.is_none_or(|s| r.station.site == s) && text_ok(r);
+            let base = q.site.is_none_or(|s| r.station.site == s)
+                && (!q.logged || logged.is_some_and(|l| l.contains(&r.station.id)))
+                && text_ok(r);
             if !base {
                 continue;
             }

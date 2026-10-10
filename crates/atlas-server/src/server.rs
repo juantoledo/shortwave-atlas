@@ -176,7 +176,7 @@ mod tests {
     use tokio_tungstenite::tungstenite;
 
     async fn start(auth: Option<&str>) -> (u16, Arc<Atlas>) {
-        let atlas = Atlas::start(AppConfig::default(), None, None, crate::app::tests::no_updates()).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), None, None, None, crate::app::tests::no_updates()).unwrap();
         let cfg = ServerConfig { auth: auth.map(String::from), ..ServerConfig::default() };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();

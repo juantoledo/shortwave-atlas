@@ -3,12 +3,14 @@
 
 pub mod api;
 pub mod audio;
+pub mod bands;
 pub mod calendar;
 pub mod country;
 pub mod eibi;
 pub mod geo;
 pub mod platform;
 pub mod rig;
+pub mod scan;
 pub mod schedule;
 pub mod setup;
 pub mod stations;

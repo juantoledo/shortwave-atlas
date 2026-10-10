@@ -4,6 +4,7 @@
 
 import { createContext, useContext } from 'react';
 import type { Messages } from '../i18n';
+import type { Band } from '../types/generated/Band';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
 import type { Region } from '../types/generated/Region';
 
@@ -14,6 +15,8 @@ export interface Names {
   target(code: string): string;
   region(id: Region): string;
   band(id: string): string;
+  /** A dial band: `49m`, `Ham 40m`, `Mediumwave`. */
+  dialBand(b: Pick<Band, 'id' | 'label' | 'kind'>): string;
 }
 
 function displayNames(locale: string): ((iso: string) => string | null) {
@@ -47,6 +50,8 @@ export function makeNames(meta: CatalogMeta | null, t: Messages): Names {
     target: (code) => targets.get(code) ?? countries.get(code) ?? code,
     region: (id) => t.regions[id],
     band: (id) => (id === 'oob' ? t.bandOob : id),
+    dialBand: (b) =>
+      b.kind === 'ham' ? t.hamBand(b.label.endsWith('cm') ? b.label : b.label + 'm') : (t.bandNames[b.id] ?? b.id),
   };
 }
 

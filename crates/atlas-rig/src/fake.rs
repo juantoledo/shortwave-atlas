@@ -1,5 +1,6 @@
 //! A tiny in-process rigctld for tests: answers the commands in `hamlib::Cmd`.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -11,7 +12,11 @@ struct Rig {
     mode: String,
     power: bool,
     fail_next: Option<String>,
+    /// S-meter per frequency (else -54, S0).
+    strength: HashMap<u32, i32>,
     log: Vec<String>,
+    /// Every command, reads included.
+    all: Vec<String>,
 }
 
 pub struct FakeRigctld {
@@ -28,7 +33,9 @@ impl FakeRigctld {
             mode: "USB".into(),
             power: true,
             fail_next: None,
+            strength: HashMap::new(),
             log: vec![],
+            all: vec![],
         }));
         let shared = rig.clone();
         tokio::spawn(async move {
@@ -58,15 +65,33 @@ impl FakeRigctld {
     pub async fn log(&self) -> Vec<String> {
         self.rig.lock().await.log.clone()
     }
+
+    /// Every command received so far.
+    pub async fn all(&self) -> Vec<String> {
+        self.rig.lock().await.all.clone()
+    }
+
+    /// The S-meter reads `db` (relative to S9) while tuned to `hz`.
+    pub async fn signal(&self, hz: u32, db: i32) {
+        self.rig.lock().await.strength.insert(hz, db);
+    }
 }
 
 fn answer(rig: &mut Rig, line: &str) -> String {
+    rig.all.push(line.into());
     if let Some(e) = rig.fail_next.take() {
         return format!("{e}\n");
     }
     let mut parts = line.split_whitespace();
     let ok = "RPRT 0\n".to_string();
     match (parts.next(), parts.next()) {
+        (Some("+\\dump_state"), _) => concat!(
+            "dump_state:\n1\n3073\n2\n",
+            "30000.000000 470000000.000000 0x1bf -1 -1 0x3 0x0\n0 0 0 0 0 0 0\n",
+            "1800000.000000 54000000.000000 0x1bf 5000 100000 0x3 0x0\n0 0 0 0 0 0 0\n",
+            "RPRT 0\n"
+        )
+        .into(),
         (Some("\\get_powerstat"), _) => format!("{}\n", u8::from(rig.power)),
         (Some("\\set_powerstat"), Some(v)) => {
             rig.log.push(line.into());
@@ -86,7 +111,7 @@ fn answer(rig: &mut Rig, line: &str) -> String {
             rig.mode = v.into();
             ok
         }
-        (Some("l"), Some("STRENGTH")) => "-54\n".into(),
+        (Some("l"), Some("STRENGTH")) => format!("{}\n", rig.strength.get(&rig.freq).copied().unwrap_or(-54)),
         (Some("l"), Some("CWPITCH")) => "600\n".into(),
         _ => "RPRT -1\n".into(),
     }
