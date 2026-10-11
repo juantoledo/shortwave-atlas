@@ -174,7 +174,9 @@ rigctld side by side; run it from there.
 - **macOS:** a LaunchAgent (`~/Library/LaunchAgents/org.swatlas.server.plist`) with
   `ProgramArguments` set to the server's path, `EnvironmentVariables` for `WEB_BIND`/`WEB_AUTH`, and
   `KeepAlive` set to true. Load it with `launchctl load`.
-- **Linux:** systemd, below.
+- **Linux:** systemd, below. Put the contents of the Linux server archive in `/opt/swatlas` (the
+  server finds `ui/` next to it) and add a user for it: `sudo useradd -r -G dialout,audio swatlas` (`audio` is
+  for Listen).
 
 `/etc/systemd/system/swatlas.service`
 ```
@@ -183,13 +185,12 @@ Description=Shortwave Atlas server
 After=network.target
 
 [Service]
-ExecStart=/home/jtoledoc/dev/swatlas/target/release/swatlas-server
-Environment=SWATLAS_UI_DIR=/home/jtoledoc/dev/swatlas/ui/dist
+ExecStart=/opt/swatlas/swatlas-server
 Environment=WEB_BIND=0.0.0.0
-Environment=WEB_AUTH=jtoledoc:A_LONG_PASSWORD
+Environment=WEB_AUTH=admin:A_LONG_PASSWORD
 Restart=always
 RestartSec=5
-User=jtoledoc
+User=swatlas
 Group=dialout
 
 [Install]
@@ -198,6 +199,17 @@ WantedBy=multi-user.target
 With `rig.backend = "spawn"`, the server starts and supervises its own `rigctld`, so no separate
 rigctld service is needed. Don't run another CAT program on the same serial port. The audio
 device can only be opened by one program at a time.
+
+## How it's built
+Shortwave Atlas is written with [Claude Code](https://claude.com/claude-code), Anthropic's coding
+agent. I set the direction and the rules, review every change, and test it on my own radio, a Yaesu
+FTDX10 ([docs/rigs/ftdx10.md](docs/rigs/ftdx10.md)). The rules the agent works under are in
+[CLAUDE.md](CLAUDE.md): receive only, one API for both clients, logic that doesn't touch IO in
+`atlas-core` with unit tests. Commits it helped write carry a `Co-Authored-By: Claude` trailer.
+
+Every change goes through CI: formatting, clippy and the tests on Linux, Windows and macOS, the
+TypeScript typecheck and UI tests, `cargo deny` and `npm audit` on the dependencies, and
+conventional commit messages. Every release ships with checksums, SBOMs and build attestations.
 
 ## Credits
 - Coastlines, borders and shaded relief: [Natural Earth](https://www.naturalearthdata.com/) (public
@@ -210,7 +222,12 @@ device can only be opened by one program at a time.
 The globe rasters in `ui/src/assets/globe/` are built by `assets/make_globe_rasters.py`.
 
 ## Status
-This is the kickstart: phase 1 (skeleton) plus remote access, audio and i18n (English and Spanish).
-The EiBi schedule is in (phase 2), held in memory: SQLite only if notes and logs need it.
-Next steps: map polish, real-rig validation, then notes/logs, the band scan, a shared rigctld
-port and packaging.
+Early, and in active use. As of 0.5: the EiBi catalog with search and filters, remote access from a
+browser, the rig's audio with a waterfall, the band scan with a logbook, installers for Linux,
+Windows and macOS (with signed in-app updates on Windows, macOS and the AppImage), and English and
+Spanish.
+
+It is tested on a Yaesu FTDX10. Other Hamlib rigs should work but haven't been tried yet: if you
+run it on yours, an issue saying how it went (working or not) helps.
+
+Next: map polish, more rigs, notes, and sharing one rigctld port with other CAT programs.
