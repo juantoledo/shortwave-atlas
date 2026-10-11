@@ -93,7 +93,8 @@ pub fn search(cat: &Catalog, q: &StationQuery, unix: i64, k: &Known) -> StationP
         (Some(l), Some(m)) => Some(m.ids().intersection(&l).copied().collect()),
     };
     let heard_list = q.lens == Lens::Heard && q.scan.is_none();
-    let mut page = if heard_list { cat.matching(q, unix, only.as_ref()) } else { cat.search_in(q, unix, only.as_ref()) };
+    let mut page =
+        if heard_list { cat.matching(q, unix, only.as_ref()) } else { cat.search_in(q, unix, only.as_ref()) };
     if let Some(m) = &marks {
         page.scan_db = page.items.iter().filter_map(|r| m.heard.get(&r.id).map(|&db| (r.id, db))).collect();
     }
@@ -125,9 +126,8 @@ pub fn search(cat: &Catalog, q: &StationQuery, unix: i64, k: &Known) -> StationP
     if heard_list {
         let logs: HashMap<u32, &Logged> = k.logbook.iter().map(|l| (l.station_id, l)).collect();
         let stations = std::mem::take(&mut page.items).into_iter();
-        let mut rows: Vec<HeardRow> = stations
-            .filter_map(|row| logs.get(&row.id).map(|&l| HeardRow::Station { log: l.clone(), row }))
-            .collect();
+        let mut rows: Vec<HeardRow> =
+            stations.filter_map(|row| logs.get(&row.id).map(|&l| HeardRow::Station { log: l.clone(), row })).collect();
         let signals = filter_off(k.signals.iter().map(from_signal).collect(), q);
         rows.extend(signals.into_iter().map(|row| HeardRow::Signal { row }));
         // stable: the same frequency keeps stations first, in catalog order

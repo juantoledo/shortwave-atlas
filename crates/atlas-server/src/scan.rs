@@ -80,12 +80,8 @@ impl ScanService {
     /// Load the saved scans and their logbook (against `catalog`).
     pub fn new(dir: Option<PathBuf>, catalog: Arc<Catalog>) -> Arc<Self> {
         let scans = dir.as_deref().map(load).unwrap_or_default();
-        let mut inner = Inner {
-            status: ScanStatus::Idle,
-            scans,
-            logbook: Default::default(),
-            signals: Default::default(),
-        };
+        let mut inner =
+            Inner { status: ScanStatus::Idle, scans, logbook: Default::default(), signals: Default::default() };
         inner.relog(&catalog);
         Arc::new(Self { dir, catalog, inner: Mutex::new(inner) })
     }
