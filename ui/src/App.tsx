@@ -15,6 +15,8 @@ import { ScanBar } from './components/ScanBar';
 import { Scans } from './components/Scans';
 import { PanelHead, ViewTabs, type View } from './components/NavBar';
 import { Settings, type SettingsTab } from './components/settings/Settings';
+import { StationForm } from './components/StationForm';
+import { draftFrom, draftFromOff, draftHere, draftOf } from './components/stationDraft';
 import { StationList } from './components/StationList';
 import { TopBar } from './components/TopBar';
 import { Tuner, useBandWindow } from './components/Tuner';
@@ -41,6 +43,7 @@ import type { OffSchedule } from './types/generated/OffSchedule';
 import type { Qth } from './types/generated/Qth';
 import type { SiteDot } from './types/generated/SiteDot';
 import type { StationRow } from './types/generated/StationRow';
+import type { UserStationDraft } from './types/generated/UserStationDraft';
 
 const MSG_MS = 6000;
 const NO_HZ: number[] = [];
@@ -51,6 +54,8 @@ type SheetState =
   | { kind: 'settings'; tab: SettingsTab }
   | { kind: 'help'; topic: HelpTopic | null }
   | { kind: 'scans'; id: string | null }
+  /** A station of the listener's own: new (`id` null) or kept. */
+  | { kind: 'station'; id: string | null; draft: UserStationDraft }
   | null;
 
 export function App() {
@@ -196,6 +201,26 @@ export function App() {
     setFilters((f) => ({ ...f, scan: id, lens: 'all' }));
     if (phone) setView('browse');
   };
+  // the listener's own stations: the form, and where it opens from
+  const addStation = (c: Candidate | null) => {
+    if (freqHz === null) return;
+    setSheet({ kind: 'station', id: null, draft: c ? draftFrom(c, new Date()) : draftHere(freqHz, asMode(rig.mode), new Date()) });
+  };
+  const addStationOff = (o: OffSchedule) => setSheet({ kind: 'station', id: null, draft: draftFromOff(o, asMode(rig.mode), new Date()) });
+  const shownMine = sel?.station.source === MINE ? mine.byId.get(sel.station.key) ?? null : null;
+  const editStation = () => shownMine && setSheet({ kind: 'station', id: shownMine.station.id, draft: draftOf(shownMine.station) });
+  const deleteStation = async () => {
+    if (!shownMine) return;
+    if ((await mine.remove(shownMine.station.id)) !== null) setWanted(null);
+  };
+  /** Save the form's station and show it: tuned there if it moved off the dial's frequency. */
+  const saveStation = async (id: string | null, d: UserStationDraft) => {
+    const v = id ? await mine.update(id, d) : await mine.add(d);
+    if (!v) return false;
+    setWanted(keyOf({ source: MINE, key: v.station.id }));
+    if (on && v.station.freq_hz !== freqHz) tuneAs(v.station.freq_hz, v.station.mode);
+    return true;
+  };
   const toggleFavorites = () => {
     const to = filters.lens === 'favorites' ? 'all' : 'favorites';
     setFilters((f) => ({ ...f, lens: to }));
@@ -335,6 +360,7 @@ export function App() {
             scanDb={search.scanDb}
             onPick={pick}
             onPickOff={pickOff}
+            onAddOff={addStationOff}
             onTuneHz={tune}
             onMore={search.more}
             searchRef={searchRef}
@@ -351,7 +377,7 @@ export function App() {
             meta={meta}
             now={now}
             logged={scan.logged}
-            mine={sel?.station.source === MINE ? mine.byId.get(sel.station.key) ?? null : null}
+            mine={shownMine}
             star={sel && (
               <FavStar
                 fav={selFav}
@@ -361,6 +387,9 @@ export function App() {
               />
             )}
             onChoose={choose}
+            onAdd={addStation}
+            onEdit={editStation}
+            onDelete={deleteStation}
           />
         </section>
 
@@ -433,6 +462,17 @@ export function App() {
             onOpen={(id) => openScans(id)}
             onTune={tune}
             onShow={showScan}
+            onClose={() => setSheet(null)}
+          />
+        )}
+        {sheet?.kind === 'station' && api && (
+          <StationForm
+            key={sheet.id ?? 'new'}
+            api={api}
+            id={sheet.id}
+            draft={sheet.draft}
+            qth={qth}
+            onSave={(d) => saveStation(sheet.id, d)}
             onClose={() => setSheet(null)}
           />
         )}

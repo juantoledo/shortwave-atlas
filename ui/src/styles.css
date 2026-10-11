@@ -442,8 +442,17 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 .pill.on::before { box-shadow: 0 0 8px var(--amber); }
 .d-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .d-sub { color: var(--dim); font-size: 12.5px; }
-.d-title { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; }
+.d-title { position: relative; display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; }
+.d-del { display: inline-flex; flex: none; }
 .d-title .fav-star { margin-top: 2px; }
+/* small round buttons by the station's name: edit, delete, add another here */
+.d-act {
+  display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; margin-top: 2px; padding: 0;
+  background: transparent; border: 0; border-radius: 50%; color: var(--dim); font-size: 18px; line-height: 1;
+}
+.d-act:hover:not(:disabled) { color: var(--text); background: rgba(140, 185, 230, 0.08); }
+.d-act[aria-expanded="true"] { color: var(--warn); }
+.add-station { align-self: flex-start; margin-top: 16px; }
 .d-name {
   flex: 1; min-width: 0;
   margin: 0; font: 800 34px/0.98 var(--font-display); letter-spacing: 0.01em; text-transform: uppercase;
@@ -622,6 +631,9 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 .row.missed .rf, .row.missed .rn { opacity: 0.5; }
 .off-row, .heard-row { grid-template-columns: 60px minmax(0, 1fr) auto; }
 .list-h { margin: 6px 0 4px; }
+.off-li { display: flex; align-items: center; border-top: 1px solid var(--line); }
+.off-li > .row { flex: 1; min-width: 0; border-top: 0; }
+.off-li > .row-add { margin: 0 2px 0 4px; }
 .list-h + .list { margin-bottom: 10px; }
 .chip.scan-filter { color: var(--band-ham-text); border-color: rgba(79, 200, 164, 0.45); }
 .dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #5b6c7f; }
@@ -901,6 +913,26 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .hint span { color: var(--dim); font-size: 12.5px; }
 .hint b > span { color: var(--warn); }
 .log, .adv { margin-top: 12px; }
+/* the station form (components/StationForm.tsx) */
+.field textarea {
+  width: 100%; min-width: 0; padding: 8px 10px; resize: vertical; background: var(--panel); border: 1px solid var(--line-strong);
+  border-radius: 6px; color: var(--text); font: 13px/1.45 var(--font-body);
+}
+.field textarea:focus { border-color: rgba(255, 179, 63, 0.6); }
+.row-inline > .field { flex: 1; min-width: 0; }
+.station-form .mode-f { flex: 0 0 110px; }
+.form-h { margin-top: 22px; }
+.slot-ed { margin: 10px 0 0; padding: 0 0 14px; border: 0; border-bottom: 1px solid var(--line); }
+.slot-ed .row-inline { align-items: flex-end; }
+.slot-ed .slot-del { margin-bottom: 3px; }
+.seg.days { width: 100%; }
+.seg.days button { flex: 1; padding: 6px 0; text-transform: capitalize; }
+.seg.days button[aria-pressed="true"] { background: var(--amber-soft); color: var(--amber); }
+.lang-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.add-slot, .use-qth { margin-top: 12px; }
+.station-form > .seg { margin-top: 10px; }
+.field small.warn { color: var(--warn); }
+.problems { margin: 18px 0 0; padding-left: 18px; color: var(--warn); font-size: 13px; }
 .log summary, .adv summary { cursor: pointer; font: 500 10.5px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
 .log pre { max-height: 220px; overflow: auto; margin: 8px 0 0; padding: 8px; background: #050a11; border: 1px solid var(--line); border-radius: 6px; font: 10.5px/1.45 var(--font-mono); color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; }
 

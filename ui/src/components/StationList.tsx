@@ -57,6 +57,8 @@ interface Props {
   scanDb: Record<number, number>;
   onPick: (r: StationRow) => void;
   onPickOff: (o: OffSchedule) => void;
+  /** Add a station of one's own where a row off the schedule is. */
+  onAddOff: (o: OffSchedule) => void;
   /** Shift+Enter on a kHz query: tune there exactly. */
   onTuneHz: (hz: number) => void;
   onMore: () => void;
@@ -122,11 +124,11 @@ function StationItem({ r, p, log, mine }: { r: StationRow; p: Props; log?: Logge
   );
 }
 
-/** A row the schedule has none for: a signal, a favorite, or both. */
+/** A row the schedule has none for: a signal, a favorite, or both; "+" adds a station there. */
 function OffItem({ o, p }: { o: OffSchedule; p: Props }) {
   const t = useT();
   return (
-    <li>
+    <li className="off-li">
       <button className="row off-row" type="button" disabled={!p.on} onClick={() => p.onPickOff(o)}>
         <span className="rf">{o.freq_hz / 1000}</span>
         <span className="rn">
@@ -144,6 +146,7 @@ function OffItem({ o, p }: { o: OffSchedule; p: Props }) {
         </span>
         <span className="sval">{o.heard ? sLabel(o.heard.best_db) : ''}</span>
       </button>
+      <button className="d-act row-add" type="button" title={t.addStation} aria-label={t.addStation} onClick={() => p.onAddOff(o)}>+</button>
     </li>
   );
 }
