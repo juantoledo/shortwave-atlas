@@ -786,6 +786,7 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .btn:hover:not(:disabled) { background: rgba(140, 185, 230, 0.08); }
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn.primary { background: var(--amber-soft); border-color: rgba(255, 179, 63, 0.6); color: var(--amber); }
+.btn.danger { border-color: rgba(255, 138, 122, 0.55); color: var(--warn); }
 .vol { display: inline-flex; align-items: center; gap: 6px; font: 500 11px var(--font-mono); color: var(--dim); }
 .vol input { width: 80px; accent-color: var(--amber); }
 .vol select { background: var(--panel); border: 1px solid var(--line-strong); border-radius: 6px; padding: 3px 6px; color: var(--text); font: inherit; }
@@ -933,6 +934,16 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .station-form > .seg { margin-top: 10px; }
 .field small.warn { color: var(--warn); }
 .problems { margin: 18px 0 0; padding-left: 18px; color: var(--warn); font-size: 13px; }
+/* settings: sources, and the listener's stations to a file and back */
+.src { margin-top: 14px; }
+.src b { display: flex; justify-content: space-between; gap: 10px; font: 700 18px/1.2 var(--font-display); letter-spacing: 0.03em; text-transform: uppercase; }
+.src b span { font: 400 12px var(--font-mono); letter-spacing: normal; text-transform: none; color: var(--dim); }
+.src .note { margin: 4px 0 0; }
+.import-ask, .import-report { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 8px; }
+.import-ask p, .import-report p { margin: 0; }
+.import-ask .actions { margin-top: 12px; flex-wrap: wrap; }
+.import-ask small { display: block; margin-top: 8px; color: var(--dim); font-size: 12px; }
+.import-report ul { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--dim); }
 .log summary, .adv summary { cursor: pointer; font: 500 10.5px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
 .log pre { max-height: 220px; overflow: auto; margin: 8px 0 0; padding: 8px; background: #050a11; border: 1px solid var(--line); border-radius: 6px; font: 10.5px/1.45 var(--font-mono); color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; }
 

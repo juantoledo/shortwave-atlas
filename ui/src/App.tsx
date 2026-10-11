@@ -448,6 +448,8 @@ export function App() {
             rig={rig}
             update={update}
             display={display}
+            meta={meta}
+            mine={mine}
             tab={sheet.tab}
             onTab={(tab) => setSheet({ kind: 'settings', tab })}
             onClose={() => setSheet(null)}

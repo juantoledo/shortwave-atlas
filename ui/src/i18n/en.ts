@@ -410,6 +410,22 @@ export const en = {
   updateBusy: (v: string) => `Installing ${v}…`,
   updateCheckFailed: (m: string) => `Could not check: ${m}`,
 
+  sourcesSection: 'Sources',
+  sourceRows: (n: number) => `${n.toLocaleString('en')} station${n === 1 ? '' : 's'}`,
+  sourceSeason: (season: string, from: string, to: string) => `season ${season}, ${from} to ${to}`,
+  sourceMineNote: 'The stations you add, kept on the computer that runs Shortwave Atlas.',
+  stationsFile: 'Your stations in a file',
+  exportStations: 'Export',
+  importStations: 'Import',
+  stationsFileHelp: 'A JSON file: keep a copy, or take your stations to another computer.',
+  importAsk: (file: string, n: number) => `${file} has ${n} station${n === 1 ? '' : 's'}. Merge them with yours, or replace yours with them?`,
+  importMerge: 'Merge',
+  importReplace: 'Replace mine',
+  importHow: 'Merging keeps yours; a station in both is taken from whichever copy was changed last.',
+  importTooBig: 'That file is too large to be stations.',
+  importDone: (added: number, updated: number, same: number, skipped: number) =>
+    `Imported: ${added} new, ${updated} updated, ${same} unchanged${skipped ? `, ${skipped} skipped:` : '.'}`,
+
   displaySection: 'Display',
   globeLayout: 'Globe',
   globeFull: 'Full window',

@@ -1,20 +1,24 @@
-// The settings sheet: Rig, Audio, Display and Updates, one tab each, so each fits without scrolling.
+// The settings sheet: Rig, Audio, Sources, Display and Updates, one tab each, so each fits
+// without scrolling.
 // QTH, language and server slot in here later.
 
 import type { Api } from '../../api/client';
 import type { DisplayApi } from '../../hooks/useDisplay';
 import type { UpdateApi } from '../../hooks/useUpdate';
+import type { UserStationsApi } from '../../hooks/useUserStations';
 import { useT } from '../../i18n';
+import type { CatalogMeta } from '../../types/generated/CatalogMeta';
 import type { Os } from '../../types/generated/Os';
 import type { RigState } from '../../types/generated/RigState';
 import { Sheet } from '../Sheet';
 import { AudioSection } from './AudioSection';
 import { DisplaySection } from './DisplaySection';
 import { RigSection } from './RigSection';
+import { SourcesSection } from './SourcesSection';
 import { UpdatesSection } from './UpdatesSection';
 
-export type SettingsTab = 'rig' | 'audio' | 'display' | 'updates';
-const TABS: SettingsTab[] = ['rig', 'audio', 'display', 'updates'];
+export type SettingsTab = 'rig' | 'audio' | 'sources' | 'display' | 'updates';
+const TABS: SettingsTab[] = ['rig', 'audio', 'sources', 'display', 'updates'];
 
 interface Props {
   api: Api;
@@ -23,6 +27,8 @@ interface Props {
   rig: RigState;
   update: UpdateApi;
   display: DisplayApi;
+  meta: CatalogMeta | null;
+  mine: UserStationsApi;
   tab: SettingsTab;
   onTab: (t: SettingsTab) => void;
   onClose: () => void;
@@ -30,9 +36,9 @@ interface Props {
   onApplied: () => void;
 }
 
-export function Settings({ api, os, rig, update, display, tab, onTab, onClose, onError, onApplied }: Props) {
+export function Settings({ api, os, rig, update, display, meta, mine, tab, onTab, onClose, onError, onApplied }: Props) {
   const t = useT();
-  const label = { rig: t.rigSection, audio: t.audioSection, display: t.displaySection, updates: t.updatesSection };
+  const label = { rig: t.rigSection, audio: t.audioSection, sources: t.sourcesSection, display: t.displaySection, updates: t.updatesSection };
   const tabs = (
     <div className="tabs sheet-tabs" role="tablist" aria-label={t.settings}>
       {TABS.map((k) => (
@@ -45,6 +51,7 @@ export function Settings({ api, os, rig, update, display, tab, onTab, onClose, o
       {/* all mounted, so a half-filled form survives a tab switch */}
       <div hidden={tab !== 'rig'}><RigSection api={api} os={os} rig={rig} onError={onError} onApplied={onApplied} /></div>
       <div hidden={tab !== 'audio'}><AudioSection api={api} os={os} onError={onError} onApplied={onApplied} /></div>
+      <div hidden={tab !== 'sources'}><SourcesSection api={api} meta={meta} mine={mine} onError={onError} /></div>
       <div hidden={tab !== 'display'}><DisplaySection display={display} /></div>
       <div hidden={tab !== 'updates'}><UpdatesSection update={update} onError={onError} /></div>
     </Sheet>
