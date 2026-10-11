@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.5.0...v0.6.0) (2026-10-11)
+
+
+### Features
+
+* favorites, station list lenses, one Heard list and deleting scans ([0f724d0](https://github.com/juantoledo/shortwave-atlas/commit/0f724d057c7440b9a5ac7f91f7d4471716c8cbcc))
+
+
+### Bug Fixes
+
+* **rig:** give set_freq 10 s to answer when the rig changes band ([0f724d0](https://github.com/juantoledo/shortwave-atlas/commit/0f724d057c7440b9a5ac7f91f7d4471716c8cbcc))
+
 ## [0.5.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.4.0...v0.5.0) (2026-10-10)
 
 
