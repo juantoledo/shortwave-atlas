@@ -410,6 +410,7 @@ impl Parsed {
                     itu,
                     site: SiteSpec::Known(site),
                     slots,
+                    notes: String::new(),
                 }
             })
             .collect();

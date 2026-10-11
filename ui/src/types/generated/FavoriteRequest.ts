@@ -12,4 +12,9 @@ label: string | null,
 /**
  * `Station::id` in the running catalog.
  */
-station_id: number | null, };
+station_id: number | null, 
+/**
+ * `Catalog::generation` the id is of; when given and the catalog has since changed, the
+ * request is refused rather than keep another station.
+ */
+generation?: number, };

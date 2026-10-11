@@ -64,7 +64,12 @@ impl FavoriteService {
 
     pub fn add(&self, req: &FavoriteRequest, now: i64) -> Result<Favorite, ApiError> {
         let cat = self.catalog.get();
-        self.change(|l| favorites::add(l, req, &cat, now).map_err(invalid))
+        self.change(|l| {
+            favorites::add(l, req, &cat, now).map_err(|e| match e.as_str() {
+                favorites::STALE => ApiError { kind: ErrorKind::Conflict, message: e },
+                _ => invalid(e),
+            })
+        })
     }
 
     pub fn rename(&self, id: &str, label: &str) -> Result<(), ApiError> {
@@ -91,7 +96,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let file = dir.join("favorites.json");
         let svc = FavoriteService::new(Some(file.clone()), crate::sources::bundled_cell());
-        let req = FavoriteRequest { freq_hz: 7_000_000, mode: Mode::LSB, label: Some("Net".into()), station_id: None };
+        let req = FavoriteRequest {
+            freq_hz: 7_000_000,
+            mode: Mode::LSB,
+            label: Some("Net".into()),
+            station_id: None,
+            generation: None,
+        };
         let f = svc.add(&req, 10).unwrap();
         svc.add(&FavoriteRequest { freq_hz: 3_000_000, ..req.clone() }, 11).unwrap();
         svc.rename(&f.id, "Morning net").unwrap();

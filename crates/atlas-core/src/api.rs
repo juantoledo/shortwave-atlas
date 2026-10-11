@@ -13,6 +13,7 @@ use crate::scan::ScanRequest;
 use crate::setup::{BackendKind, Hint, RigChoice, RigctldStatus};
 use crate::stations::StationQuery;
 use crate::update::Channel;
+use crate::user_stations::UserStationDraft;
 
 /// The listener's location.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -119,6 +120,30 @@ pub enum Call {
     },
     DeleteFavorite {
         id: String,
+    },
+    /// The listener's own stations by frequency, with their rows in the running catalog (result:
+    /// `UserStationView[]`).
+    UserStations,
+    /// Keep a station of the listener's (result: `UserStationView`).
+    AddUserStation(UserStationDraft),
+    /// Change one; it keeps its id, so its favorites and logbook entries follow (result:
+    /// `UserStationView`).
+    UpdateUserStation {
+        id: String,
+        station: UserStationDraft,
+    },
+    DeleteUserStation {
+        id: String,
+    },
+    /// Every code and known site the station form offers (result: `CodeTables`).
+    CodeTables,
+    /// The listener's stations as a file to keep (result: its JSON text).
+    ExportUserStations,
+    /// Bring stations in from an export; `replace` drops the ones kept first (result:
+    /// `ImportReport`).
+    ImportUserStations {
+        json: String,
+        replace: bool,
     },
 }
 
@@ -293,8 +318,42 @@ mod tests {
         .unwrap();
         assert_eq!(
             c,
-            Call::AddFavorite(FavoriteRequest { freq_hz: 5_905_000, mode: Mode::AM, label: None, station_id: Some(3) })
+            Call::AddFavorite(FavoriteRequest {
+                freq_hz: 5_905_000,
+                mode: Mode::AM,
+                label: None,
+                station_id: Some(3),
+                generation: None
+            })
         );
+        let c: Call = serde_json::from_str(
+            r#"{"cmd":"add_favorite","args":{"freq_hz":1,"mode":"AM","label":null,"station_id":3,"generation":7}}"#,
+        )
+        .unwrap();
+        assert!(matches!(c, Call::AddFavorite(FavoriteRequest { generation: Some(7), .. })));
+        for (json, call) in [
+            (r#"{"cmd":"user_stations"}"#, Call::UserStations),
+            (r#"{"cmd":"code_tables"}"#, Call::CodeTables),
+            (r#"{"cmd":"export_user_stations"}"#, Call::ExportUserStations),
+            (r#"{"cmd":"delete_user_station","args":{"id":"x"}}"#, Call::DeleteUserStation { id: "x".into() }),
+            (
+                r#"{"cmd":"import_user_stations","args":{"json":"{}","replace":true}}"#,
+                Call::ImportUserStations { json: "{}".into(), replace: true },
+            ),
+        ] {
+            assert_eq!(serde_json::from_str::<Call>(json).unwrap(), call, "{json}");
+        }
+        let draft = r#"{"freq_hz":6075000,"mode":"USB","name":"Radio Local","itu":"CHL",
+            "site":{"kind":"country","itu":"CHL"},"notes":"","url":null,
+            "slots":[{"start":0,"end":1440,"days":{"t":"daily"},"lang":"S","target":""}]}"#;
+        let c: Call = serde_json::from_str(&format!(r#"{{"cmd":"add_user_station","args":{draft}}}"#)).unwrap();
+        let Call::AddUserStation(d) = &c else { panic!("{c:?}") };
+        assert_eq!((d.name.as_str(), d.slots.len()), ("Radio Local", 1));
+        let c: Call = serde_json::from_str(&format!(
+            r#"{{"cmd":"update_user_station","args":{{"id":"1-2","station":{draft}}}}}"#
+        ))
+        .unwrap();
+        assert!(matches!(c, Call::UpdateUserStation { id, .. } if id == "1-2"));
         let c: Call = serde_json::from_str(r#"{"cmd":"rename_favorite","args":{"id":"x","label":"y"}}"#).unwrap();
         assert_eq!(c, Call::RenameFavorite { id: "x".into(), label: "y".into() });
         let c: Call = serde_json::from_str(r#"{"cmd":"favorites"}"#).unwrap();

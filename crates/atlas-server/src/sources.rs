@@ -1,11 +1,13 @@
 //! The data sources: the EiBi schedule bundled at build time (`data/eibi`), or the files in
-//! `eibi_dir`; and the catalog built from them.
+//! `eibi_dir`, and the listener's own stations (`user_stations`); and the catalog built from
+//! them.
 
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use atlas_core::eibi::{parse, EibiFiles, EibiSource};
+use atlas_core::source::SourceData;
 use atlas_core::stations::Catalog;
 #[cfg(test)]
 use atlas_core::stations::CatalogCell;
@@ -85,15 +87,17 @@ pub fn load(dir: &Path) -> Result<Arc<EibiSource>, String> {
     read_eibi(&files, &dir.display().to_string())
 }
 
-/// The catalog of the sources.
-pub fn catalog(eibi: &EibiSource) -> Catalog {
-    Catalog::build(&[&eibi.data], &eibi.vocabulary, &eibi.gazetteer)
+/// The catalog of EiBi and the listener's stations (`mine`), with EiBi's code names and sites.
+pub fn catalog(eibi: &EibiSource, mine: &SourceData) -> Catalog {
+    Catalog::build(&[&eibi.data, mine], &eibi.vocabulary, &eibi.gazetteer)
 }
 
-/// The bundled schedule's catalog, in a cell of its own (tests).
+/// The bundled schedule's catalog without stations of the listener's, in a cell of its own
+/// (tests).
 #[cfg(test)]
 pub fn bundled_cell() -> Arc<CatalogCell> {
-    CatalogCell::new(catalog(&bundled()))
+    let eibi = bundled();
+    CatalogCell::new(catalog(&eibi, &atlas_core::user_stations::to_source(&[], &eibi.gazetteer)))
 }
 
 #[cfg(test)]
@@ -104,9 +108,10 @@ mod tests {
     fn bundled_data_loads() {
         let s = bundled();
         assert!(Arc::ptr_eq(&s, &bundled()));
-        let c = catalog(&s);
+        let c = bundled_cell().get();
         assert!(c.len() > 1000, "{} rows", c.len());
-        assert_eq!(c.meta(0).sources[0].id, "eibi");
+        let ids: Vec<String> = c.meta(0).sources.into_iter().map(|s| s.id).collect();
+        assert_eq!(ids, ["eibi", "mine"]);
     }
 
     #[test]
@@ -121,7 +126,8 @@ mod tests {
         let csv =
             "kHz;Time(UTC);ITU;Station;Remarks;P\n6070;0000-2400;CAN;CFRX Toronto;;1\n9000;0000-0100;CAN;Volmet;;1\n";
         std::fs::write(dir.join("source/sked-b26.csv"), csv).unwrap();
-        let c = catalog(&load(&dir).unwrap_or_else(|e| panic!("{e}")));
+        let eibi = load(&dir).unwrap_or_else(|e| panic!("{e}"));
+        let c = catalog(&eibi, &atlas_core::user_stations::to_source(&[], &eibi.gazetteer));
         assert_eq!(c.len(), 1); // the bundled utility patterns drop the Volmet
         assert_eq!(c.meta(0).sources[0].season.as_deref(), Some("B26"));
 

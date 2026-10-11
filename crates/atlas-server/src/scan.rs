@@ -392,6 +392,7 @@ mod tests {
                 itu: "G".into(),
                 site: SiteSpec::Known(0),
                 slots: vec![],
+                notes: String::new(),
             }],
         };
         cell.replace(Catalog::build(&[&eibi.data, &early], &eibi.vocabulary, &eibi.gazetteer));

@@ -122,6 +122,8 @@ pub struct Record {
     pub itu: String,
     pub site: SiteSpec,
     pub slots: Vec<Slot>,
+    /// Free text about it, which search finds.
+    pub notes: String,
 }
 
 /// A source's records.

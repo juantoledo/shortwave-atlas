@@ -10,6 +10,7 @@ pub mod scan;
 pub mod server;
 pub mod sources;
 pub mod update;
+pub mod user_stations;
 
 pub use app::Atlas;
 pub use config::AppConfig;

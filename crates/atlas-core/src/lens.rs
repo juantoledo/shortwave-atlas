@@ -247,6 +247,7 @@ mod tests {
                 mode: Mode::AM,
                 label: label.map(Into::into),
                 station_id,
+                generation: None,
             };
             add(&mut favorites, &req(c.freq_hz, Some(c.id), None), &cat, 1).unwrap();
             add(&mut favorites, &req(a.freq_hz, Some(a.id), None), &cat, 1).unwrap();

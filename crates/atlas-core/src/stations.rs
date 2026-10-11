@@ -9,8 +9,8 @@ use std::sync::{Arc, RwLock};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::country::{country, Region};
-use crate::eibi::names::{band_of, bands, lang_name, target, target_region, Band};
+use crate::country::{country, Region, COUNTRIES};
+use crate::eibi::names::{band_of, bands, lang_name, target, target_region, Band, LANGS, TARGETS};
 use crate::eibi::{Parsed, SiteKey, SiteRec};
 use crate::geo::{dist_bearing, sun_at, LatLon, Route, SunAt};
 use crate::lens::{HeardRow, OffSchedule};
@@ -282,6 +282,23 @@ pub struct CatalogMeta {
     pub sites: u32,
 }
 
+/// Every code a station may use and the known transmitter sites, for the station form's pickers
+/// (`Call::CodeTables`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CodeTables {
+    /// The built-in languages and the vocabulary's; `rows` counts the catalog's.
+    pub langs: Vec<LangInfo>,
+    /// Every country.
+    pub countries: Vec<CountryInfo>,
+    /// The built-in target areas and the vocabulary's (countries are targets too).
+    pub targets: Vec<TargetInfo>,
+    /// The known sites with their own coordinates, by country and name (ids are the catalog's).
+    pub sites: Vec<Site>,
+    /// Countries a station may stand in without a site: those with a known site to show it at.
+    pub placeable: Vec<String>,
+}
+
 struct Row {
     station: Station,
     band: &'static str,
@@ -314,6 +331,48 @@ fn country_names(itu: &str) -> (String, String) {
     match country(itu) {
         Some(c) => (c.en.to_string(), c.es.to_string()),
         None => (itu.to_string(), itu.to_string()),
+    }
+}
+
+/// A language's names: the built-in table's, else the vocabulary's, else its code.
+fn lang_info(code: String, vocab: &Vocabulary, rows: u32) -> LangInfo {
+    let named = vocab.langs.get(&code);
+    let tbl = lang_name(&code);
+    LangInfo {
+        en: tbl
+            .and_then(|t| t.en)
+            .map(str::to_string)
+            .or_else(|| named.map(|r| r.name.clone()))
+            .unwrap_or_else(|| code.clone()),
+        es: tbl.map(|t| t.es.to_string()),
+        iso: named.and_then(|r| r.iso.clone()),
+        code,
+        rows,
+    }
+}
+
+/// A target's names: the built-in table's, a country's, else the vocabulary's.
+fn target_info(code: String, vocab: &Vocabulary) -> TargetInfo {
+    let (en, es) = match target(&code) {
+        Some(t) => (t.en.to_string(), t.es.to_string()),
+        None if country(&code).is_some() => country_names(&code),
+        None => {
+            let en = vocab.targets.get(&code).cloned().unwrap_or_else(|| code.clone());
+            (en.clone(), en)
+        }
+    };
+    TargetInfo { region: target_region(&code), code, en, es }
+}
+
+fn country_info(itu: String, rows: u32) -> CountryInfo {
+    let (en, es) = country_names(&itu);
+    CountryInfo {
+        flag: country(&itu).and_then(|c| c.flag).map(str::to_string),
+        region: country(&itu).map_or(Region::Other, |c| c.region),
+        itu,
+        en,
+        es,
+        rows,
     }
 }
 
@@ -371,38 +430,8 @@ impl Catalog {
                 targets_used.insert(slot.target.clone());
             }
         }
-        let langs: Vec<LangInfo> = lang_rows
-            .into_iter()
-            .map(|(code, rows)| {
-                let named = vocab.langs.get(&code);
-                let tbl = lang_name(&code);
-                LangInfo {
-                    en: tbl
-                        .and_then(|t| t.en)
-                        .map(str::to_string)
-                        .or_else(|| named.map(|r| r.name.clone()))
-                        .unwrap_or_else(|| code.clone()),
-                    es: tbl.map(|t| t.es.to_string()),
-                    iso: named.and_then(|r| r.iso.clone()),
-                    code,
-                    rows,
-                }
-            })
-            .collect();
-        let targets: Vec<TargetInfo> = targets_used
-            .into_iter()
-            .map(|code| {
-                let (en, es) = match target(&code) {
-                    Some(t) => (t.en.to_string(), t.es.to_string()),
-                    None if country(&code).is_some() => country_names(&code),
-                    None => {
-                        let en = vocab.targets.get(&code).cloned().unwrap_or_else(|| code.clone());
-                        (en.clone(), en)
-                    }
-                };
-                TargetInfo { region: target_region(&code), code, en, es }
-            })
-            .collect();
+        let langs: Vec<LangInfo> = lang_rows.into_iter().map(|(code, rows)| lang_info(code, vocab, rows)).collect();
+        let targets: Vec<TargetInfo> = targets_used.into_iter().map(|code| target_info(code, vocab)).collect();
         let lang_ix: HashMap<&str, &LangInfo> = langs.iter().map(|l| (l.code.as_str(), l)).collect();
         let target_ix: HashMap<&str, &TargetInfo> = targets.iter().map(|t| (t.code.as_str(), t)).collect();
 
@@ -416,6 +445,9 @@ impl Catalog {
                 for c in [&itu, &site_rec.itu] {
                     let (en, es) = country_names(c);
                     words.extend([en, es]);
+                }
+                if !rec.notes.is_empty() {
+                    words.push(rec.notes.clone());
                 }
                 let slot_langs: Vec<Vec<String>> = slots.iter().map(|s| lang_parts(&s.lang)).collect();
                 for l in slot_langs.iter().flatten() {
@@ -467,23 +499,51 @@ impl Catalog {
         for r in &rows {
             *country_rows.entry(r.station.itu.clone()).or_default() += 1;
         }
-        let countries = country_rows
-            .into_iter()
-            .map(|(itu, rows)| {
-                let (en, es) = country_names(&itu);
-                CountryInfo {
-                    flag: country(&itu).and_then(|c| c.flag).map(str::to_string),
-                    region: country(&itu).map_or(Region::Other, |c| c.region),
-                    itu,
-                    en,
-                    es,
-                    rows,
-                }
-            })
-            .collect();
+        let countries = country_rows.into_iter().map(|(itu, rows)| country_info(itu, rows)).collect();
 
         let sources = sources.iter().map(|s| s.desc.clone()).collect();
         Self { rows, sites, langs, countries, targets, sources, keys, generation: 0 }
+    }
+
+    /// The code tables for the station form, against the vocabulary and gazetteer this catalog
+    /// was built with.
+    pub fn code_tables(&self, vocab: &Vocabulary, gaz: &Gazetteer) -> CodeTables {
+        let lang_rows: HashMap<&str, u32> = self.langs.iter().map(|l| (l.code.as_str(), l.rows)).collect();
+        let codes: BTreeSet<String> =
+            LANGS.iter().map(|l| l.code.to_string()).chain(vocab.langs.keys().cloned()).collect();
+        let langs = codes
+            .into_iter()
+            .map(|c| {
+                let rows = lang_rows.get(c.as_str()).copied().unwrap_or(0);
+                lang_info(c, vocab, rows)
+            })
+            .collect();
+        let country_rows: HashMap<&str, u32> = self.countries.iter().map(|c| (c.itu.as_str(), c.rows)).collect();
+        let countries = COUNTRIES
+            .iter()
+            .map(|c| country_info(c.itu.to_string(), country_rows.get(c.itu).copied().unwrap_or(0)))
+            .collect();
+        let targets: BTreeSet<String> = TARGETS
+            .iter()
+            .map(|t| t.code.to_string())
+            .chain(vocab.targets.keys().cloned())
+            .filter(|c| country(c).is_none())
+            .collect();
+        let mut sites: Vec<Site> = self.sites.iter().take(gaz.sites.len()).filter(|s| s.precise).cloned().collect();
+        sites.sort_by(|a, b| a.itu.cmp(&b.itu).then_with(|| a.name.cmp(&b.name)));
+        let placeable = COUNTRIES
+            .iter()
+            .map(|c| c.itu)
+            .filter(|itu| gaz.first_site.contains_key(*itu) || gaz.sites.iter().any(|s| s.itu == *itu && !s.precise))
+            .map(str::to_string)
+            .collect();
+        CodeTables {
+            langs,
+            countries,
+            targets: targets.into_iter().map(|c| target_info(c, vocab)).collect(),
+            sites,
+            placeable,
+        }
     }
 
     /// Changes whenever the catalog is built again (`CatalogCell::replace`): station ids from
@@ -1019,6 +1079,7 @@ mod tests {
             itu: "CHL".into(),
             site,
             slots: vec![slot.clone()],
+            notes: if key == "a" { "heard on the ferry".into() } else { String::new() },
         };
         let own =
             SiteRec { itu: "CHL".into(), code: None, name: "Santiago".into(), lat: -33.45, lon: -70.67, precise: true };
@@ -1101,6 +1162,31 @@ mod tests {
         assert_eq!(f.sources.get("eibi"), Some(&10));
         assert_eq!(f.countries.values().sum::<u32>(), 3);
         assert_eq!(both.search(&query(|q| q.q = "radio local".into()), t).total, 1);
+        assert_eq!(names(&both.search(&query(|q| q.q = "ferry".into()), t).items), [(6075, "Radio Local")]);
+    }
+
+    #[test]
+    fn code_tables_offer_every_code_and_the_known_sites() {
+        let s = parse(&files()).unwrap().into_source();
+        let c = Catalog::build(&[&s.data], &s.vocabulary, &s.gazetteer);
+        let t = c.code_tables(&s.vocabulary, &s.gazetteer);
+        assert_eq!(t.countries.len(), COUNTRIES.len());
+        assert_eq!(t.countries.iter().find(|c| c.itu == "KOR").map(|c| c.rows), Some(3));
+        // the built-in languages and the README's, with the catalog's counts
+        let lang = |code: &str| t.langs.iter().find(|l| l.code == code);
+        assert_eq!(lang("S").map(|l| l.rows), Some(1));
+        assert_eq!(lang("AB").map(|l| (l.en.as_str(), l.rows)), Some(("Abkhaz", 0)));
+        assert!(t.langs.len() >= LANGS.len());
+        // targets without the countries, which the country list offers
+        assert!(t.targets.iter().any(|t| t.code == "CAm"));
+        assert!(t.targets.iter().all(|t| country(&t.code).is_none()));
+        // precise sites only, by country and name
+        assert!(t.sites.iter().all(|s| s.precise));
+        assert!(t.sites.windows(2).all(|w| (&w[0].itu, &w[0].name) <= (&w[1].itu, &w[1].name)));
+        let goyang = t.sites.iter().find(|s| s.code.as_deref() == Some("g")).unwrap();
+        assert_eq!(c.site(goyang.id), Some(goyang));
+        assert!(t.placeable.iter().any(|c| c == "BUL") && t.placeable.iter().any(|c| c == "CHN"));
+        assert!(!t.placeable.iter().any(|c| c == "CHL"));
     }
 
     #[test]
