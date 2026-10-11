@@ -1,6 +1,7 @@
 // The window is the receiver: a top bar, the globe in the middle with the station list on its
 // left and the tuned station on its right, and the faceplate (dial and audio) along the bottom.
 // Smaller screens fold the side panels into tabs (styles.css); `view` says which one shows.
+// The globe may also be drawn behind the whole window (`data-globe`, Settings → Display).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AudioOff, AudioPanel, type AudioKeys } from './components/AudioPanel';
@@ -24,6 +25,7 @@ import { makeNames, NamesProvider } from './catalog/names';
 import { NO_FILTERS, useCandidates, useCore, useDial, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
 import { PHONE, useMedia } from './hooks/useMedia';
 import { useFavorites } from './hooks/useFavorites';
+import { useDisplay } from './hooks/useDisplay';
 import { useBandScans, useScan } from './hooks/useScan';
 import { useUpdate } from './hooks/useUpdate';
 import { fmtStamp, I18nProvider, pickMessages } from './i18n';
@@ -52,6 +54,7 @@ type SheetState =
 export function App() {
   const { api, info, reloadInfo, rig, status } = useCore();
   const update = useUpdate(api);
+  const display = useDisplay();
   const [sheet, setSheet] = useState<SheetState>(null);
   const [view, setView] = useState<View>('globe');
   const [dockOpen, setDockOpen] = useState(false);
@@ -261,7 +264,7 @@ export function App() {
   return (
     <I18nProvider value={t}>
       <NamesProvider value={names}>
-      <div className="app" data-view={view} data-dock={dockOpen ? 'open' : undefined}>
+      <div className="app" data-view={view} data-dock={dockOpen ? 'open' : undefined} data-globe={display.fullGlobe ? 'full' : 'framed'}>
         <TopBar
           info={info}
           status={statusLine}
@@ -408,6 +411,7 @@ export function App() {
             os={info?.os ?? 'linux'}
             rig={rig}
             update={update}
+            display={display}
             tab={sheet.tab}
             onTab={(tab) => setSheet({ kind: 'settings', tab })}
             onClose={() => setSheet(null)}

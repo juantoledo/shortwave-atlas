@@ -11,6 +11,8 @@
 // (a signal also sends an arc home). When the scan ends, the sites it logged pulse green, framed
 // together with the QTH, and lock-on resumes. Every altitude is fitted to the view's
 // shape (`fitAltitude`), so a tall phone view shows as much as a wide window.
+// The canvas may cover the whole window, behind the panels (styles.css, `data-globe="full"`):
+// the globe is then centred on the stage (`globeOffset`) and sized for it, the rest is overflow.
 
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import GlobeGL, { type GlobeMethods } from 'react-globe.gl';
@@ -192,17 +194,26 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
     () => !REDUCE && !selRef.current && !hovering.current && performance.now() - touched.current > IDLE_MS,
     [],
   );
-  const aspect = useRef(1);
-  const fit = useCallback((alt: number) => fitAltitude(alt, aspect.current), []);
+  /** The part of the canvas left visible (the stage): the canvas may cover the whole window. */
+  const view = useRef<HTMLDivElement>(null);
+  const shape = useRef({ viewW: 1, viewH: 1, canvasH: 1 });
+  const fit = useCallback((alt: number) => fitAltitude(alt, shape.current.viewW, shape.current.viewH, shape.current.canvasH), []);
+  /** Moves the globe's centre from the canvas's to the view's. */
+  const [offset, setOffset] = useState<[number, number]>([0, 0]);
 
   useEffect(() => {
-    const el = stage.current!;
+    const el = stage.current!, v = view.current!;
     const ro = new ResizeObserver(() => {
-      if (!el.clientWidth || !el.clientHeight) return;
-      aspect.current = el.clientWidth / el.clientHeight;
+      if (!el.clientWidth || !el.clientHeight || !v.clientWidth || !v.clientHeight) return;
+      const c = el.getBoundingClientRect(), r = v.getBoundingClientRect();
+      shape.current = { viewW: r.width, viewH: r.height, canvasH: c.height };
+      const dx = Math.round(r.left + r.width / 2 - (c.left + c.width / 2));
+      const dy = Math.round(r.top + r.height / 2 - (c.top + c.height / 2));
+      setOffset((o) => (o[0] === dx && o[1] === dy ? o : [dx, dy]));
       setSize({ w: el.clientWidth, h: el.clientHeight });
     });
     ro.observe(el);
+    ro.observe(v);
     return () => ro.disconnect();
   }, []);
 
@@ -505,12 +516,14 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
   return (
     <>
       <div className="stars" style={{ backgroundImage: `url(${stars})` }} />
+      <div className="globe-view" ref={view} />
       <div id="globe" ref={stage}>
         {size.w > 0 && (
           <GlobeGL
             ref={globe}
             width={size.w}
             height={size.h}
+            globeOffset={offset}
             animateIn={false}
             backgroundColor="rgba(0,0,0,0)"
             globeImageUrl={placeholderUrl}

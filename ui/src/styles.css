@@ -8,7 +8,9 @@
      600–1279px        globe + one side column with Station / Stations tabs
      < 600px           phone: one view at a time (bottom tabs), compact faceplate
      max-height 520px  short screens: compact faceplate
-     max-height 700px  a tighter faceplate */
+     max-height 700px  a tighter faceplate
+   The globe is either framed in the stage or drawn behind the whole window with frosted panels
+   (data-globe="full"; see the block after the stage). */
 :root {
   --ink: #070d15;
   --panel: #0c1520;
@@ -278,6 +280,40 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
   .hud-bl, .legend .lg-term { display: none; }
   .legend { font-size: 10px; }
   .globe-ctl .zoom { flex-direction: row; }
+}
+.globe-view { position: absolute; inset: 0; pointer-events: none; }
+
+/* The globe behind the whole window (Settings → Display; data-globe="full"). The canvas and the
+   stars are fixed to the window under the grid (z-index -1 inside the isolated .app); Globe.tsx
+   centres the globe on the stage, which keeps the HUD and the controls but no frame. Clicks go
+   through the grid to the globe wherever no panel covers it. The panels turn to frosted glass.
+   "framed" is the plain layout above. */
+.app[data-globe="full"] {
+  --glass: rgba(10, 19, 29, 0.6);
+  --glass-blur: blur(14px) saturate(1.15);
+  isolation: isolate;
+  pointer-events: none;
+  background: radial-gradient(110% 85% at 50% 42%, #10243b 0%, #08121e 55%, #050a11 100%);
+}
+.app[data-globe="full"] > *:not(.stage) { pointer-events: auto; }
+.app[data-globe="full"] .stage { border-color: transparent; background: none; }
+.app[data-globe="full"] :is(.stars, #globe) { position: fixed; z-index: -1; }
+.app[data-globe="full"] :is(#globe, .globe-ctl, .stage-msg) { pointer-events: auto; }
+/* a dim band under the top bar, over the globe (last in the tree, so it paints over the canvas) */
+.app[data-globe="full"]::after {
+  content: ""; position: fixed; z-index: -1; left: 0; right: 0; top: 0; height: 110px; pointer-events: none;
+  background: linear-gradient(rgba(7, 13, 21, 0.7), rgba(7, 13, 21, 0));
+}
+.app[data-globe="full"] :is(.panel, .rx, .audio, .tabs.nav) {
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+/* the panel is the backdrop here: the rows blur under the header */
+.app[data-globe="full"] .slots th {
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 /* pins on the globe */

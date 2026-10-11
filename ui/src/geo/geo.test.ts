@@ -42,16 +42,29 @@ describe('geo (mirrors atlas-core)', () => {
   });
 
   it('fits camera altitudes to tall views and leaves wide ones alone', () => {
-    expect(fitAltitude(2.6, 1)).toBe(2.6);
-    expect(fitAltitude(2.6, 1.8)).toBe(2.6);
+    expect(fitAltitude(2.6, 600, 600)).toBe(2.6);
+    expect(fitAltitude(2.6, 1080, 600)).toBe(2.6);
     // the globe's apparent radius (tan of its half-angle) shrinks with the width
     const share = (alt: number) => Math.tan(Math.asin(1 / (1 + alt)));
     for (const aspect of [0.9, 0.6, 0.45]) {
-      const alt = fitAltitude(2.6, aspect);
+      const alt = fitAltitude(2.6, 1000 * aspect, 1000);
       expect(alt).toBeGreaterThan(2.6);
       expect(share(alt) / aspect).toBeCloseTo(share(2.6), 9);
     }
-    expect(fitAltitude(1.5, 0.5)).toBeLessThan(fitAltitude(2.6, 0.5));
+    expect(fitAltitude(1.5, 500, 1000)).toBeLessThan(fitAltitude(2.6, 500, 1000));
+    expect(fitAltitude(2.6, 0, 0)).toBe(2.6);
+  });
+
+  it('fits a view inside a taller canvas to the view, not the canvas', () => {
+    const share = (alt: number) => Math.tan(Math.asin(1 / (1 + alt)));
+    // a wide 1200×700 stage on a 1000 px tall window: the globe keeps its share of 700 px
+    const alt = fitAltitude(2.6, 1200, 700, 1000);
+    expect(alt).toBeGreaterThan(2.6);
+    expect(share(alt) * 1000).toBeCloseTo(share(2.6) * 700, 9);
+    // a tall stage fits its width
+    expect(share(fitAltitude(2.6, 400, 700, 1000)) * 1000).toBeCloseTo(share(2.6) * 400, 9);
+    // the same view on a canvas of its own height is plain fitting
+    expect(fitAltitude(2.6, 1200, 700, 700)).toBe(2.6);
   });
 
   it('sizes scan pings by the S-meter', () => {
