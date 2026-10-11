@@ -131,7 +131,7 @@ export function useOverview(api: Api | null) {
 }
 
 export type Filters = Omit<StationQuery, 'offset' | 'limit' | 'facets'>;
-export const NO_FILTERS: Filters = { q: '', bands: [], langs: [], countries: [], regions: [], site: null, lens: 'all', scan: null, sort: 'freq' };
+export const NO_FILTERS: Filters = { q: '', bands: [], langs: [], countries: [], regions: [], sources: [], site: null, lens: 'all', scan: null, sort: 'freq' };
 
 interface SearchState {
   rows: StationRow[];

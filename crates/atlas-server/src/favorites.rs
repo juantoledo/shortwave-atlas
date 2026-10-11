@@ -5,14 +5,14 @@ use std::sync::{Arc, Mutex};
 
 use atlas_core::api::{ApiError, ErrorKind};
 use atlas_core::favorites::{self, Favorite, FavoriteRequest, FavoriteView, FavoritesFile, FORMAT_VERSION};
-use atlas_core::stations::Catalog;
+use atlas_core::stations::CatalogCell;
 
 use crate::files::write_atomic;
 
 pub struct FavoriteService {
     /// `favorites.json`; `None` keeps them in memory only (tests).
     file: Option<PathBuf>,
-    catalog: Arc<Catalog>,
+    catalog: Arc<CatalogCell>,
     list: Mutex<Vec<Favorite>>,
 }
 
@@ -22,7 +22,7 @@ fn invalid(message: impl Into<String>) -> ApiError {
 
 impl FavoriteService {
     /// Load the saved favorites; a file that does not read gives none (and a warning).
-    pub fn new(file: Option<PathBuf>, catalog: Arc<Catalog>) -> Arc<Self> {
+    pub fn new(file: Option<PathBuf>, catalog: Arc<CatalogCell>) -> Arc<Self> {
         let list = file
             .as_ref()
             .and_then(|p| {
@@ -45,7 +45,7 @@ impl FavoriteService {
     }
 
     pub fn views(&self) -> Vec<FavoriteView> {
-        favorites::views(&self.lock(), &self.catalog)
+        favorites::views(&self.lock(), &self.catalog.get())
     }
 
     /// Apply `change` to a copy of the list, save that, and only then keep it.
@@ -63,7 +63,8 @@ impl FavoriteService {
     }
 
     pub fn add(&self, req: &FavoriteRequest, now: i64) -> Result<Favorite, ApiError> {
-        self.change(|l| favorites::add(l, req, &self.catalog, now).map_err(invalid))
+        let cat = self.catalog.get();
+        self.change(|l| favorites::add(l, req, &cat, now).map_err(invalid))
     }
 
     pub fn rename(&self, id: &str, label: &str) -> Result<(), ApiError> {
@@ -89,7 +90,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("swatlas-favs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let file = dir.join("favorites.json");
-        let svc = FavoriteService::new(Some(file.clone()), crate::stations::bundled());
+        let svc = FavoriteService::new(Some(file.clone()), crate::sources::bundled_cell());
         let req = FavoriteRequest { freq_hz: 7_000_000, mode: Mode::LSB, label: Some("Net".into()), station_id: None };
         let f = svc.add(&req, 10).unwrap();
         svc.add(&FavoriteRequest { freq_hz: 3_000_000, ..req.clone() }, 11).unwrap();
@@ -97,17 +98,17 @@ mod tests {
         assert_eq!(svc.rename("nope", "x").unwrap_err().kind, ErrorKind::Invalid);
         assert_eq!(svc.add(&FavoriteRequest { freq_hz: 0, ..req }, 12).unwrap_err().kind, ErrorKind::Invalid);
 
-        let again = FavoriteService::new(Some(file.clone()), crate::stations::bundled());
+        let again = FavoriteService::new(Some(file.clone()), crate::sources::bundled_cell());
         let v = again.views();
         assert_eq!(v.iter().map(|v| v.favorite.freq_hz).collect::<Vec<_>>(), [3_000_000, 7_000_000]);
         assert_eq!(v[1].favorite.label, "Morning net");
         again.delete(&f.id).unwrap();
         assert!(again.delete(&f.id).is_err());
-        assert_eq!(FavoriteService::new(Some(file.clone()), crate::stations::bundled()).list().len(), 1);
+        assert_eq!(FavoriteService::new(Some(file.clone()), crate::sources::bundled_cell()).list().len(), 1);
         assert!(!dir.read_dir().unwrap().flatten().any(|e| e.path().to_string_lossy().ends_with(".tmp")));
 
         std::fs::write(&file, "{").unwrap();
-        assert!(FavoriteService::new(Some(file), crate::stations::bundled()).list().is_empty());
+        assert!(FavoriteService::new(Some(file), crate::sources::bundled_cell()).list().is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

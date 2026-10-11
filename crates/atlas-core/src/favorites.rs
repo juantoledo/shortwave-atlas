@@ -245,7 +245,9 @@ mod tests {
         // next season the station moved: the favorite stays, without a row
         let mut moved = list[1].clone();
         moved.id = "moved".into();
-        moved.station.as_mut().unwrap().freq_hz += 5_000;
+        let st = moved.station.as_mut().unwrap();
+        st.freq_hz += 5_000;
+        st.key.clear(); // keyed by its fields again, as EiBi keys its rows
         list.push(moved);
         let r = resolve(&list, &c);
         assert_eq!(r.by_station.len(), 2);

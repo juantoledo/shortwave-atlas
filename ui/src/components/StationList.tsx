@@ -22,6 +22,7 @@ import type { Sort } from '../types/generated/Sort';
 import type { StationRow } from '../types/generated/StationRow';
 import { Dropdown, type DropOpt } from './Dropdown';
 import { Flag } from './Flag';
+import { scheduleOf } from './sources';
 
 const REGIONS: Region[] = ['am', 'eu', 'af', 'me', 'as', 'oc', 'other'];
 const LENSES: Lens[] = ['all', 'heard', 'favorites'];
@@ -168,7 +169,8 @@ export function StationList(p: Props) {
   const lensLabel = { all: t.lensAll, heard: t.lensHeard, favorites: t.lensFav };
   const lensTitle = { all: t.lensAllTitle, heard: t.lensHeardTitle, favorites: t.lensFavTitle };
   const empty = filtered ? t.noResults : f.lens === 'heard' ? t.heardEmpty : f.lens === 'favorites' ? t.favEmpty : t.noResults;
-  const season = p.meta?.source.season ?? '';
+  const schedule = scheduleOf(p.meta);
+  const season = schedule?.season ?? '';
 
   const box = useRef<HTMLDivElement>(null), end = useRef<HTMLDivElement>(null);
   const more = useRef(p.onMore);
@@ -321,7 +323,7 @@ export function StationList(p: Props) {
       {p.meta && (
         <p className="foot">
           {t.listFoot(season)}
-          {!p.meta.source.current && <><br /><span className="warn">{t.seasonStale(season)}</span></>}
+          {schedule && !schedule.current && <><br /><span className="warn">{t.seasonStale(season)}</span></>}
         </p>
       )}
     </>

@@ -1,20 +1,22 @@
-//! The station catalog built from EiBi: one row per (frequency, station, transmitter site)
-//! with its schedule slots, plus the lookups the UI needs: candidates for a frequency,
-//! filtered and paged search, per-site on-air counts for the globe, and the code tables.
+//! The station catalog built from the data sources: one row per record (frequency, station,
+//! transmitter site) with its schedule slots, plus the lookups the UI needs: candidates for a
+//! frequency, filtered and paged search, per-site on-air counts for the globe, and the code
+//! tables. `CatalogCell` holds the running one, replaced whole when a source changes.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::calendar::{day_of, iso_date, Season};
 use crate::country::{country, Region};
 use crate::eibi::names::{band_of, bands, lang_name, target, target_region, Band};
-use crate::eibi::{ParseReport, Parsed};
+use crate::eibi::{Parsed, SiteKey, SiteRec};
 use crate::geo::{dist_bearing, sun_at, LatLon, Route, SunAt};
 use crate::lens::{HeardRow, OffSchedule};
 use crate::rig::Mode;
 use crate::schedule::{air_status_at, any_on, slot_on, today_parts, AirStatus, Slot, Window};
+use crate::source::{Gazetteer, SiteSpec, SourceData, SourceDesc, SourceInfo, SourceStamp, Vocabulary};
 use crate::text::fold;
 
 /// Default match tolerance around the tuned frequency.
@@ -71,6 +73,9 @@ pub struct Station {
     /// `Site::id`.
     pub site: u32,
     pub slots: Vec<Slot>,
+    /// `SourceDesc::id` of the source it comes from, and its `Record::key` there.
+    pub source: String,
+    pub key: String,
 }
 
 /// A station as seen from a QTH at a given time.
@@ -109,6 +114,8 @@ pub struct StationRow {
     /// Language and target of the slot that matched (the one on the air if any).
     pub lang: String,
     pub target: String,
+    /// `SourceDesc::id`.
+    pub source: String,
 }
 
 /// Which stations the list shows: the whole schedule, those a band scan logged, or the
@@ -152,6 +159,8 @@ pub struct StationQuery {
     pub countries: Vec<String>,
     /// Target regions.
     pub regions: Vec<Region>,
+    /// Source ids (`eibi`).
+    pub sources: Vec<String>,
     pub site: Option<u32>,
     pub lens: Lens,
     /// Only the stations this saved scan heard or missed.
@@ -173,6 +182,7 @@ pub struct Facets {
     pub langs: BTreeMap<String, u32>,
     pub countries: BTreeMap<String, u32>,
     pub regions: BTreeMap<String, u32>,
+    pub sources: BTreeMap<String, u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -217,22 +227,8 @@ pub struct Overview {
     pub sites: Vec<SiteDot>,
     /// Frequencies with something on the air, sorted.
     pub on_hz: Vec<u32>,
-}
-
-/// Where the data comes from.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
-pub struct DataSource {
-    pub name: String,
-    pub url: String,
-    pub file: String,
-    /// `A26`
-    pub season: Option<String>,
-    /// Season dates, `YYYY-MM-DD`.
-    pub from: Option<String>,
-    pub to: Option<String>,
-    /// Whether the season is the one in force now.
-    pub current: bool,
+    /// `Catalog::generation`.
+    pub generation: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -268,12 +264,14 @@ pub struct TargetInfo {
     pub region: Region,
 }
 
-/// Code tables and data facts for the UI (loaded once).
+/// Code tables and data facts for the UI (loaded again when `generation` changes).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct CatalogMeta {
-    pub source: DataSource,
-    pub report: ParseReport,
+    /// Where the stations come from, EiBi first.
+    pub sources: Vec<SourceInfo>,
+    /// `Catalog::generation`.
+    pub generation: u32,
     pub langs: Vec<LangInfo>,
     pub countries: Vec<CountryInfo>,
     pub targets: Vec<TargetInfo>,
@@ -301,18 +299,15 @@ pub struct Catalog {
     langs: Vec<LangInfo>,
     countries: Vec<CountryInfo>,
     targets: Vec<TargetInfo>,
-    season: Option<Season>,
-    report: ParseReport,
+    sources: Vec<SourceDesc>,
+    /// Row id by source id and record key.
+    keys: HashMap<String, HashMap<String, u32>>,
+    generation: u32,
 }
 
 /// `S,Q` -> `["S", "Q"]`
 fn lang_parts(lang: &str) -> Vec<String> {
     lang.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect()
-}
-
-fn mode_for(_name: &str) -> Mode {
-    // EiBi has no mode column; broadcasts on shortwave are AM (DRM rows would need a marker)
-    Mode::AM
 }
 
 fn country_names(itu: &str) -> (String, String) {
@@ -322,48 +317,73 @@ fn country_names(itu: &str) -> (String, String) {
     }
 }
 
+fn site_of(id: u32, s: &SiteRec) -> Site {
+    Site {
+        id,
+        itu: s.itu.clone(),
+        flag: country(&s.itu).and_then(|c| c.flag).map(str::to_string),
+        code: s.code.clone(),
+        name: s.name.clone(),
+        lat: s.lat,
+        lon: s.lon,
+        precise: s.precise,
+    }
+}
+
 impl Catalog {
+    /// The catalog of EiBi alone.
     pub fn from_eibi(p: Parsed) -> Self {
-        let sites: Vec<Site> = p
-            .sites
-            .iter()
-            .enumerate()
-            .map(|(i, s)| Site {
-                id: i as u32,
-                itu: s.itu.clone(),
-                flag: country(&s.itu).and_then(|c| c.flag).map(str::to_string),
-                code: s.code.clone(),
-                name: s.name.clone(),
-                lat: s.lat,
-                lon: s.lon,
-                precise: s.precise,
-            })
-            .collect();
+        let s = p.into_source();
+        Self::build(&[&s.data], &s.vocabulary, &s.gazetteer)
+    }
+
+    /// The catalog of every source's records, with the code names and sites they share. The
+    /// gazetteer's sites come first and in its order, so their ids hold when another source
+    /// changes; sites of a source's own follow.
+    pub fn build(sources: &[&SourceData], vocab: &Vocabulary, gaz: &Gazetteer) -> Self {
+        let mut sites: Vec<Site> = gaz.sites.iter().enumerate().map(|(i, s)| site_of(i as u32, s)).collect();
+        let mut site_ix: HashMap<SiteKey, u32> =
+            gaz.sites.iter().enumerate().map(|(i, s)| (s.key(), i as u32)).collect();
+        // (source, record, site id)
+        let mut placed = Vec::new();
+        for (src, data) in sources.iter().enumerate() {
+            for rec in &data.records {
+                let site = match &rec.site {
+                    SiteSpec::Known(i) if (*i as usize) < gaz.sites.len() => *i,
+                    SiteSpec::Known(_) => continue,
+                    SiteSpec::At(s) => *site_ix.entry(s.key()).or_insert_with(|| {
+                        sites.push(site_of(sites.len() as u32, s));
+                        (sites.len() - 1) as u32
+                    }),
+                };
+                placed.push((src, rec, site));
+            }
+        }
 
         // language and target names
         let mut lang_rows: BTreeMap<String, u32> = BTreeMap::new();
         let mut targets_used: BTreeSet<String> = BTreeSet::new();
-        for e in &p.entries {
-            for l in lang_parts(&e.slot.lang) {
+        for slot in placed.iter().flat_map(|(_, r, _)| &r.slots) {
+            for l in lang_parts(&slot.lang) {
                 *lang_rows.entry(l).or_default() += 1;
             }
-            if !e.slot.target.is_empty() {
-                targets_used.insert(e.slot.target.clone());
+            if !slot.target.is_empty() {
+                targets_used.insert(slot.target.clone());
             }
         }
         let langs: Vec<LangInfo> = lang_rows
             .into_iter()
             .map(|(code, rows)| {
-                let readme = p.readme.langs.get(&code);
+                let named = vocab.langs.get(&code);
                 let tbl = lang_name(&code);
                 LangInfo {
                     en: tbl
                         .and_then(|t| t.en)
                         .map(str::to_string)
-                        .or_else(|| readme.map(|r| r.name.clone()))
+                        .or_else(|| named.map(|r| r.name.clone()))
                         .unwrap_or_else(|| code.clone()),
                     es: tbl.map(|t| t.es.to_string()),
-                    iso: readme.and_then(|r| r.iso.clone()),
+                    iso: named.and_then(|r| r.iso.clone()),
                     code,
                     rows,
                 }
@@ -376,7 +396,7 @@ impl Catalog {
                     Some(t) => (t.en.to_string(), t.es.to_string()),
                     None if country(&code).is_some() => country_names(&code),
                     None => {
-                        let en = p.readme.targets.get(&code).cloned().unwrap_or_else(|| code.clone());
+                        let en = vocab.targets.get(&code).cloned().unwrap_or_else(|| code.clone());
                         (en.clone(), en)
                     }
                 };
@@ -386,16 +406,10 @@ impl Catalog {
         let lang_ix: HashMap<&str, &LangInfo> = langs.iter().map(|l| (l.code.as_str(), l)).collect();
         let target_ix: HashMap<&str, &TargetInfo> = targets.iter().map(|t| (t.code.as_str(), t)).collect();
 
-        // group entries into rows
-        let mut groups: BTreeMap<(u32, u32, u32), Vec<Slot>> = BTreeMap::new();
-        for e in p.entries {
-            groups.entry((e.freq_hz, e.station, e.site)).or_default().push(e.slot);
-        }
-        let mut rows: Vec<Row> = groups
+        let mut rows: Vec<Row> = placed
             .into_iter()
-            .map(|((freq_hz, st, site), mut slots)| {
-                slots.sort_by_key(|s| (s.start, s.end));
-                let (name, itu) = p.stations[st as usize].clone();
+            .map(|(src, rec, site)| {
+                let (name, itu, slots) = (rec.name.clone(), rec.itu.clone(), rec.slots.clone());
                 let site_rec = &sites[site as usize];
                 let mut words: Vec<String> =
                     vec![name.clone(), itu.clone(), site_rec.name.clone(), site_rec.itu.clone()];
@@ -417,19 +431,21 @@ impl Catalog {
                 }
                 let slot_regions = slots.iter().map(|s| target_region(&s.target)).collect();
                 Row {
-                    band: band_of(freq_hz),
+                    band: band_of(rec.freq_hz),
                     hay: fold(&words.join(" | ")),
                     slot_langs,
                     slot_regions,
                     station: Station {
                         id: 0,
-                        freq_hz,
+                        freq_hz: rec.freq_hz,
                         flag: country(&itu).and_then(|c| c.flag).map(str::to_string),
-                        mode: mode_for(&name),
+                        mode: rec.mode,
                         name,
                         itu,
                         site,
                         slots,
+                        source: sources[src].desc.id.clone(),
+                        key: rec.key.clone(),
                     },
                 }
             })
@@ -441,8 +457,10 @@ impl Catalog {
                 .then_with(|| a.station.name.cmp(&b.station.name))
                 .then_with(|| sites[a.station.site as usize].name.cmp(&sites[b.station.site as usize].name))
         });
+        let mut keys: HashMap<String, HashMap<String, u32>> = HashMap::new();
         for (i, r) in rows.iter_mut().enumerate() {
             r.station.id = i as u32;
+            keys.entry(r.station.source.clone()).or_default().entry(r.station.key.clone()).or_insert(i as u32);
         }
 
         let mut country_rows: BTreeMap<String, u32> = BTreeMap::new();
@@ -464,7 +482,14 @@ impl Catalog {
             })
             .collect();
 
-        Self { rows, sites, langs, countries, targets, season: p.season, report: p.report }
+        let sources = sources.iter().map(|s| s.desc.clone()).collect();
+        Self { rows, sites, langs, countries, targets, sources, keys, generation: 0 }
+    }
+
+    /// Changes whenever the catalog is built again (`CatalogCell::replace`): station ids from
+    /// another generation mean other stations.
+    pub fn generation(&self) -> u32 {
+        self.generation
     }
 
     pub fn len(&self) -> usize {
@@ -495,9 +520,15 @@ impl Catalog {
         self.rows[lo..hi.max(lo)].iter().map(|r| &r.station)
     }
 
-    /// The schedule file this catalog was built from (`sked-a26.csv`).
-    pub fn source_file(&self) -> &str {
-        &self.report.source_file
+    /// The station with `key` in source `source`.
+    pub fn by_key(&self, source: &str, key: &str) -> Option<&Station> {
+        let id = *self.keys.get(source)?.get(key)?;
+        self.station(id)
+    }
+
+    /// Which versions of the sources this catalog was built from.
+    pub fn stamps(&self) -> Vec<SourceStamp> {
+        self.sources.iter().map(SourceDesc::stamp).collect()
     }
 
     /// Rows within `tol_hz` of `freq_hz` (rows are sorted by frequency).
@@ -603,17 +634,21 @@ impl Catalog {
             }
             let band_ok = q.bands.is_empty() || q.bands.iter().any(|b| b == r.band);
             let country_ok = q.countries.is_empty() || q.countries.contains(&r.station.itu);
+            let source_ok = q.sources.is_empty() || q.sources.contains(&r.station.source);
             let tests: Vec<(bool, bool)> = (0..r.station.slots.len()).map(|i| slot_tests(r, i)).collect();
             let slot_ok = tests.iter().any(|&(l, g)| l && g);
 
             if q.facets {
-                if country_ok && slot_ok {
+                if country_ok && slot_ok && source_ok {
                     *facets.bands.entry(r.band.to_string()).or_default() += 1;
                 }
-                if band_ok && slot_ok {
+                if band_ok && slot_ok && source_ok {
                     *facets.countries.entry(r.station.itu.clone()).or_default() += 1;
                 }
-                if band_ok && country_ok {
+                if band_ok && country_ok && slot_ok {
+                    *facets.sources.entry(r.station.source.clone()).or_default() += 1;
+                }
+                if band_ok && country_ok && source_ok {
                     let langs: BTreeSet<&String> = tests
                         .iter()
                         .enumerate()
@@ -631,7 +666,7 @@ impl Catalog {
                 }
             }
 
-            if !(band_ok && country_ok && slot_ok) {
+            if !(band_ok && country_ok && slot_ok && source_ok) {
                 continue;
             }
             let now: Vec<bool> = r.station.slots.iter().map(|s| slot_on(s, unix)).collect();
@@ -677,6 +712,7 @@ impl Catalog {
             on,
             lang: s.map(|s| s.lang.clone()).unwrap_or_default(),
             target: s.map(|s| s.target.clone()).unwrap_or_default(),
+            source: st.source.clone(),
         }
     }
 
@@ -709,25 +745,17 @@ impl Catalog {
                 total: total[s.id as usize],
             })
             .collect();
-        Overview { sites, on_hz }
+        Overview { sites, on_hz, generation: self.generation }
     }
 
-    /// Code tables, the import report and the data season.
+    /// The sources with their import reports and seasons, and the code tables.
     pub fn meta(&self, unix: i64) -> CatalogMeta {
-        let range = self.season.map(|s| s.range());
         let mut freqs_hz: Vec<u32> = self.rows.iter().map(|r| r.station.freq_hz).collect();
         freqs_hz.dedup();
+        let rows_of = |id: &str| self.rows.iter().filter(|r| r.station.source == id).count() as u32;
         CatalogMeta {
-            source: DataSource {
-                name: "EiBi".into(),
-                url: "http://www.eibispace.de/dx/".into(),
-                file: self.report.source_file.clone(),
-                season: self.season.map(|s| s.code()),
-                from: range.map(|r| iso_date(day_of(r.0))),
-                to: range.map(|r| iso_date(day_of(r.1) - 1)),
-                current: self.season.is_some_and(|s| s == Season::at(unix)),
-            },
-            report: self.report.clone(),
+            sources: self.sources.iter().map(|s| s.info(rows_of(&s.id), unix)).collect(),
+            generation: self.generation,
             langs: self.langs.clone(),
             countries: self.countries.clone(),
             targets: self.targets.clone(),
@@ -739,12 +767,35 @@ impl Catalog {
     }
 }
 
+/// The running catalog, replaced whole when a source changes. Readers take a snapshot (`get`)
+/// and keep to it for one request, so station ids within it hold.
+pub struct CatalogCell(RwLock<Arc<Catalog>>);
+
+impl CatalogCell {
+    pub fn new(catalog: Catalog) -> Arc<Self> {
+        Arc::new(Self(RwLock::new(Arc::new(catalog))))
+    }
+
+    pub fn get(&self) -> Arc<Catalog> {
+        self.0.read().expect("catalog lock").clone()
+    }
+
+    /// Put `catalog` in, as the next generation.
+    pub fn replace(&self, mut catalog: Catalog) {
+        let mut cur = self.0.write().expect("catalog lock");
+        catalog.generation = cur.generation.wrapping_add(1);
+        *cur = Arc::new(catalog);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::calendar::{days_from_civil, SECS_PER_DAY};
     use crate::eibi::parse;
     use crate::eibi::tests::files;
+    use crate::schedule::{Days, SeasonOnly};
+    use crate::source::{Record, SourceKind};
 
     const SANTIAGO: LatLon = LatLon { lat: -33.45, lon: -70.67 };
 
@@ -919,10 +970,13 @@ mod tests {
     fn meta_lists_codes_in_use() {
         let c = catalog();
         let m = c.meta(at(10, 0));
-        assert_eq!(m.source.season.as_deref(), Some("A26"));
-        assert_eq!((m.source.from.as_deref(), m.source.to.as_deref()), (Some("2026-03-29"), Some("2026-10-24")));
-        assert!(m.source.current);
-        assert!(!c.meta(at(10, 0) + 30 * SECS_PER_DAY).source.current);
+        let [eibi] = &m.sources[..] else { panic!("{:?}", m.sources) };
+        assert_eq!((eibi.id.as_str(), eibi.version.as_str(), eibi.rows), ("eibi", "sked-a26.csv", 10));
+        assert_eq!(eibi.season.as_deref(), Some("A26"));
+        assert_eq!((eibi.from.as_deref(), eibi.to.as_deref()), (Some("2026-03-29"), Some("2026-10-24")));
+        assert!(eibi.current && !eibi.editable);
+        assert_eq!(eibi.report.as_ref().map(|r| r.kept), Some(10));
+        assert!(!c.meta(at(10, 0) + 30 * SECS_PER_DAY).sources[0].current);
         let spanish = m.langs.iter().find(|l| l.code == "S").unwrap();
         assert_eq!((spanish.en.as_str(), spanish.es.as_deref(), spanish.rows), ("Spanish", Some("Español"), 1));
         let hindi = m.langs.iter().find(|l| l.code == "HI").unwrap();
@@ -939,5 +993,126 @@ mod tests {
         assert_eq!(m.freqs_hz.len(), 10);
         assert_eq!((m.stations, m.sites), (10, c.sites.len() as u32));
         assert_eq!(m.bands.len(), 14);
+    }
+
+    /// The fixture's catalog alone, and with a second source: a station on 6075 kHz from a site
+    /// of its own, one at an EiBi site, another at the same site of its own, and one at a site
+    /// the gazetteer does not have.
+    fn two_sources() -> (Catalog, Catalog) {
+        let eibi = parse(&files()).unwrap().into_source();
+        let slot = Slot {
+            start: 0,
+            end: 1440,
+            days: Days::Daily,
+            lang: "S".into(),
+            target: "SAm".into(),
+            season: SeasonOnly::All,
+            from: None,
+            to: None,
+            heard: None,
+        };
+        let rec = |key: &str, khz: u32, name: &str, site| Record {
+            key: key.into(),
+            freq_hz: khz * 1000,
+            mode: Mode::USB,
+            name: name.into(),
+            itu: "CHL".into(),
+            site,
+            slots: vec![slot.clone()],
+        };
+        let own =
+            SiteRec { itu: "CHL".into(), code: None, name: "Santiago".into(), lat: -33.45, lon: -70.67, precise: true };
+        let mine = SourceData {
+            desc: SourceDesc {
+                id: "mine".into(),
+                name: "Mine".into(),
+                kind: SourceKind::User,
+                editable: true,
+                url: None,
+                version: "1".into(),
+                season: None,
+                report: None,
+            },
+            records: vec![
+                rec("a", 6075, "Radio Local", SiteSpec::At(own.clone())),
+                rec("b", 6070, "Radio Relay", SiteSpec::Known(0)),
+                rec("c", 7000, "Twin", SiteSpec::At(own)),
+                rec("d", 7100, "Nowhere", SiteSpec::Known(9999)),
+            ],
+        };
+        let both = Catalog::build(&[&eibi.data, &mine], &eibi.vocabulary, &eibi.gazetteer);
+        (catalog(), both)
+    }
+
+    #[test]
+    fn sources_build_one_catalog() {
+        let (alone, both) = two_sources();
+        assert_eq!(both.len(), 13, "the record at an unknown site is left out");
+        // EiBi's sites keep their ids; the two records of their own share one site after them
+        assert_eq!(both.sites.len(), alone.sites.len() + 1);
+        assert!(alone.sites.iter().all(|s| both.site(s.id) == Some(s)));
+        let ids: Vec<u32> = both.stations().map(|s| s.id).collect();
+        assert_eq!(ids, (0..13).collect::<Vec<_>>());
+        assert!(both.stations().collect::<Vec<_>>().windows(2).all(|w| w[0].freq_hz <= w[1].freq_hz));
+
+        let local = both.by_key("mine", "a").unwrap();
+        assert_eq!(
+            (local.freq_hz, local.name.as_str(), local.mode, local.source.as_str()),
+            (6_075_000, "Radio Local", Mode::USB, "mine")
+        );
+        assert_eq!(both.site(local.site).unwrap().name, "Santiago");
+        assert_eq!(both.by_key("mine", "c").unwrap().site, local.site);
+        let cnr = alone.between(6_070_000, 6_070_000).next().unwrap();
+        assert_eq!(both.by_key("eibi", &cnr.key).map(|s| s.name.as_str()), Some(cnr.name.as_str()));
+        assert!(both.by_key("mine", "d").is_none() && both.by_key("eibi", "a").is_none());
+
+        // both sources answer a lookup; the relay stands at EiBi's site 0
+        let l = both.lookup(6_070_000, at(10, 0), SANTIAGO, LOOKUP_TOLERANCE_HZ);
+        let found: Vec<(&str, &str)> = l.iter().map(|c| (c.station.source.as_str(), c.station.name.as_str())).collect();
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.contains(&("mine", "Radio Relay")) && found.contains(&("eibi", cnr.name.as_str())));
+        assert_eq!(l.iter().find(|c| c.station.source == "mine").unwrap().site.id, 0);
+
+        let m = both.meta(at(10, 0));
+        let rows: Vec<(&str, u32, bool)> = m.sources.iter().map(|s| (s.id.as_str(), s.rows, s.current)).collect();
+        assert_eq!(rows, [("eibi", 10, true), ("mine", 3, true)]);
+        assert_eq!(m.langs.iter().find(|l| l.code == "S").unwrap().rows, 4);
+        assert_eq!(both.stamps().iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["eibi", "mine"]);
+    }
+
+    #[test]
+    fn search_filters_and_counts_sources() {
+        let (_, both) = two_sources();
+        let t = at(10, 0);
+        let p = both.search(&query(|q| q.facets = true), t);
+        let f = p.facets.unwrap();
+        assert_eq!(f.sources, BTreeMap::from([("eibi".to_string(), 10), ("mine".to_string(), 3)]));
+        let p = both.search(
+            &query(|q| {
+                q.sources = vec!["mine".into()];
+                q.facets = true;
+            }),
+            t,
+        );
+        assert_eq!(names(&p.items), [(6070, "Radio Relay"), (6075, "Radio Local"), (7000, "Twin")]);
+        assert!(p.items.iter().all(|r| r.source == "mine"));
+        let f = p.facets.unwrap();
+        // the source facet leaves its own filter out; the others count Mine's rows
+        assert_eq!(f.sources.get("eibi"), Some(&10));
+        assert_eq!(f.countries.values().sum::<u32>(), 3);
+        assert_eq!(both.search(&query(|q| q.q = "radio local".into()), t).total, 1);
+    }
+
+    #[test]
+    fn a_cell_replaces_the_catalog_as_the_next_generation() {
+        let cell = CatalogCell::new(catalog());
+        let before = cell.get();
+        assert_eq!((before.generation(), before.overview(0).generation, before.meta(0).generation), (0, 0, 0));
+        cell.replace(two_sources().1);
+        let after = cell.get();
+        assert_eq!((after.generation(), after.len()), (1, 13));
+        assert_eq!(after.meta(0).generation, 1);
+        // a snapshot taken before keeps its catalog
+        assert_eq!((before.generation(), before.len()), (0, 10));
     }
 }

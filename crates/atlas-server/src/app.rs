@@ -14,7 +14,7 @@ use atlas_core::lens::{self, Known};
 use atlas_core::platform::Os;
 use atlas_core::scan::{plan, ScanRequest, ScanStatus};
 use atlas_core::setup::{validate_choice, BackendKind, RigChoice, RigModel};
-use atlas_core::stations::{Catalog, LOOKUP_TOLERANCE_HZ};
+use atlas_core::stations::{CatalogCell, LOOKUP_TOLERANCE_HZ};
 use atlas_rig::{discover, Rig, RigConfig, ScanStop};
 use serde_json::Value;
 use tokio::sync::OnceCell;
@@ -35,7 +35,8 @@ pub struct Atlas {
     rig_config: RwLock<RigConfig>,
     /// `swatlas.toml`, where the settings page saves the rig choice.
     config_path: Option<PathBuf>,
-    stations: Arc<Catalog>,
+    /// The running catalog, built from the sources.
+    stations: Arc<CatalogCell>,
     qth: Arc<RwLock<Qth>>,
     /// Where a QTH picked in the UI is saved (kept apart from the hand-edited TOML).
     qth_file: Option<PathBuf>,
@@ -68,10 +69,11 @@ impl Atlas {
         if let Some(p) = &config.stations {
             tracing::warn!("`stations = {}` is no longer used; see `eibi_dir`", p.display());
         }
-        let stations = match &config.eibi_dir {
-            Some(dir) => crate::stations::load(dir)?,
-            None => crate::stations::bundled(),
+        let eibi = match &config.eibi_dir {
+            Some(dir) => crate::sources::load(dir)?,
+            None => crate::sources::bundled(),
         };
+        let stations = CatalogCell::new(crate::sources::catalog(&eibi));
         let saved = qth_file
             .as_ref()
             .and_then(|p| std::fs::read_to_string(p).ok())
@@ -273,17 +275,19 @@ impl Atlas {
                 Ok(Value::Null)
             }
             Call::Lookup { freq_hz } => {
-                let c = self.stations.lookup(freq_hz, now, self.qth().pos(), LOOKUP_TOLERANCE_HZ);
+                let c = self.stations.get().lookup(freq_hz, now, self.qth().pos(), LOOKUP_TOLERANCE_HZ);
                 json(serde_json::to_value(c))
             }
             Call::Search(q) => {
-                let (logbook, signals, favorites) = (self.scan.logbook(), self.scan.signals(), self.favorites.list());
+                let cat = self.stations.get();
+                let (logbook, signals, favorites) =
+                    (self.scan.logbook_for(&cat), self.scan.signals(), self.favorites.list());
                 let scan = q.scan.as_deref().and_then(|id| self.scan.summary(id));
                 let known = Known { logbook: &logbook, signals: &signals, favorites: &favorites, scan: scan.as_ref() };
-                json(serde_json::to_value(lens::search(&self.stations, &q, now, &known)))
+                json(serde_json::to_value(lens::search(&cat, &q, now, &known)))
             }
-            Call::Overview => json(serde_json::to_value(self.stations.overview(now))),
-            Call::StationsMeta => json(serde_json::to_value(self.stations.meta(now))),
+            Call::Overview => json(serde_json::to_value(self.stations.get().overview(now))),
+            Call::StationsMeta => json(serde_json::to_value(self.stations.get().meta(now))),
             Call::SetQth(q) => {
                 self.set_qth(q)?;
                 Ok(Value::Null)

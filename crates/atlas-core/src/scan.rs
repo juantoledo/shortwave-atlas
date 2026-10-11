@@ -3,6 +3,7 @@
 //! the logbook: every station a scan has logged, joined to the running catalog, and the signals
 //! no station explained, gathered across scans.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,7 @@ use crate::bands::{Band, BandKind};
 use crate::calendar::{civil_from_days, SECS_PER_DAY};
 use crate::rig::RxRange;
 use crate::schedule::slot_on;
+use crate::source::{row_key, SourceStamp, EIBI};
 use crate::stations::{Catalog, Station, LOOKUP_TOLERANCE_HZ};
 
 /// Most grid points one scan may visit (20 m at 1 kHz is 351; MW at 9 kHz is 120).
@@ -144,10 +146,16 @@ pub struct ScanRequest {
 }
 
 /// A station as a scan saw it. A copy rather than a `Station::id`, which only holds for one
-/// version of the schedule.
+/// version of the catalog.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct StationRef {
+    /// The source it comes from and its key there (`Station::source`, `Station::key`). Refs saved
+    /// before sources have neither: they are EiBi's, keyed by the fields below.
+    #[serde(default = "eibi")]
+    pub source: String,
+    #[serde(default)]
+    pub key: String,
     pub freq_hz: u32,
     pub name: String,
     /// The station's own country (EiBi code) and flag.
@@ -160,14 +168,17 @@ pub struct StationRef {
     pub target: String,
 }
 
-/// What identifies a station across schedule versions.
-type Key<'a> = (u32, &'a str, &'a str, &'a str, &'a str);
+fn eibi() -> String {
+    EIBI.into()
+}
 
 impl StationRef {
     pub(crate) fn of(cat: &Catalog, st: &Station, unix: i64) -> Self {
         let site = cat.site(st.site);
         let slot = st.slots.iter().find(|s| slot_on(s, unix));
         Self {
+            source: st.source.clone(),
+            key: st.key.clone(),
             freq_hz: st.freq_hz,
             name: st.name.clone(),
             itu: st.itu.clone(),
@@ -179,22 +190,23 @@ impl StationRef {
         }
     }
 
-    fn key(&self) -> Key<'_> {
-        (self.freq_hz, &self.name, &self.itu, &self.site_itu, &self.site_name)
+    /// What identifies the station across catalog versions: its source and key.
+    fn id(&self) -> (&str, Cow<'_, str>) {
+        if self.key.is_empty() {
+            (EIBI, Cow::Owned(row_key(self.freq_hz, &self.name, &self.itu, &self.site_itu, &self.site_name)))
+        } else {
+            (&self.source, Cow::Borrowed(&self.key))
+        }
     }
 
-    /// The same station in `cat`, if this version of the schedule still has it.
+    /// The same station in `cat`, if this version of its source still has it.
     pub(crate) fn find<'c>(&self, cat: &'c Catalog) -> Option<&'c Station> {
-        cat.between(self.freq_hz, self.freq_hz).find(|st| {
-            st.name == self.name
-                && st.itu == self.itu
-                && cat.site(st.site).is_some_and(|s| s.itu == self.site_itu && s.name == self.site_name)
-        })
+        let (source, key) = self.id();
+        cat.by_key(source, &key)
     }
 
-    /// The same station's key: frequency, name, country and site.
     pub(crate) fn same(&self, other: &StationRef) -> bool {
-        self.key() == other.key()
+        self.id() == other.id()
     }
 }
 
@@ -265,8 +277,10 @@ pub struct ScanSummary {
     pub qth: Qth,
     /// Which rig (backend, model).
     pub rig: String,
-    /// The schedule file the signals were matched against (`sked-a26.csv`).
-    pub eibi: String,
+    /// The sources the signals were matched against. Empty in scans saved before sources: those
+    /// were matched against EiBi, and their file names it in an `eibi` field this build ignores.
+    #[serde(default)]
+    pub sources: Vec<SourceStamp>,
     /// The median reading, dB relative to S9.
     pub noise_db: Option<i16>,
     /// Grid points measured.
@@ -456,27 +470,13 @@ pub fn analyse(cat: &Catalog, first_hz: u32, step_hz: u32, samples: &[Option<i16
     Found { noise_db: Some(floor), peaks, missed }
 }
 
-/// The catalog's rows by `StationRef::key`: (station id, site id).
-fn rows_by_key(cat: &Catalog) -> HashMap<Key<'_>, (u32, u32)> {
-    cat.stations()
-        .filter_map(|st| {
-            let site = cat.site(st.site)?;
-            Some((
-                (st.freq_hz, st.name.as_str(), st.itu.as_str(), site.itu.as_str(), site.name.as_str()),
-                (st.id, site.id),
-            ))
-        })
-        .collect()
-}
-
 /// The sites of the stations `peaks` logged that `cat` still has, by id.
 pub fn logged_sites(cat: &Catalog, peaks: &[Peak]) -> Vec<u32> {
-    let ix = rows_by_key(cat);
     let sites: BTreeSet<u32> = peaks
         .iter()
         .filter(|p| p.verdict != Verdict::Unidentified)
         .flat_map(|p| &p.stations)
-        .filter_map(|r| ix.get(&r.key()).map(|&(_, site)| site))
+        .filter_map(|r| r.find(cat).map(|st| st.site))
         .collect();
     sites.into_iter().collect()
 }
@@ -484,12 +484,11 @@ pub fn logged_sites(cat: &Catalog, peaks: &[Peak]) -> Vec<u32> {
 /// Every station the scans logged, as rows of `cat` (stations the schedule no longer has are left
 /// out), by station id.
 pub fn logbook<'a>(scans: impl IntoIterator<Item = &'a ScanSummary>, cat: &Catalog) -> Vec<Logged> {
-    let ix = rows_by_key(cat);
     let mut out: BTreeMap<u32, Logged> = BTreeMap::new();
     for scan in scans {
         for p in scan.peaks.iter().filter(|p| p.verdict != Verdict::Unidentified) {
             for r in &p.stations {
-                let Some(&(station_id, site_id)) = ix.get(&r.key()) else { continue };
+                let Some((station_id, site_id)) = r.find(cat).map(|st| (st.id, st.site)) else { continue };
                 let l = out.entry(station_id).or_insert(Logged {
                     station_id,
                     site_id,
@@ -796,7 +795,7 @@ mod tests {
             outcome: ScanOutcome::Complete,
             qth: Qth::default(),
             rig: "sim".into(),
-            eibi: "sked-a26.csv".into(),
+            sources: vec![SourceStamp { id: EIBI.into(), version: "sked-a26.csv".into() }],
             noise_db: Some(-48),
             measured: 101,
             peaks,
@@ -818,6 +817,7 @@ mod tests {
         };
         let mut gone = r.clone();
         gone.name = "Radio Nowhere".into();
+        gone.key.clear(); // keyed by its fields again, as EiBi keys its rows
         let scans = [
             summary(vec![peak(100, -20, Verdict::Ambiguous, vec![r.clone(), gone.clone()])]),
             summary(vec![peak(50, -6, Verdict::Sure, vec![r.clone()]), peak(70, 0, Verdict::Unidentified, vec![])]),
@@ -869,6 +869,7 @@ mod tests {
         let r = |st: &Station| StationRef::of(&c, st, at(10, 0));
         let mut gone = r(b);
         gone.site_name = "Nowhere".into();
+        gone.key.clear(); // keyed by its fields again, as EiBi keys its rows
         let mut s = summary(vec![
             Peak { freq_hz: a.freq_hz, db: -20, at: 0, verdict: Verdict::Sure, stations: vec![r(a)] },
             Peak { freq_hz: a.freq_hz, db: -8, at: 0, verdict: Verdict::Ambiguous, stations: vec![r(a), gone.clone()] },
@@ -909,6 +910,34 @@ mod tests {
         want.dedup();
         assert_eq!(logged_sites(&c, &peaks), want);
         assert!(logged_sites(&c, &peaks[2..]).is_empty());
+    }
+
+    #[test]
+    fn refs_saved_before_sources_still_find_their_station() {
+        let c = catalog();
+        let st = c.station(6).unwrap();
+        let r = StationRef::of(&c, st, at(10, 0));
+        assert_eq!((r.source.as_str(), r.key.as_str()), ("eibi", st.key.as_str()));
+        let mut old = serde_json::to_value(&r).unwrap();
+        let o = old.as_object_mut().unwrap();
+        o.remove("source");
+        o.remove("key");
+        let old: StationRef = serde_json::from_value(old).unwrap();
+        assert_eq!((old.source.as_str(), old.key.as_str()), ("eibi", ""));
+        assert_eq!(old.find(&c).map(|s| s.id), Some(st.id));
+        assert!(old.same(&r) && r.same(&old));
+        // a ref with a key follows it, whatever the copied fields say
+        let renamed = StationRef { name: "Renamed".into(), ..r.clone() };
+        assert_eq!(renamed.find(&c).map(|s| s.id), Some(st.id));
+        assert!(renamed.same(&r));
+        assert!(StationRef { key: "nope".into(), ..r.clone() }.find(&c).is_none());
+        // a scan saved before sources reads, without them
+        let mut j = serde_json::to_value(summary(vec![])).unwrap();
+        let o = j.as_object_mut().unwrap();
+        o.remove("sources");
+        o.insert("eibi".into(), "sked-a26.csv".into());
+        let back: ScanSummary = serde_json::from_value(j).unwrap();
+        assert!(back.sources.is_empty());
     }
 
     #[test]

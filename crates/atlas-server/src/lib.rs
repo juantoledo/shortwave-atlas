@@ -8,7 +8,7 @@ pub mod favorites;
 pub mod files;
 pub mod scan;
 pub mod server;
-pub mod stations;
+pub mod sources;
 pub mod update;
 
 pub use app::Atlas;

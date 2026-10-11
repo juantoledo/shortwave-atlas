@@ -15,6 +15,7 @@ pub mod rig;
 pub mod scan;
 pub mod schedule;
 pub mod setup;
+pub mod source;
 pub mod stations;
 pub mod text;
 pub mod tools;

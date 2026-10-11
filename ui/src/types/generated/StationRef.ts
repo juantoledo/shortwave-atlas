@@ -2,9 +2,14 @@
 
 /**
  * A station as a scan saw it. A copy rather than a `Station::id`, which only holds for one
- * version of the schedule.
+ * version of the catalog.
  */
-export type StationRef = { freq_hz: number, name: string, 
+export type StationRef = { 
+/**
+ * The source it comes from and its key there (`Station::source`, `Station::key`). Refs saved
+ * before sources have neither: they are EiBi's, keyed by the fields below.
+ */
+source: string, key: string, freq_hz: number, name: string, 
 /**
  * The station's own country (EiBi code) and flag.
  */

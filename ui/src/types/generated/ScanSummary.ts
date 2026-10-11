@@ -3,6 +3,7 @@ import type { BandKind } from "./BandKind";
 import type { Peak } from "./Peak";
 import type { Qth } from "./Qth";
 import type { ScanOutcome } from "./ScanOutcome";
+import type { SourceStamp } from "./SourceStamp";
 import type { StationRef } from "./StationRef";
 
 /**
@@ -34,9 +35,10 @@ started: number, finished: number, outcome: ScanOutcome, qth: Qth,
  */
 rig: string, 
 /**
- * The schedule file the signals were matched against (`sked-a26.csv`).
+ * The sources the signals were matched against. Empty in scans saved before sources: those
+ * were matched against EiBi, and their file names it in an `eibi` field this build ignores.
  */
-eibi: string, 
+sources: Array<SourceStamp>, 
 /**
  * The median reading, dB relative to S9.
  */

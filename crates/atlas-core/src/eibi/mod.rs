@@ -18,7 +18,9 @@ use ts_rs::TS;
 
 use crate::calendar::Season;
 use crate::country::country;
+use crate::rig::Mode;
 use crate::schedule::{Days, SeasonOnly, Slot};
+use crate::source::{row_key, Gazetteer, Record, SiteSpec, SourceData, SourceDesc, SourceKind, Vocabulary, EIBI};
 use crate::text::decode_eibi;
 use fields::{
     parse_days, parse_ddmm, parse_khz, parse_last_heard, parse_persistence, parse_site_code, parse_time, DaysField,
@@ -183,7 +185,13 @@ fn map_header(header: &str) -> Result<HashMap<&'static str, usize>, EibiError> {
 /// `(itu, code)` -> `(name, lat, lon)`; code empty = the country's default site.
 type Overrides = HashMap<(String, String), (String, f64, f64)>;
 /// A site's identity: `(itu, code, name, lat bits, lon bits, precise)`.
-type SiteKey = (String, Option<String>, String, u64, u64, bool);
+pub(crate) type SiteKey = (String, Option<String>, String, u64, u64, bool);
+
+impl SiteRec {
+    pub(crate) fn key(&self) -> SiteKey {
+        (self.itu.clone(), self.code.clone(), self.name.clone(), self.lat.to_bits(), self.lon.to_bits(), self.precise)
+    }
+}
 
 /// `site_overrides.csv`.
 fn parse_overrides(text: &str) -> Result<Overrides, EibiError> {
@@ -229,8 +237,7 @@ struct SiteResolver<'a> {
 
 impl SiteResolver<'_> {
     fn add(&mut self, s: SiteRec) -> u32 {
-        let key = (s.itu.clone(), s.code.clone(), s.name.clone(), s.lat.to_bits(), s.lon.to_bits(), s.precise);
-        *self.index.entry(key).or_insert_with(|| {
+        *self.index.entry(s.key()).or_insert_with(|| {
             self.sites.push(s);
             (self.sites.len() - 1) as u32
         })
@@ -370,6 +377,58 @@ pub fn parse(files: &EibiFiles) -> Result<Parsed, EibiError> {
     report.warnings.extend(unknown_days.iter().map(|(d, n)| format!("unknown days {d:?} ({n}x), kept as irregular")));
     report.warnings.extend(unresolved.iter().map(|(s, n)| format!("no site for {s} ({n}x)")));
     Ok(Parsed { season, readme, sites, stations, entries, report })
+}
+
+/// EiBi as a data source: its rows as records, and the code names and sites it brings.
+#[derive(Clone, Debug)]
+pub struct EibiSource {
+    pub data: SourceData,
+    pub vocabulary: Vocabulary,
+    pub gazetteer: Gazetteer,
+}
+
+impl Parsed {
+    /// One record per (frequency, station, site), with its slots by time.
+    pub fn into_source(self) -> EibiSource {
+        let Parsed { season, readme, sites, stations, entries, report } = self;
+        let mut groups: BTreeMap<(u32, u32, u32), Vec<Slot>> = BTreeMap::new();
+        for e in entries {
+            groups.entry((e.freq_hz, e.station, e.site)).or_default().push(e.slot);
+        }
+        let records = groups
+            .into_iter()
+            .map(|((freq_hz, st, site), mut slots)| {
+                slots.sort_by_key(|s| (s.start, s.end));
+                let (name, itu) = stations[st as usize].clone();
+                let s = &sites[site as usize];
+                Record {
+                    key: row_key(freq_hz, &name, &itu, &s.itu, &s.name),
+                    freq_hz,
+                    // EiBi has no mode column; broadcasts on shortwave are AM (DRM rows would need a marker)
+                    mode: Mode::AM,
+                    name,
+                    itu,
+                    site: SiteSpec::Known(site),
+                    slots,
+                }
+            })
+            .collect();
+        let desc = SourceDesc {
+            id: EIBI.into(),
+            name: "EiBi".into(),
+            kind: SourceKind::Schedule,
+            editable: false,
+            url: Some("http://www.eibispace.de/dx/".into()),
+            version: report.source_file.clone(),
+            season,
+            report: Some(report),
+        };
+        EibiSource {
+            data: SourceData { desc, records },
+            vocabulary: Vocabulary { langs: readme.langs, targets: readme.targets },
+            gazetteer: Gazetteer { sites, first_site: readme.first_site },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -555,6 +614,26 @@ abc;0000-0100;;USA;Bad freq;E;NAm;;1;;
         r.skipped.invalid = 0;
         r.kept = 0;
         assert!(r.check_strict().is_err());
+    }
+
+    #[test]
+    fn as_a_source_one_record_per_frequency_station_and_site() {
+        let p = parsed();
+        let sites = p.sites.clone();
+        let s = p.into_source();
+        assert_eq!((s.data.desc.id.as_str(), s.data.desc.version.as_str()), ("eibi", "sked-a26.csv"));
+        assert_eq!(s.data.desc.report.as_ref().map(|r| r.kept), Some(10));
+        assert_eq!(s.data.records.len(), 10);
+        assert_eq!(s.gazetteer.sites, sites);
+        let keys: HashSet<&str> = s.data.records.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(keys.len(), 10);
+        let bbc = s.data.records.iter().find(|r| r.freq_hz == 9_410_000).unwrap();
+        assert_eq!(bbc.key, "9410000|BBC|G|AFS|Johannesburg");
+        assert_eq!(
+            (bbc.mode, &bbc.site),
+            (Mode::AM, &SiteSpec::Known(sites.iter().position(|s| s.name == "Johannesburg").unwrap() as u32))
+        );
+        assert_eq!(s.vocabulary.langs.get("S").map(|l| l.name.as_str()), Some("Spanish"));
     }
 
     #[test]

@@ -8,4 +8,8 @@ export type Overview = { sites: Array<SiteDot>,
 /**
  * Frequencies with something on the air, sorted.
  */
-on_hz: Array<number>, };
+on_hz: Array<number>, 
+/**
+ * `Catalog::generation`.
+ */
+generation: number, };

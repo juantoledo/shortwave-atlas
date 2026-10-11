@@ -155,9 +155,14 @@ pub fn search(cat: &Catalog, q: &StationQuery, unix: i64, k: &Known) -> StationP
 }
 
 /// The rows off the schedule that the band and text filters keep. The others (language,
-/// country, region, site) are about schedule rows: with any of them set, none.
+/// country, region, site, source) are about catalog rows: with any of them set, none.
 fn filter_off(mut rows: Vec<OffSchedule>, q: &StationQuery) -> Vec<OffSchedule> {
-    if q.site.is_some() || !q.langs.is_empty() || !q.countries.is_empty() || !q.regions.is_empty() {
+    if q.site.is_some()
+        || !q.langs.is_empty()
+        || !q.countries.is_empty()
+        || !q.regions.is_empty()
+        || !q.sources.is_empty()
+    {
         return vec![];
     }
     let text = fold(q.q.trim());
@@ -207,7 +212,7 @@ mod tests {
             outcome: ScanOutcome::Complete,
             qth: Qth::default(),
             rig: "sim".into(),
-            eibi: "sked-a26.csv".into(),
+            sources: vec![],
             noise_db: Some(-48),
             measured: 101,
             peaks,
