@@ -242,12 +242,11 @@ mod tests {
                 scan("s2", vec![unknown(6200, -10, 20)], vec![]),
             ];
             let mut favorites = vec![];
-            let req = |freq_hz, station_id, label: Option<&str>| FavoriteRequest {
+            let req = |freq_hz, station_id: Option<u32>, label: Option<&str>| FavoriteRequest {
                 freq_hz,
                 mode: Mode::AM,
                 label: label.map(Into::into),
-                station_id,
-                generation: None,
+                station: station_id.map(|id| cat.station(id).unwrap().station_key()),
             };
             add(&mut favorites, &req(c.freq_hz, Some(c.id), None), &cat, 1).unwrap();
             add(&mut favorites, &req(a.freq_hz, Some(a.id), None), &cat, 1).unwrap();

@@ -98,11 +98,13 @@ function mkPulse(cls: string, sizePx: number, alpha: number): HTMLElement {
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /** Transmitter sites: short towers where something is on the air (taller with more), flat
- *  dim dots elsewhere, so they stand out from the city lights; the active site is white, and
- *  sites of stations a scan logged are green (a little larger). */
+ *  dim dots elsewhere, so they stand out from the city lights; the active site is white, sites
+ *  of stations a scan logged are green (a little larger), and sites of the listener's own
+ *  stations violet. */
 const siteColor = (s: SiteDot, active: boolean, logged: boolean) =>
   active ? '#ffffff'
   : logged ? `rgba(79,200,164,${s.on ? 1 : 0.7})`
+  : s.mine > 0 ? `rgba(190,160,255,${s.on ? 1 : 0.75})`
   : s.on ? `rgba(255,226,160,${s.precise ? 1 : 0.75})` : `rgba(150,185,220,${s.precise ? 0.6 : 0.35})`;
 const siteRadius = (s: SiteDot, active: boolean, logged: boolean) => (active ? 0.6 : s.on ? 0.45 : 0.32) + (logged && !active ? 0.1 : 0);
 const siteAltitude = (s: SiteDot, active: boolean) => (active ? 0.05 : s.on ? 0.012 + Math.min(0.03, s.on * 0.002) : 0.003);

@@ -7,4 +7,8 @@ export type SiteDot = { id: number, lat: number, lon: number, name: string, itu:
 /**
  * Rows on the air now / all rows at this site.
  */
-on: number, total: number, };
+on: number, total: number, 
+/**
+ * Of those, rows of the listener's own stations.
+ */
+mine: number, };

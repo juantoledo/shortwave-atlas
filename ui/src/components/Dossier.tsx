@@ -1,7 +1,8 @@
 // The station card: on-air status, transmitter, route, today's bar, other candidates, and every
-// broadcast slot. It fills its panel: the top part is fixed, the slots scroll in their own box.
+// broadcast slot; for one of the listener's own stations, also its notes and link. It fills its
+// panel: the top part is fixed, the slots scroll in their own box.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNames } from '../catalog/names';
 import { compass, fmtDate, fmtDays, fmtDur, fmtKhz, fmtKm, fmtMonth, fmtStamp, hhmm, sLabel, useT, weekdayName, type Messages } from '../i18n';
 import type { AirStatus } from '../types/generated/AirStatus';
@@ -9,8 +10,16 @@ import type { Candidate } from '../types/generated/Candidate';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
 import type { Logged } from '../types/generated/Logged';
 import type { Slot } from '../types/generated/Slot';
+import type { UserStationView } from '../types/generated/UserStationView';
 import { Flag } from './Flag';
 import { FlagBackdrop } from './FlagBackdrop';
+import { userSources } from './sources';
+
+/** "Mine": a station of the listener's own. */
+export function MineBadge() {
+  const t = useT();
+  return <span className="mine" title={t.mineBadgeTitle}>{t.mineBadge}</span>;
+}
 
 const wavelengthM = (hz: number) => 299_792_458 / hz;
 /** Other candidates shown before "+n more". */
@@ -64,14 +73,17 @@ interface Props {
   now: Date;
   /** Stations a band scan logged, by id. */
   logged: ReadonlyMap<number, Logged>;
+  /** The station shown, when it is one of the listener's own. */
+  mine: UserStationView | null;
   /** The favorite star for the station shown. */
   star: ReactNode;
   onChoose: (c: Candidate) => void;
 }
 
-export function Dossier({ on, freqHz, sel, others, meta, now, logged, star, onChoose }: Props) {
+export function Dossier({ on, freqHz, sel, others, meta, now, logged, mine, star, onChoose }: Props) {
   const t = useT();
   const names = useNames();
+  const userSrc = useMemo(() => userSources(meta), [meta]);
   const [allCands, setAllCands] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const stId = sel?.station.id ?? null, slotIx = sel?.slot ?? null;
@@ -113,13 +125,19 @@ export function Dossier({ on, freqHz, sel, others, meta, now, logged, star, onCh
       <div className="d-top" key={st.id}>
         <Head t={t} air={sel.air} now={now} />
         <div className="d-title">
-          <h3 className="d-name"><Flag flag={st.flag} title={country} />{st.name}</h3>
+          <h3 className="d-name"><Flag flag={st.flag} title={country} />{st.name}{userSrc.has(st.source) && <MineBadge />}</h3>
           {star}
         </div>
         <p className="d-meta">
           {country}
           {slot && <> · {slot.lang ? names.lang(slot.lang) : ''}{slot.target && ` → ${names.target(slot.target)}`}</>}
         </p>
+        {mine && (mine.station.notes || mine.station.url) && (
+          <p className="d-notes">
+            {mine.station.notes}
+            {mine.station.url && <a className="link" href={mine.station.url} target="_blank" rel="noreferrer">{t.website}</a>}
+          </p>
+        )}
         {lg && <p className="d-logged"><span aria-hidden="true">✓ </span>{t.loggedLine(lg.count, fmtStamp(t, lg.last), sLabel(lg.best_db))}</p>}
         <dl className="d-grid">
           <div className="wide">
@@ -128,6 +146,7 @@ export function Dossier({ on, freqHz, sel, others, meta, now, logged, star, onCh
               <Flag flag={site.flag} title={siteCountry} />
               {site.precise ? `${site.name} (${siteCountry})` : siteCountry}
               {!site.precise && <small className="approx">{t.approxSite}</small>}
+              {mine?.site_missing && <small className="approx">{t.siteGone}</small>}
             </dd>
           </div>
           <div><dt>{t.distance}</dt><dd>{fmtKm(t, route.km)}</dd></div>
@@ -152,6 +171,7 @@ export function Dossier({ on, freqHz, sel, others, meta, now, logged, star, onCh
                 <span className={'dot' + (o.air.on ? ' on' : '')} />
                 <Flag flag={o.station.flag} title={names.country(o.station.itu)} />
                 <span className="chip-name">{o.station.name}</span>
+                {userSrc.has(o.station.source) && <MineBadge />}
               </button>
             ))}
             {others.length > FEW_CANDS && (

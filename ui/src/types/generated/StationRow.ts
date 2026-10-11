@@ -14,6 +14,6 @@ on: boolean,
  */
 lang: string, target: string, 
 /**
- * `SourceDesc::id`.
+ * `SourceDesc::id`, and the `Record::key` there.
  */
-source: string, };
+source: string, key: string, };

@@ -561,6 +561,7 @@ pub(crate) mod tests {
     async fn favorites_and_lenses_through_calls() {
         use atlas_core::favorites::FavoriteRequest;
         use atlas_core::rig::Mode;
+        use atlas_core::source::StationKey;
         use atlas_core::stations::{Lens, Sort};
 
         let dir = std::env::temp_dir().join(format!("swatlas-favs-app-{}", std::process::id()));
@@ -569,16 +570,12 @@ pub(crate) mod tests {
         let page = atlas.call(Call::Search(StationQuery { limit: 1, ..Default::default() })).await.unwrap();
         let st = &page["items"][0];
         let (id, freq_hz) = (st["id"].as_u64().unwrap() as u32, st["freq_hz"].as_u64().unwrap() as u32);
-        let req = FavoriteRequest { freq_hz, mode: Mode::AM, label: None, station_id: Some(id), generation: None };
+        let key: StationKey =
+            serde_json::from_value(serde_json::json!({ "source": st["source"], "key": st["key"] })).unwrap();
+        let req = FavoriteRequest { freq_hz, mode: Mode::AM, label: None, station: Some(key) };
         let fav = atlas.call(Call::AddFavorite(req)).await.unwrap();
         assert_eq!(fav["label"], st["name"]);
-        let free = FavoriteRequest {
-            freq_hz: 14_230_000,
-            mode: Mode::USB,
-            label: Some("SSTV".into()),
-            station_id: None,
-            generation: None,
-        };
+        let free = FavoriteRequest { freq_hz: 14_230_000, mode: Mode::USB, label: Some("SSTV".into()), station: None };
         let free = atlas.call(Call::AddFavorite(free)).await.unwrap();
         let fav_id = fav["id"].as_str().unwrap().to_string();
         atlas.call(Call::RenameFavorite { id: fav_id.clone(), label: "Mine".into() }).await.unwrap();
@@ -614,6 +611,7 @@ pub(crate) mod tests {
     async fn user_stations_through_calls() {
         use atlas_core::favorites::FavoriteRequest;
         use atlas_core::rig::Mode;
+        use atlas_core::source::StationKey;
         use atlas_core::stations::Lens;
         use atlas_core::user_stations::UserStationDraft;
 
@@ -648,16 +646,15 @@ pub(crate) mod tests {
         assert_eq!(e.kind, ErrorKind::Invalid);
 
         // a favorite of it follows it through an edit
-        let fav = |station_id, generation| FavoriteRequest {
+        let fav = |key: &str| FavoriteRequest {
             freq_hz: 6_075_000,
             mode: Mode::USB,
             label: None,
-            station_id: Some(station_id),
-            generation: Some(generation),
+            station: Some(StationKey { source: "mine".into(), key: key.into() }),
         };
-        let stale = atlas.call(Call::AddFavorite(fav(station_id as u32, gen0 as u32))).await.unwrap_err();
-        assert_eq!(stale.kind, ErrorKind::Conflict);
-        atlas.call(Call::AddFavorite(fav(station_id as u32, generation(&overview) as u32))).await.unwrap();
+        let e = atlas.call(Call::AddFavorite(fav("nope"))).await.unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Invalid);
+        atlas.call(Call::AddFavorite(fav(&id))).await.unwrap();
         let moved = UserStationDraft { freq_hz: 1_000_000, name: "Radio Local AM".into(), ..draft.clone() };
         let v = atlas.call(Call::UpdateUserStation { id: id.clone(), station: moved }).await.unwrap();
         let favs = atlas.call(Call::Favorites).await.unwrap();

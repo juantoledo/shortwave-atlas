@@ -20,6 +20,7 @@ import { TopBar } from './components/TopBar';
 import { Tuner, useBandWindow } from './components/Tuner';
 import { DEFAULT_COVERAGE, HF_SPAN } from './components/dial';
 import { bandOf, noiseFloor } from './components/scan';
+import { keyOf, MINE } from './components/sources';
 import { UpdateBanner } from './components/UpdateBanner';
 import { makeNames, NamesProvider } from './catalog/names';
 import { NO_FILTERS, useCandidates, useCore, useDial, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
@@ -28,6 +29,7 @@ import { useFavorites } from './hooks/useFavorites';
 import { useDisplay } from './hooks/useDisplay';
 import { useBandScans, useScan } from './hooks/useScan';
 import { useUpdate } from './hooks/useUpdate';
+import { useUserStations } from './hooks/useUserStations';
 import { fmtStamp, I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
 import { stepIndex, type Action } from './keys/keymap';
@@ -86,26 +88,30 @@ export function App() {
   useEffect(() => { if (info) setQth(info.qth); }, [info]);
 
   const now = useNow(20_000);
-  const meta = useStationsMeta(api);
-  const overview = useOverview(api);
+  // the catalog's generation: station ids hold within one, so whatever keeps them reloads
+  const { overview, reload: reloadOverview } = useOverview(api);
+  const generation = overview?.generation ?? null;
+  const meta = useStationsMeta(api, generation);
   const dialBands = dial?.bands ?? meta?.bands ?? NO_BANDS;
   const win = useBandWindow(freqHz, dialBands, overview?.on_hz ?? NO_HZ);
   const names = useMemo(() => makeNames(meta, t), [meta, t]);
-  const scan = useScan(api, onError);
-  const favs = useFavorites(api, onError);
+  const scan = useScan(api, onError, generation);
+  const favs = useFavorites(api, onError, generation);
+  const mine = useUserStations(api, onError, generation, reloadOverview);
   const bandScans = useBandScans(scan, win.w.band?.id ?? null);
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
-  // the lenses change with the logbook and the favorites
-  const lensKey = useMemo(() => ({}), [scan.logged, favs.views]);
+  // the lenses change with the logbook and the favorites, and every list with the catalog
+  const lensKey = useMemo(() => ({}), [scan.logged, favs.views, generation]);
   const search = useStationSearch(api, filters, lensKey);
-  const cands = useCandidates(api, on ? freqHz : null, `${qth?.lat},${qth?.lon},${now.getTime()}`);
+  const cands = useCandidates(api, on ? freqHz : null, `${qth?.lat},${qth?.lon},${now.getTime()},${generation}`);
 
-  // Keep the chosen station while it is still a candidate; otherwise take the best one.
+  // Keep the chosen station while it is still a candidate; otherwise take the best one. It is
+  // kept by source and key (`keyOf`), which hold when the catalog changes and the ids do not.
   const [sel, setSel] = useState<Candidate | null>(null);
-  const [wanted, setWanted] = useState<number | null>(null);
+  const [wanted, setWanted] = useState<string | null>(null);
   useEffect(() => {
     if (!on || !cands.length) setSel(null);
-    else setSel((cur) => cands.find((c) => c.station.id === (wanted ?? cur?.station.id)) ?? cands[0]);
+    else setSel((cur) => cands.find((c) => keyOf(c.station) === (wanted ?? (cur && keyOf(cur.station)))) ?? cands[0]);
   }, [cands, on, wanted]);
 
   const sites = overview?.sites ?? [];
@@ -133,14 +139,14 @@ export function App() {
   };
   const pick = (r: StationRow) => {
     tuneAs(r.freq_hz, r.mode);
-    setWanted(r.id);
+    setWanted(keyOf(r));
   };
   const pickOff = (o: OffSchedule) => {
     tuneAs(o.freq_hz, o.mode);
     setWanted(null);
   };
   const choose = (c: Candidate) => {
-    setWanted(c.station.id);
+    setWanted(keyOf(c.station));
     setSel(c);
   };
   // turning off asks first (components/Confirm.tsx); a rig that goes off by itself drops the question
@@ -198,8 +204,8 @@ export function App() {
 
   // the stars: the station shown, and the tuned frequency (with the station if it is on it)
   const selFav = sel ? favs.byStation.get(sel.station.id) ?? null : null;
-  const tunedStation = sel && sel.station.freq_hz === freqHz ? sel.station.id : null;
-  const tunedFav = on ? favAt(favs.views, freqHz, tunedStation)?.favorite ?? null : null;
+  const tunedStation = sel && sel.station.freq_hz === freqHz ? sel.station : null;
+  const tunedFav = on ? favAt(favs.views, freqHz, tunedStation?.id ?? null)?.favorite ?? null : null;
 
   // the keyboard (keys/keymap.ts): typing anywhere starts a new search
   const searchRef = useRef<HTMLInputElement>(null);
@@ -236,8 +242,8 @@ export function App() {
         return hz !== null && tune(hz);
       }
       case 'station': {
-        const rows = search.rows, cur = wanted ?? sel?.station.id;
-        const i = stepIndex(rows.length, rows.findIndex((r) => r.id === cur), a.dir);
+        const rows = search.rows, cur = wanted ?? (sel && keyOf(sel.station));
+        const i = stepIndex(rows.length, rows.findIndex((r) => keyOf(r) === cur), a.dir);
         return i !== null && pick(rows[i]);
       }
       case 'cand': {
@@ -345,10 +351,11 @@ export function App() {
             meta={meta}
             now={now}
             logged={scan.logged}
+            mine={sel?.station.source === MINE ? mine.byId.get(sel.station.key) ?? null : null}
             star={sel && (
               <FavStar
                 fav={selFav}
-                onAdd={() => favs.add({ freq_hz: sel.station.freq_hz, mode: sel.station.mode, label: null, station_id: sel.station.id })}
+                onAdd={() => favs.add({ freq_hz: sel.station.freq_hz, mode: sel.station.mode, label: null, station: { source: sel.station.source, key: sel.station.key } })}
                 onRename={(label) => selFav && favs.rename(selFav.id, label)}
                 onRemove={() => selFav && favs.remove(selFav.id)}
               />
@@ -383,7 +390,7 @@ export function App() {
               <FavStar
                 fav={tunedFav}
                 disabled={!on || freqHz === null}
-                onAdd={() => freqHz !== null && favs.add({ freq_hz: freqHz, mode: asMode(rig.mode), label: null, station_id: tunedStation })}
+                onAdd={() => freqHz !== null && favs.add({ freq_hz: freqHz, mode: asMode(rig.mode), label: null, station: tunedStation && { source: tunedStation.source, key: tunedStation.key } })}
                 onRename={(label) => tunedFav && favs.rename(tunedFav.id, label)}
                 onRemove={() => tunedFav && favs.remove(tunedFav.id)}
               />

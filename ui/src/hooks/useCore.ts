@@ -99,12 +99,13 @@ export function useCandidates(api: Api | null, freqHz: number | null, refreshKey
   return cands;
 }
 
-/** Code tables and facts about the station data (loaded once). */
-export function useStationsMeta(api: Api | null) {
+/** Code tables and facts about the station data, loaded again when the catalog's `generation`
+ *  changes (a source changed). */
+export function useStationsMeta(api: Api | null, generation: number | null) {
   const [meta, setMeta] = useState<CatalogMeta | null>(null);
   useEffect(() => {
     if (api) api.stationsMeta().then(setMeta, () => {});
-  }, [api]);
+  }, [api, generation]);
   return meta;
 }
 
@@ -117,17 +118,26 @@ export function useDial(api: Api | null, key: string) {
   return { dial, reload };
 }
 
-/** Every transmitter site and the frequencies on the air, refreshed each minute. */
+/** Every transmitter site and the frequencies on the air, refreshed each minute, when the window
+ *  comes back to the front and on `reload` (after a change to the stations). Its `generation` says
+ *  when the catalog changed, so everything holding station ids reloads. */
 export function useOverview(api: Api | null) {
   const [overview, setOverview] = useState<Overview | null>(null);
+  const reload = useCallback(() => { api?.overview().then(setOverview, () => {}); }, [api]);
   useEffect(() => {
     if (!api) return;
-    const load = () => api.overview().then(setOverview, () => {});
-    load();
-    const t = setInterval(load, ON_AIR_REFRESH_MS);
-    return () => clearInterval(t);
-  }, [api]);
-  return overview;
+    reload();
+    const t = setInterval(reload, ON_AIR_REFRESH_MS);
+    const seen = () => { if (document.visibilityState === 'visible') reload(); };
+    document.addEventListener('visibilitychange', seen);
+    window.addEventListener('focus', seen);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', seen);
+      window.removeEventListener('focus', seen);
+    };
+  }, [api, reload]);
+  return { overview, reload };
 }
 
 export type Filters = Omit<StationQuery, 'offset' | 'limit' | 'facets'>;

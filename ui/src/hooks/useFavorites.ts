@@ -1,5 +1,6 @@
 // Favorites: the core's list with each one's station in the running schedule, reloaded after a
-// change and when the window comes back to the front (another window may have changed them).
+// change, when the window comes back to the front (another window may have changed them) and
+// when the catalog's `generation` changes (station ids with it).
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Api } from '../api/client';
@@ -7,7 +8,7 @@ import type { Favorite } from '../types/generated/Favorite';
 import type { FavoriteRequest } from '../types/generated/FavoriteRequest';
 import type { FavoriteView } from '../types/generated/FavoriteView';
 
-export function useFavorites(api: Api | null, onError: (e: unknown) => void) {
+export function useFavorites(api: Api | null, onError: (e: unknown) => void, generation: number | null) {
   const [views, setViews] = useState<FavoriteView[]>([]);
 
   const reload = useCallback(() => { api?.favorites().then(setViews, () => {}); }, [api]);
@@ -20,7 +21,7 @@ export function useFavorites(api: Api | null, onError: (e: unknown) => void) {
       document.removeEventListener('visibilitychange', seen);
       window.removeEventListener('focus', seen);
     };
-  }, [reload]);
+  }, [reload, generation]);
 
   const run = useCallback(async <T,>(f: (api: Api) => Promise<T>): Promise<T | null> => {
     if (!api) return null;

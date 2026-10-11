@@ -32,6 +32,8 @@
   --band-ham-text: #7fdcbf;
   --band-util: #b48cf0;
   --band-util-text: #c9aef5;
+  /* the listener's own stations */
+  --mine: #bea0ff;
   --band-gap: repeating-linear-gradient(135deg, rgba(140, 185, 230, 0.13) 0 2px, transparent 2px 6px);
   --gap: 12px;
   --radius: 14px;
@@ -268,6 +270,7 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 .lg.quiet { width: 6px; height: 6px; margin: 0 1px; background: var(--site-quiet); }
 .lg.qth { background: var(--cool); box-shadow: 0 0 6px rgba(127, 208, 255, 0.65); }
 .lg.logged { background: var(--band-ham); box-shadow: 0 0 6px rgba(79, 200, 164, 0.6); }
+.lg.mine { background: var(--mine); box-shadow: 0 0 6px rgba(190, 160, 255, 0.6); }
 .lg.band { width: 16px; height: 5px; border-radius: 1px; background: var(--band-bc); }
 .lg.band.k-ham { background: var(--band-ham); }
 .lg.band.k-utility { background: var(--band-util); }
@@ -450,6 +453,15 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 .d-name .flag { height: 0.62em; width: 0.83em; vertical-align: 0.06em; }
 .d-meta { margin: 4px 0 0; color: var(--dim); font-size: 13px; }
 .d-logged { margin: 4px 0 0; font: 500 11.5px var(--font-mono); color: var(--band-ham-text); }
+.d-notes { margin: 6px 0 0; font-size: 13px; white-space: pre-line; overflow-wrap: anywhere; max-height: 5.5em; overflow-y: auto; }
+.d-notes .link { display: block; margin-top: 2px; }
+/* "Mine": one of the listener's own stations */
+.mine {
+  display: inline-block; margin-left: 8px; padding: 1px 5px; border: 1px solid rgba(190, 160, 255, 0.5); border-radius: 4px;
+  font: 500 10px/1.2 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--mine); vertical-align: 0.15em;
+}
+.d-name .mine { font-size: 11px; vertical-align: 0.4em; }
+.chip .mine { margin-left: 0; padding: 0 4px; font-size: 9px; }
 .d-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; margin: 12px 0 0; }
 .d-grid > div { min-width: 0; }
 .d-grid .wide { grid-column: 1 / -1; }
@@ -508,7 +520,7 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
   .slots { margin-top: 10px; min-height: 80px; }
 }
 @container (max-height: 350px) {
-  .d-meta { display: none; }
+  .d-meta, .d-notes { display: none; }
   .d-grid .minor { display: none; }
   .d-grid .w2 { grid-column: span 1; }
   .d-grid dd { font-size: 12.5px; }

@@ -66,6 +66,15 @@ pub struct SourceInfo {
     pub report: Option<ParseReport>,
 }
 
+/// A station by what identifies it across catalog versions (`Station::source`, `Station::key`):
+/// station ids change whenever a source does.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct StationKey {
+    pub source: String,
+    pub key: String,
+}
+
 /// Which version of a source something was matched against.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]

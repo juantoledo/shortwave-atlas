@@ -42,6 +42,7 @@ function Extra({ topic, version, meta }: { topic: HelpTopic; version: string | n
           <li><i className="lg quiet" />{t.legendQuiet}</li>
           <li><i className="lg qth" />{t.legendQth}</li>
           <li><i className="lg logged" />{t.legendLogged}</li>
+          <li><i className="lg mine" />{t.legendMine}</li>
         </ul>
       </>
     );

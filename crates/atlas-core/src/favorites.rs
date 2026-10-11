@@ -9,12 +9,11 @@ use ts_rs::TS;
 
 use crate::rig::Mode;
 use crate::scan::StationRef;
+use crate::source::StationKey;
 use crate::stations::Catalog;
 
 /// `FavoritesFile::version` of what this build writes.
 pub const FORMAT_VERSION: u32 = 1;
-/// Why a request whose station id is of another catalog generation is refused.
-pub const STALE: &str = "The stations changed meanwhile: try again";
 /// Most favorites one may keep, and the longest label (characters).
 pub const MAX_FAVORITES: usize = 500;
 pub const MAX_LABEL: usize = 60;
@@ -49,13 +48,8 @@ pub struct FavoriteRequest {
     pub mode: Mode,
     /// `None` = the station's name (or nothing, without a station).
     pub label: Option<String>,
-    /// `Station::id` in the running catalog.
-    pub station_id: Option<u32>,
-    /// `Catalog::generation` the id is of; when given and the catalog has since changed, the
-    /// request is refused rather than keep another station.
-    #[serde(default)]
-    #[ts(optional)]
-    pub generation: Option<u32>,
+    /// The station heard there.
+    pub station: Option<StationKey>,
 }
 
 /// A favorite and its station in the running catalog (result of `Call::Favorites`).
@@ -91,12 +85,9 @@ pub fn add(list: &mut Vec<Favorite>, req: &FavoriteRequest, cat: &Catalog, now: 
         return Err("No frequency to keep".into());
     }
     let label = req.label.as_deref().map(clean_label).transpose()?;
-    if req.station_id.is_some() && req.generation.is_some_and(|g| g != cat.generation()) {
-        return Err(STALE.into());
-    }
-    let station = match req.station_id {
-        Some(id) => {
-            let st = cat.station(id).ok_or("That station is not in the schedule")?;
+    let station = match &req.station {
+        Some(k) => {
+            let st = cat.by_key(&k.source, &k.key).ok_or("That station is not in the catalog")?;
             Some(StationRef::of(cat, st, now))
         }
         None => None,
@@ -190,8 +181,13 @@ mod tests {
         Catalog::from_eibi(parse(&files()).unwrap())
     }
 
+    /// A request for the fixture's station `station_id`.
     fn req(freq_hz: u32, station_id: Option<u32>, label: Option<&str>) -> FavoriteRequest {
-        FavoriteRequest { freq_hz, mode: Mode::AM, label: label.map(Into::into), station_id, generation: None }
+        let station = station_id.map(|id| match catalog().station(id) {
+            Some(st) => st.station_key(),
+            None => StationKey { source: "eibi".into(), key: "nowhere".into() },
+        });
+        FavoriteRequest { freq_hz, mode: Mode::AM, label: label.map(Into::into), station }
     }
 
     #[test]
@@ -221,11 +217,6 @@ mod tests {
         assert!(add(&mut list, &req(0, None, None), &c, 0).is_err());
         assert!(add(&mut list, &req(5_000_000, None, Some(&"x".repeat(MAX_LABEL + 1))), &c, 0).is_err());
         assert!(add(&mut list, &req(5_000_000, Some(u32::MAX), None), &c, 0).is_err());
-        // an id of another generation of the catalog
-        let stale = FavoriteRequest { generation: Some(c.generation() + 1), ..req(5_900_000, Some(0), None) };
-        assert_eq!(add(&mut list, &stale, &c, 0).unwrap_err(), STALE);
-        assert!(add(&mut list, &FavoriteRequest { generation: Some(c.generation()), ..stale.clone() }, &c, 0).is_ok());
-        list.clear();
         let ok = "é".repeat(MAX_LABEL);
         assert!(add(&mut list, &req(5_000_000, None, Some(&ok)), &c, 0).is_ok(), "characters, not bytes");
         for i in 1..MAX_FAVORITES as u32 {

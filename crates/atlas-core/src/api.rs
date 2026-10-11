@@ -313,7 +313,8 @@ mod tests {
         let c: Call = serde_json::from_str(r#"{"cmd":"search","args":{"lens":"heard","sort":"strongest"}}"#).unwrap();
         assert_eq!(c, Call::Search(StationQuery { lens: Lens::Heard, sort: Sort::Strongest, ..Default::default() }));
         let c: Call = serde_json::from_str(
-            r#"{"cmd":"add_favorite","args":{"freq_hz":5905000,"mode":"AM","label":null,"station_id":3}}"#,
+            r#"{"cmd":"add_favorite","args":{"freq_hz":5905000,"mode":"AM","label":null,
+                "station":{"source":"mine","key":"1-2"}}}"#,
         )
         .unwrap();
         assert_eq!(
@@ -322,15 +323,9 @@ mod tests {
                 freq_hz: 5_905_000,
                 mode: Mode::AM,
                 label: None,
-                station_id: Some(3),
-                generation: None
+                station: Some(crate::source::StationKey { source: "mine".into(), key: "1-2".into() }),
             })
         );
-        let c: Call = serde_json::from_str(
-            r#"{"cmd":"add_favorite","args":{"freq_hz":1,"mode":"AM","label":null,"station_id":3,"generation":7}}"#,
-        )
-        .unwrap();
-        assert!(matches!(c, Call::AddFavorite(FavoriteRequest { generation: Some(7), .. })));
         for (json, call) in [
             (r#"{"cmd":"user_stations"}"#, Call::UserStations),
             (r#"{"cmd":"code_tables"}"#, Call::CodeTables),

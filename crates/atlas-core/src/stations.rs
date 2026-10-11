@@ -16,7 +16,9 @@ use crate::geo::{dist_bearing, sun_at, LatLon, Route, SunAt};
 use crate::lens::{HeardRow, OffSchedule};
 use crate::rig::Mode;
 use crate::schedule::{air_status_at, any_on, slot_on, today_parts, AirStatus, Slot, Window};
-use crate::source::{Gazetteer, SiteSpec, SourceData, SourceDesc, SourceInfo, SourceStamp, Vocabulary};
+use crate::source::{
+    Gazetteer, SiteSpec, SourceData, SourceDesc, SourceInfo, SourceKind, SourceStamp, StationKey, Vocabulary,
+};
 use crate::text::fold;
 
 /// Default match tolerance around the tuned frequency.
@@ -50,6 +52,12 @@ pub struct Site {
     pub lon: f64,
     /// `false`: EiBi does not say where; shown at a known site of the country.
     pub precise: bool,
+}
+
+impl Station {
+    pub fn station_key(&self) -> StationKey {
+        StationKey { source: self.source.clone(), key: self.key.clone() }
+    }
 }
 
 impl Site {
@@ -114,8 +122,9 @@ pub struct StationRow {
     /// Language and target of the slot that matched (the one on the air if any).
     pub lang: String,
     pub target: String,
-    /// `SourceDesc::id`.
+    /// `SourceDesc::id`, and the `Record::key` there.
     pub source: String,
+    pub key: String,
 }
 
 /// Which stations the list shows: the whole schedule, those a band scan logged, or the
@@ -218,6 +227,8 @@ pub struct SiteDot {
     /// Rows on the air now / all rows at this site.
     pub on: u32,
     pub total: u32,
+    /// Of those, rows of the listener's own stations.
+    pub mine: u32,
 }
 
 /// What is on the air now: every site, and the frequencies in use.
@@ -773,6 +784,7 @@ impl Catalog {
             lang: s.map(|s| s.lang.clone()).unwrap_or_default(),
             target: s.map(|s| s.target.clone()).unwrap_or_default(),
             source: st.source.clone(),
+            key: st.key.clone(),
         }
     }
 
@@ -780,10 +792,14 @@ impl Catalog {
     pub fn overview(&self, unix: i64) -> Overview {
         let mut on = vec![0u32; self.sites.len()];
         let mut total = vec![0u32; self.sites.len()];
+        let mut mine = vec![0u32; self.sites.len()];
+        let user: HashSet<&str> =
+            self.sources.iter().filter(|s| s.kind == SourceKind::User).map(|s| s.id.as_str()).collect();
         let mut on_hz = Vec::new();
         for r in &self.rows {
             let i = r.station.site as usize;
             total[i] += 1;
+            mine[i] += u32::from(user.contains(r.station.source.as_str()));
             if any_on(&r.station.slots, unix) {
                 on[i] += 1;
                 on_hz.push(r.station.freq_hz);
@@ -803,6 +819,7 @@ impl Catalog {
                 precise: s.precise,
                 on: on[s.id as usize],
                 total: total[s.id as usize],
+                mine: mine[s.id as usize],
             })
             .collect();
         Overview { sites, on_hz, generation: self.generation }
@@ -1139,6 +1156,11 @@ mod tests {
         assert_eq!(rows, [("eibi", 10, true), ("mine", 3, true)]);
         assert_eq!(m.langs.iter().find(|l| l.code == "S").unwrap().rows, 4);
         assert_eq!(both.stamps().iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["eibi", "mine"]);
+        // the globe counts the listener's rows per site: two at Santiago, the relay at site 0
+        let o = both.overview(at(10, 0));
+        assert_eq!(o.sites.iter().map(|s| s.mine).sum::<u32>(), 3);
+        assert_eq!((o.sites[0].mine, o.sites[local.site as usize].mine), (1, 2));
+        assert!(alone.overview(at(10, 0)).sites.iter().all(|s| s.mine == 0));
     }
 
     #[test]
