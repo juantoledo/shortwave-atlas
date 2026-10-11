@@ -338,6 +338,12 @@ export const es: Messages = {
   updateBusy: (v: string) => `Instalando ${v}…`,
   updateCheckFailed: (m: string) => `No se pudo buscar: ${m}`,
 
+  displaySection: 'Pantalla',
+  globeLayout: 'Globo',
+  globeFull: 'Toda la ventana',
+  globeFramed: 'Enmarcado',
+  globeFullHelp: 'Toda la ventana dibuja el globo detrás de los paneles, que lo dejan ver como vidrio esmerilado. Usa más la tarjeta gráfica; Enmarcado deja el globo al centro con paneles sólidos. Se guarda en este dispositivo.',
+
   audioSection: 'Audio',
   audioOffLabel: 'Apagado',
   audioOn: 'Escuchar la radio',

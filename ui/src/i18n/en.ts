@@ -351,6 +351,12 @@ export const en = {
   updateBusy: (v: string) => `Installing ${v}…`,
   updateCheckFailed: (m: string) => `Could not check: ${m}`,
 
+  displaySection: 'Display',
+  globeLayout: 'Globe',
+  globeFull: 'Full window',
+  globeFramed: 'Framed',
+  globeFullHelp: 'Full window draws the globe behind the panels, which show it through frosted glass. It uses more of the graphics card; Framed keeps the globe in the middle with solid panels. Saved on this device.',
+
   audioSection: 'Audio',
   audioOffLabel: 'Off',
   audioOn: 'Listen to the rig',

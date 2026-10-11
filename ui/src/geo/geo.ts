@@ -57,14 +57,18 @@ export function sunPos(d: Date): LatLon {
 }
 
 /**
- * Camera altitude (in globe radii) that looks the same in a view of `aspect` (width / height)
- * as `alt` does in a square one. The camera's field of view is vertical, so wide views change
- * nothing; tall views pull back until the globe takes the same share of the width.
+ * Camera altitude (in globe radii) that looks the same in a view of `viewW`×`viewH` as `alt`
+ * does filling a square one. The view may be part of a taller canvas (`canvasH`; the globe drawn
+ * behind the whole window). The camera's field of view spans the canvas height, so the globe
+ * keeps the same share of the view's shorter side: wide views drawn on their own change nothing,
+ * tall ones pull back to fit the width, and a view inside a taller canvas pulls back to fit it.
  */
-export function fitAltitude(alt: number, aspect: number): number {
-  if (!(aspect > 0) || aspect >= 1) return alt;
+export function fitAltitude(alt: number, viewW: number, viewH: number, canvasH = viewH): number {
+  if (!(viewW > 0 && viewH > 0 && canvasH > 0)) return alt;
+  const k = Math.min(viewW, viewH) / canvasH;
+  if (k >= 1) return alt;
   const th = Math.asin(1 / (1 + alt));
-  const fitted = Math.atan(aspect * Math.tan(th));
+  const fitted = Math.atan(k * Math.tan(th));
   return 1 / Math.sin(fitted) - 1;
 }
 
