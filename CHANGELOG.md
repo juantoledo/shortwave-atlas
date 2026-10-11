@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.6.0...v0.7.0) (2026-10-11)
+
+
+### Features
+
+* **ui:** globe behind the whole window, with frosted-glass panels ([58ddac1](https://github.com/juantoledo/shortwave-atlas/commit/58ddac1eb7a51837439d370d1d25f1881d62803b))
+* **ui:** globe behind the whole window, with frosted-glass panels ([0982e0c](https://github.com/juantoledo/shortwave-atlas/commit/0982e0c06b6582ed6e4f401e950fe1924ec7b80c))
+
 ## [0.6.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.5.0...v0.6.0) (2026-10-11)
 
 
