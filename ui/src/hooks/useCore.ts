@@ -11,6 +11,7 @@ import type { HeardRow } from '../types/generated/HeardRow';
 import type { Info } from '../types/generated/Info';
 import type { OffSchedule } from '../types/generated/OffSchedule';
 import type { Overview } from '../types/generated/Overview';
+import type { Mode } from '../types/generated/Mode';
 import type { RigState } from '../types/generated/RigState';
 import type { RxRange } from '../types/generated/RxRange';
 import type { StationPage } from '../types/generated/StationPage';
@@ -60,7 +61,8 @@ export function useCore() {
 }
 
 /** The displayed frequency: what we just asked for, until the rig reports it (or a timeout). */
-/** Tuning, kept within what the rig receives (`coverage`). */
+/** Tuning, kept within what the rig receives (`coverage`). A station's `mode` goes with its
+ *  frequency: the core sets it once the rig is there (a band change may recall another). */
 export function useTuning(api: Api | null, rigHz: number | null, coverage: readonly RxRange[], onError: (e: unknown) => void) {
   const [pending, setPending] = useState<number | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -69,13 +71,13 @@ export function useTuning(api: Api | null, rigHz: number | null, coverage: reado
     if (pending !== null && rigHz === pending) setPending(null);
   }, [rigHz, pending]);
 
-  const tune = useCallback((hz: number) => {
+  const tune = useCallback((hz: number, mode: Mode | null = null) => {
     if (!api) return;
     hz = clampToCoverage(Math.round(hz / 100) * 100, coverage);
     setPending(hz);
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setPending(null), PENDING_MS);
-    api.rig({ cmd: 'set_freq', hz }).catch(onError);
+    api.rig(mode ? { cmd: 'tune', hz, mode } : { cmd: 'set_freq', hz }).catch(onError);
   }, [api, coverage, onError]);
 
   return { freqHz: pending ?? rigHz, tune };

@@ -48,6 +48,7 @@ import type { UserStationDraft } from './types/generated/UserStationDraft';
 const MSG_MS = 6000;
 const NO_HZ: number[] = [];
 const NO_BANDS: Band[] = [];
+const NO_SITES: SiteDot[] = [];
 const HF_ONLY = [HF_SPAN];
 
 type SheetState =
@@ -119,7 +120,7 @@ export function App() {
     else setSel((cur) => cands.find((c) => keyOf(c.station) === (wanted ?? (cur && keyOf(cur.station)))) ?? cands[0]);
   }, [cands, on, wanted]);
 
-  const sites = overview?.sites ?? [];
+  const sites = overview?.sites ?? NO_SITES;
   const siteName = filters.site === null ? null : sites.find((s) => s.id === filters.site)?.name ?? null;
   const scanSel = filters.scan === null ? null : scan.scans.find((s) => s.id === filters.scan) ?? null;
   const scanName = scanSel && `${names.dialBand(bandOf(scanSel))} · ${fmtStamp(t, scanSel.started)}`;
@@ -128,20 +129,19 @@ export function App() {
     if (filters.scan !== null && !scan.scans.some((s) => s.id === filters.scan)) setFilters((f) => ({ ...f, scan: null }));
   }, [filters.scan, scan.scans]);
   const siteLabel = useCallback((s: SiteDot) => ({ country: names.country(s.itu), onAir: t.siteOnAir(s.on, s.total) }), [names, t]);
-  const pickSite = (id: number) => {
+  // the globe's callbacks are stable, so it only renders again when what it shows changes
+  const pickSite = useCallback((id: number) => {
     setFilters((f) => ({ ...f, site: f.site === id ? null : id }));
     setView('browse');
-  };
+  }, []);
 
   const [frame, setFrame] = useState(true);
+  const toggleFrame = useCallback(() => setFrame((f) => !f), []);
   const [powerBusy, setPowerBusy] = useState(false);
 
   const setMode = (mode: Mode) => api?.rig({ cmd: 'set_mode', mode }).catch(onError);
-  const tuneAs = (hz: number, mode: Mode | null) => {
-    // AM-N is still AM: a broadcast keeps the narrow filter the listener chose
-    if (mode && rig.mode !== mode && !(mode === 'AM' && rig.mode === 'AMN')) setMode(mode);
-    tune(hz);
-  };
+  // a station's mode is set by the core once the rig is on its frequency (AM-N stays for AM)
+  const tuneAs = (hz: number, mode: Mode | null) => tune(hz, mode);
   const pick = (r: StationRow) => {
     tuneAs(r.freq_hz, r.mode);
     setWanted(keyOf(r));
@@ -167,11 +167,11 @@ export function App() {
     }
     setPowerBusy(false);
   };
-  const moveQth = (q: Qth) => {
+  const moveQth = useCallback((q: Qth) => {
     setQth(q);
     // the QTH's ITU region sets some band edges
     api?.setQth(q).then(reloadDial, onError);
-  };
+  }, [api, reloadDial, onError]);
   const onGlobeTouched = useCallback(() => setTouchedGlobe(true), []);
 
   // the band dial draws the running scan of its band, else the band's last scan, each over the
@@ -322,12 +322,13 @@ export function App() {
               sel={on ? sel : null}
               qth={qth}
               frame={frame}
-              onFrame={() => setFrame((f) => !f)}
+              onFrame={toggleFrame}
               paused={phone && view !== 'globe'}
               onInteract={onGlobeTouched}
               onQth={moveQth}
               failedMsg={t.globeFailed}
               sites={sites}
+              strengthDb={on ? rig.strength_db : null}
               activeSite={filters.site}
               loggedSites={scan.loggedSites}
               scan={globeScan}

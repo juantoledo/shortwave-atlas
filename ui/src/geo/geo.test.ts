@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { angleDeg, fitAltitude, frame, frameAltitude, frameWithHome, greatCircle, midpoint, pingAlpha, pingRadius, slerp, sunPos, toVec } from './geo';
+import { altitudeAt, angleDeg, fitAltitude, frame, frameAltitude, frameWithHome, fromVec, greatCircle, hermiteEase, initialSlope, midpoint, pingAlpha, pingRadius, receivedRing, slerp, sunPos, sunVec, toVec } from './geo';
 
 const SANTIAGO = { lat: -33.45, lon: -70.67 };
 const GREENVILLE = { lat: 35.47, lon: -77.19 };
@@ -104,5 +104,73 @@ describe('geo (mirrors atlas-core)', () => {
     expect(frameWithHome([], SANTIAGO).center.lat).toBeCloseTo(SANTIAGO.lat, 9);
     expect(frameAltitude(0)).toBe(1.5);
     expect(frameAltitude(90)).toBe(3.4);
+  });
+
+  it('the sun vector is a unit vector towards the sub-solar point', () => {
+    const d = new Date(Date.UTC(2026, 3, 15, 12));
+    const v = sunVec(d);
+    expect(Math.hypot(...v)).toBeCloseTo(1, 9);
+    expect(fromVec(v).lon).toBeCloseTo(sunPos(d).lon, 9);
+    expect(fromVec(v).lat).toBeCloseTo(sunPos(d).lat, 9);
+  });
+});
+
+describe('camera flights', () => {
+  it('the Hermite ease runs from 0 to 1, leaves at its slope and lands at rest', () => {
+    for (const v0 of [0, 1, 3]) {
+      expect(hermiteEase(0, v0)).toBe(0);
+      expect(hermiteEase(1, v0)).toBeCloseTo(1, 12);
+      const h = 1e-6;
+      expect(hermiteEase(h, v0) / h).toBeCloseTo(v0, 4);
+      expect((1 - hermiteEase(1 - h, v0)) / h).toBeCloseTo(0, 4);
+      // monotonic: no overshoot up to 3
+      let prev = 0;
+      for (let k = 0.05; k <= 1; k += 0.05) {
+        const e = hermiteEase(k, v0);
+        expect(e).toBeGreaterThanOrEqual(prev);
+        expect(e).toBeLessThanOrEqual(1 + 1e-12);
+        prev = e;
+      }
+    }
+  });
+
+  it('a new flight carries on the camera speed towards its target, never away', () => {
+    const a = toVec(0, 0), b = toVec(0, 90); // a quarter turn east
+    const east: [number, number, number] = [0, 1, 0];
+    const w = Math.PI / 2;
+    // moving east at the flight's own average rate: slope 1
+    expect(initialSlope(a, east.map((c) => (c * w) / 1000) as typeof east, b, 0, 0, 0, 1000)).toBeCloseTo(1, 9);
+    // moving west: start from rest
+    expect(initialSlope(a, east.map((c) => (-c * w) / 1000) as typeof east, b, 0, 0, 0, 1000)).toBe(0);
+    // standing still, and much faster than the flight (capped)
+    expect(initialSlope(a, [0, 0, 0], b, 0, 0, 0, 1000)).toBe(0);
+    expect(initialSlope(a, [0, 1, 0], b, 0, 0, 0, 1000)).toBe(3);
+  });
+
+  it('a zoom carries on the zoom rate', () => {
+    const a = toVec(10, 10);
+    const l0 = Math.log1p(1), l1 = Math.log1p(2);
+    expect(initialSlope(a, [0, 0, 0], a, (l1 - l0) / 450, l0, l1, 450)).toBeCloseTo(1, 9);
+    expect(initialSlope(a, [0, 0, 0], a, -(l1 - l0) / 450, l0, l1, 450)).toBe(0);
+  });
+
+  it('altitudes interpolate evenly in ln(1+alt), with a bump in the middle', () => {
+    expect(altitudeAt(0.5, 3, 0, 0)).toBeCloseTo(0.5, 12);
+    expect(altitudeAt(0.5, 3, 0, 1)).toBeCloseTo(3, 12);
+    // half way in log space is the geometric mean of 1+alt
+    expect(altitudeAt(0.5, 3, 0, 0.5)).toBeCloseTo(Math.sqrt(1.5 * 4) - 1, 12);
+    expect(altitudeAt(1, 1, 0.4, 0.5)).toBeCloseTo(1.4, 12);
+  });
+});
+
+describe('received ring', () => {
+  it('keeps the default with no reading and grows with the signal', () => {
+    expect(receivedRing(null)).toEqual({ maxR: 4.5, speed: 2, period: 2200, alpha: 1 });
+    const weak = receivedRing(-54), s9 = receivedRing(0), strong = receivedRing(30);
+    expect(weak.maxR).toBeLessThan(s9.maxR);
+    expect(s9.maxR).toBeLessThan(strong.maxR);
+    expect(strong.period).toBeLessThan(weak.period);
+    expect(strong.alpha).toBeGreaterThan(weak.alpha);
+    for (const r of [weak, s9, strong]) expect(r.speed * (r.period / 1000)).toBeCloseTo(r.maxR, 9);
   });
 });

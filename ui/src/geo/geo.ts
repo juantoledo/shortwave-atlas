@@ -72,8 +72,46 @@ export function fitAltitude(alt: number, viewW: number, viewH: number, canvasH =
   return 1 / Math.sin(fitted) - 1;
 }
 
+/** The sun's direction as a unit vector (`toVec`'s frame), for the night shading. */
+export function sunVec(d: Date): Vec3 {
+  const s = sunPos(d);
+  return toVec(s.lat, s.lon);
+}
+
 /** Ease in-out cubic, for camera flights. */
 export const easeInOut = (k: number) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+
+/** An ease that leaves 0 with slope `v0` and lands at 1 at rest (cubic Hermite), so a flight that
+ *  takes over from a moving camera carries on at its speed. `v0` up to 3 never overshoots. */
+export const hermiteEase = (k: number, v0: number) => v0 * (k * k * k - 2 * k * k + k) + 3 * k * k - 2 * k * k * k;
+
+/**
+ * The slope `hermiteEase` should start with to carry on the camera's motion: its speed towards
+ * `b` (`vel`, a unit-sphere vector per ms, from `a`) or its zoom rate (`lnRate`, ln(1+altitude)
+ * per ms) from `ln0` to `ln1`, whichever change is the larger, as a share of the flight's own
+ * average rate over `ms`. 0 when the camera moves away from the target or stands still; at most 3.
+ */
+export function initialSlope(a: Vec3, vel: Vec3, b: Vec3, lnRate: number, ln0: number, ln1: number, ms: number): number {
+  const cos = clamp(a[0] * b[0] + a[1] * b[1] + a[2] * b[2], -1, 1), w = Math.acos(cos), dl = ln1 - ln0;
+  let v = 0;
+  if (w >= Math.abs(dl)) {
+    if (w > 1e-4) {
+      const t: Vec3 = [b[0] - a[0] * cos, b[1] - a[1] * cos, b[2] - a[2] * cos];
+      const along = (vel[0] * t[0] + vel[1] * t[1] + vel[2] * t[2]) / Math.hypot(...t);
+      v = (along * ms) / w;
+    }
+  } else {
+    v = (lnRate * ms) / dl;
+  }
+  return Number.isFinite(v) ? clamp(v, 0, 3) : 0;
+}
+
+/** Camera altitude `e` of the way through a flight: even in ln(1+altitude), so a zoom feels the
+ *  same near the ground as far out, plus a `bump` that lifts the middle of long flights. */
+export function altitudeAt(a0: number, a1: number, bump: number, e: number): number {
+  const l0 = Math.log1p(a0), l1 = Math.log1p(a1);
+  return Math.expm1(l0 + (l1 - l0) * e) + bump * Math.sin(Math.PI * e);
+}
 
 /** S-meter dB relative to S9 as S-units: 6 dB each up to S9, then 10 dB (S9+30 = 12). */
 const sUnits = (db: number) => (db <= 0 ? 9 + db / 6 : 9 + db / 10);
@@ -87,6 +125,16 @@ export function pingRadius(db: number | null): number {
 
 /** A scan ping's opacity: 0.7 at S0 (or no reading) to 1 at S9+30. */
 export const pingAlpha = (db: number | null) => (db === null ? 0.7 : 0.7 + (0.3 * clamp(sUnits(db), 0, 12)) / 12);
+
+/** The "received" ring at the QTH for an S-meter reading: wider, brighter and quicker with a
+ *  stronger signal; with no reading, a steady default. Radius in degrees, speed in degrees per
+ *  second (a ring reaches its edge as the next one starts), period in ms. */
+export function receivedRing(db: number | null): { maxR: number; speed: number; period: number; alpha: number } {
+  if (db === null) return { maxR: 4.5, speed: 2, period: 2200, alpha: 1 };
+  const f = (pingRadius(db) - 2.5) / 6.5;
+  const maxR = 3.5 + 4.5 * f, period = 2600 - 1400 * f;
+  return { maxR, speed: maxR / (period / 1000), period, alpha: pingAlpha(db) };
+}
 
 /** The middle of some points (their mean direction) and how far the farthest is from it, in
  *  degrees, for framing them all. Points spread all round (no mean direction) frame from the first. */

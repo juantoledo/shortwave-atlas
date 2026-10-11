@@ -29,6 +29,11 @@ const POLL_ON: Duration = Duration::from_millis(200);
 const POLL_OFF: Duration = Duration::from_secs(2);
 /// How long a command waits for a scan it stopped to let go of the rig (one step at most).
 const SCAN_RELEASE: Duration = Duration::from_secs(5);
+/// Some rigs move the frequency when the mode changes (the FTDX-10 can show CW with its pitch
+/// offset): after setting a station's mode, read the frequency this often until it holds, for
+/// this long at most, then put it back on the station.
+const SETTLE_POLL: Duration = Duration::from_millis(50);
+const SETTLE_MAX: Duration = Duration::from_millis(500);
 
 #[async_trait]
 pub trait RigBackend: Send + Sync {
@@ -41,6 +46,10 @@ pub trait RigBackend: Send + Sync {
     async fn strength(&self) -> Option<i32> {
         self.get_state(&RigState::without_rig(Link::Ok, Power::On)).await.strength_db
     }
+    /// The frequency alone (read while a tune settles).
+    async fn freq(&self) -> Option<u32> {
+        self.get_state(&RigState::without_rig(Link::Ok, Power::On)).await.freq_hz
+    }
     /// What the rig receives, if it can say.
     async fn coverage(&self) -> Option<Vec<RxRange>> {
         None
@@ -51,11 +60,19 @@ pub trait RigBackend: Send + Sync {
     }
 }
 
+/// Where the tuning task should take the rig: a frequency, and for a station its mode, set
+/// once the rig is there.
+#[derive(Clone, Copy, Debug)]
+struct Tuning {
+    hz: u32,
+    mode: Option<Mode>,
+}
+
 /// One connected backend with its tasks.
 struct Running {
     kind: BackendKind,
     backend: Arc<dyn RigBackend>,
-    freq: watch::Sender<Option<u32>>,
+    freq: watch::Sender<Option<Tuning>>,
     wake: Arc<Notify>,
     /// A scan holds the rig: the poller sleeps.
     paused: Arc<AtomicBool>,
@@ -344,7 +361,7 @@ impl Rig {
     /// Run a command. Any command takes the rig over from a running scan.
     pub async fn execute(&self, cmd: RigCommand) -> Result<(), CommandError> {
         self.stop_scan(ScanStop::Takeover).await;
-        if let RigCommand::SetFreq { .. } = cmd {
+        if let RigCommand::SetFreq { .. } | RigCommand::Tune { .. } = cmd {
             cmd.validate(&self.coverage().await)?;
         }
         let (backend, wake) = {
@@ -352,13 +369,18 @@ impl Rig {
             let Some(r) = guard.as_ref() else {
                 return Err(CommandError::Conflict("Not connected".into()));
             };
-            if let RigCommand::SetFreq { hz } = cmd {
+            let tuning = match cmd {
+                RigCommand::SetFreq { hz } => Some(Tuning { hz, mode: None }),
+                RigCommand::Tune { hz, mode } => Some(Tuning { hz, mode: Some(mode) }),
+                _ => None,
+            };
+            if let Some(t) = tuning {
                 if self.state.borrow().power != Power::On {
                     return Err(CommandError::Conflict("The radio is off".into()));
                 }
                 // Coalesced: the tuning task sends only the latest value, so a fast
                 // dial drag cannot queue up hundreds of CAT writes.
-                r.freq.send_replace(Some(hz));
+                r.freq.send_replace(Some(t));
                 return Ok(());
             }
             (r.backend.clone(), r.wake.clone())
@@ -367,7 +389,7 @@ impl Rig {
             RigCommand::SetPower { on } => backend.set_power(on).await,
             _ if self.state.borrow().power != Power::On => Err(CommandError::Conflict("The radio is off".into())),
             RigCommand::SetMode { mode } => backend.set_mode(mode).await,
-            RigCommand::SetFreq { .. } => unreachable!("handled above"),
+            RigCommand::SetFreq { .. } | RigCommand::Tune { .. } => unreachable!("handled above"),
         };
         wake.notify_one();
         res
@@ -411,13 +433,60 @@ async fn poll(
     }
 }
 
-async fn tune(backend: Arc<dyn RigBackend>, mut rx: watch::Receiver<Option<u32>>, wake: Arc<Notify>) {
+async fn tune(backend: Arc<dyn RigBackend>, mut rx: watch::Receiver<Option<Tuning>>, wake: Arc<Notify>) {
     while rx.changed().await.is_ok() {
-        let Some(hz) = *rx.borrow_and_update() else { continue };
-        if let Err(e) = backend.set_freq(hz).await {
-            tracing::warn!("set_freq {hz}: {e}");
-        }
+        let Some(t) = *rx.borrow_and_update() else { continue };
+        tune_to(&*backend, t, || rx.has_changed().unwrap_or(true)).await;
         wake.notify_one();
+    }
+}
+
+/// Take the rig to `hz`, then for a station to its `mode`: after the frequency, since changing
+/// band may recall another mode; and if setting the mode moved the frequency, back to `hz` once.
+/// Leaves the rest as soon as a newer tuning waits (`newer`).
+async fn tune_to(backend: &dyn RigBackend, Tuning { hz, mode }: Tuning, newer: impl Fn() -> bool) {
+    if let Err(e) = backend.set_freq(hz).await {
+        tracing::warn!("set_freq {hz}: {e}");
+        return;
+    }
+    let Some(mode) = mode else { return };
+    if newer() {
+        return;
+    }
+    let now = backend.get_state(&RigState::without_rig(Link::Ok, Power::On)).await;
+    if mode.satisfied_by(now.mode.as_deref()) {
+        return;
+    }
+    if let Err(e) = backend.set_mode(mode).await {
+        tracing::warn!("set_mode {}: {e}", mode.as_str());
+        return;
+    }
+    let settled = settle(backend, &newer).await;
+    if settled.is_some_and(|f| f != hz) && !newer() {
+        if let Err(e) = backend.set_freq(hz).await {
+            tracing::warn!("set_freq {hz} after the mode: {e}");
+        }
+    }
+}
+
+/// The frequency once two reads `SETTLE_POLL` apart agree (or the last read after `SETTLE_MAX`);
+/// `None` if the rig does not say or a newer tuning waits.
+async fn settle(backend: &dyn RigBackend, newer: &impl Fn() -> bool) -> Option<u32> {
+    let deadline = tokio::time::Instant::now() + SETTLE_MAX;
+    let mut last = backend.freq().await;
+    loop {
+        if newer() {
+            return None;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return last;
+        }
+        tokio::time::sleep(SETTLE_POLL).await;
+        let f = backend.freq().await;
+        if f.is_some() && f == last {
+            return f;
+        }
+        last = f;
     }
 }
 
@@ -466,6 +535,66 @@ mod tests {
         until(&mut rx, |s| s.freq_hz == Some(7_019_900)).await;
         let writes = fake.log().await.len();
         assert!(writes < 20, "{writes} writes for 200 dial steps");
+    }
+
+    #[tokio::test]
+    async fn a_station_keeps_its_mode_across_a_band_change() {
+        let fake = FakeRigctld::start().await;
+        // the 9 MHz band was last used in USB: the rig recalls it on the way in
+        fake.band_mode(9, "USB").await;
+        let rig = Rig::start(Arc::new(hamlib::Hamlib::new("127.0.0.1", fake.port)));
+        let mut rx = rig.subscribe();
+        changed(&mut rx).await;
+
+        // the mode first, then the frequency: the band change undoes it
+        rig.execute(RigCommand::SetMode { mode: Mode::AM }).await.unwrap();
+        rig.execute(RigCommand::SetFreq { hz: 9_500_000 }).await.unwrap();
+        let s = until(&mut rx, |s| s.freq_hz == Some(9_500_000)).await;
+        assert_eq!(s.mode.as_deref(), Some("USB"));
+
+        // a station's tune sets its mode once the rig is there
+        fake.band_mode(5, "LSB").await;
+        rig.execute(RigCommand::Tune { hz: 5_025_000, mode: Mode::AM }).await.unwrap();
+        let s = until(&mut rx, |s| s.freq_hz == Some(5_025_000) && s.mode.as_deref() == Some("AM")).await;
+        assert_eq!(s.power, Power::On);
+        let log = fake.log().await;
+        assert_eq!(log[log.len() - 2..], ["F 5025000", "M AM 0"]);
+
+        // already in a mode that serves (narrow AM for AM): nothing more is sent
+        rig.execute(RigCommand::SetMode { mode: Mode::AMN }).await.unwrap();
+        rig.execute(RigCommand::Tune { hz: 5_030_000, mode: Mode::AM }).await.unwrap();
+        let s = until(&mut rx, |s| s.freq_hz == Some(5_030_000)).await;
+        assert_eq!(s.mode.as_deref(), Some("AMN"));
+        assert_eq!(fake.log().await.last().map(String::as_str), Some("F 5030000"));
+    }
+
+    #[tokio::test]
+    async fn a_station_stays_on_its_frequency_when_its_mode_moves_it() {
+        let fake = FakeRigctld::start().await;
+        // entering CW moves this rig 600 Hz (its pitch offset)
+        fake.cw_shift(600).await;
+        let rig = Rig::start(Arc::new(hamlib::Hamlib::new("127.0.0.1", fake.port)));
+        let mut rx = rig.subscribe();
+        changed(&mut rx).await;
+
+        // a CW station from USB: the mode moves the rig, the tune puts it back
+        rig.execute(RigCommand::Tune { hz: 14_070_000, mode: Mode::CW }).await.unwrap();
+        until(&mut rx, |s| s.freq_hz == Some(14_070_000) && s.mode.as_deref() == Some("CW")).await;
+        let log = fake.log().await;
+        assert_eq!(log[log.len() - 3..], ["F 14070000", "M CW 0", "F 14070000"]);
+
+        // already in CW: the frequency alone
+        rig.execute(RigCommand::Tune { hz: 14_060_000, mode: Mode::CW }).await.unwrap();
+        until(&mut rx, |s| s.freq_hz == Some(14_060_000)).await;
+        tokio::time::sleep(SETTLE_MAX).await;
+        assert_eq!(fake.log().await.last().map(String::as_str), Some("F 14060000"));
+
+        // a mode chosen by hand keeps whatever the rig does with it
+        rig.execute(RigCommand::SetMode { mode: Mode::USB }).await.unwrap();
+        let s = until(&mut rx, |s| s.mode.as_deref() == Some("USB")).await;
+        assert_eq!(s.freq_hz, Some(14_059_400));
+        tokio::time::sleep(SETTLE_MAX).await;
+        assert_eq!(fake.log().await.last().map(String::as_str), Some("M USB 0"));
     }
 
     #[tokio::test]

@@ -1,28 +1,24 @@
 // Globe texture drawn at runtime: the "receiver at night" look, in detail.
 //
-// Static base (built once):  ocean gradient, graticule, coastal glow, land, shaded relief,
-//                            country borders, coastlines (Natural Earth 50m via world-atlas).
-// Per refresh (every 2 min): night shading from the real sun position, and city lights
-//                            (NASA Black Marble) glowing amber only on the night side.
-//
-// The result is one canvas used directly as a THREE.CanvasTexture: no PNG round trip.
+// Two static layers, built once and uploaded once:
+//   base:   ocean gradient, graticule, coastal glow, land, shaded relief, country borders,
+//           coastlines (Natural Earth 50m via world-atlas);
+//   lights: city lights (NASA Black Marble) tinted amber.
+// The night shading, the lights it reveals and the grey line are drawn by the globe's shader
+// from the sun's direction (night.ts), so the terminator moves continuously at no cost.
 
 import { geoEquirectangular, geoGraticule10, geoPath, type GeoProjection } from 'd3-geo';
 import { feature, mesh } from 'topojson-client';
 import type { GeometryCollection, Topology } from 'topojson-specification';
 import lightsUrl from '../assets/globe/lights.jpg';
 import reliefUrl from '../assets/globe/relief.jpg';
-import { clamp, RAD, sunPos } from './geo';
 
 /** Equirectangular projection onto a w×h texture, matching three-globe's UV mapping. */
 export function textureProjection(w: number, h: number): GeoProjection {
   return geoEquirectangular().scale(w / (2 * Math.PI)).translate([w / 2, h / 2]).precision(0.1);
 }
 
-/** Night mask resolution (upscaled smoothly onto the texture). */
-const MW = 720, MH = 360;
-/** Night shading strength and the warm tint of the city lights. */
-const NIGHT_ALPHA = 0.74;
+/** The warm tint of the city lights. */
 const LIGHT_TINT = 'rgb(255,196,120)';
 
 function canvas(w: number, h: number) {
@@ -102,70 +98,19 @@ function buildLights(w: number, h: number, lights: HTMLImageElement): HTMLCanvas
   return c;
 }
 
+/** The texture's static layers, as canvases for `CanvasTexture`s. */
 export class GlobeTexture {
-  readonly canvas: HTMLCanvasElement;
-  private base: HTMLCanvasElement;
-  private lights: HTMLCanvasElement;
-  private lightsNow: HTMLCanvasElement;
-  private shade = canvas(MW, MH);
-  private reveal = canvas(MW, MH);
+  private constructor(readonly base: HTMLCanvasElement, readonly lights: HTMLCanvasElement) {}
 
-  private constructor(w: number, h: number, world: World, relief: HTMLImageElement, lights: HTMLImageElement) {
-    this.canvas = canvas(w, h);
-    this.base = buildBase(w, h, world, relief);
-    this.lights = buildLights(w, h, lights);
-    this.lightsNow = canvas(w, h);
-  }
-
-  /** Load the map data and rasters (lazily, they are ~2 MB) and build the static layers. */
+  /** Load the map data and rasters (lazily, they are ~2 MB) and build the layers. */
   static async create(width: number): Promise<GlobeTexture> {
     const [world, relief, lights] = await Promise.all([
       import('world-atlas/countries-50m.json').then((m) => m.default as unknown as World),
       loadImage(reliefUrl),
       loadImage(lightsUrl),
     ]);
-    return new GlobeTexture(width, width / 2, world, relief, lights);
-  }
-
-  /** Redraw for time `d`: night shading and the city lights it reveals. */
-  render(d: Date) {
-    const sun = sunPos(d), sd = Math.sin(sun.lat * RAD), cd = Math.cos(sun.lat * RAD);
-    const shadeImg = this.shade.getContext('2d')!.createImageData(MW, MH);
-    const revealImg = this.reveal.getContext('2d')!.createImageData(MW, MH);
-    for (let j = 0; j < MH; j++) {
-      const lat = (90 - (j + 0.5) * (180 / MH)) * RAD, sl = Math.sin(lat) * sd, cl = Math.cos(lat) * cd;
-      for (let i = 0; i < MW; i++) {
-        const lon = (i + 0.5) * (360 / MW) - 180;
-        const cz = sl + cl * Math.cos((lon - sun.lon) * RAD); // cosine of the solar zenith angle
-        const t = clamp((0.08 - cz) / 0.33, 0, 1), night = t * t * (3 - 2 * t);
-        // lights come on a bit later than dusk falls
-        const l = clamp((0.02 - cz) / 0.25, 0, 1), lit = l * l * (3 - 2 * l);
-        const q = (j * MW + i) * 4;
-        shadeImg.data[q] = 2; shadeImg.data[q + 1] = 6; shadeImg.data[q + 2] = 13;
-        shadeImg.data[q + 3] = Math.round(night * NIGHT_ALPHA * 255);
-        revealImg.data[q + 3] = Math.round(lit * 255);
-      }
-    }
-    this.shade.getContext('2d')!.putImageData(shadeImg, 0, 0);
-    this.reveal.getContext('2d')!.putImageData(revealImg, 0, 0);
-
-    const { width: w, height: h } = this.canvas;
-    const ln = this.lightsNow.getContext('2d')!;
-    ln.globalCompositeOperation = 'copy';
-    ln.drawImage(this.lights, 0, 0);
-    ln.globalCompositeOperation = 'destination-in';
-    ln.imageSmoothingQuality = 'high';
-    ln.drawImage(this.reveal, 0, 0, w, h);
-
-    const g = this.canvas.getContext('2d')!;
-    g.globalCompositeOperation = 'copy';
-    g.drawImage(this.base, 0, 0);
-    g.globalCompositeOperation = 'source-over';
-    g.imageSmoothingQuality = 'high';
-    g.drawImage(this.shade, 0, 0, w, h);
-    g.globalCompositeOperation = 'lighter';
-    g.drawImage(this.lightsNow, 0, 0);
-    g.globalCompositeOperation = 'source-over';
+    const w = width, h = width / 2;
+    return new GlobeTexture(buildBase(w, h, world, relief), buildLights(w, h, lights));
   }
 }
 

@@ -1,11 +1,15 @@
 // The globe and the prototype's "lock on" sequence:
-//  1. zoom out and swing to the transmitter (slerp + ease, duration by distance)
+//  1. once the choice settles, zoom out and swing to the transmitter (slerp + ease, duration by
+//     distance; a flight that takes over a moving camera carries on its speed, `hermiteEase`)
 //  2. land, show the label and pulsing rings
-//  3. after 450 ms draw the arc and the great-circle path to the QTH
-//  4. after 1.5 s a blue "received" ring at the QTH
+//  3. after 450 ms the arc, and the great-circle path drawing itself from the transmitter home
+//  4. when the path lands, a blue "received" ring at the QTH, sized and paced by the S-meter
 //  5. optionally reframe the whole route
 // Off-air stations get the flight and the label only. With nothing tuned the camera goes back
-// to the QTH and, left alone, the globe turns again.
+// to the QTH and, left alone, the globe eases into a turn again.
+// One frame loop drives the camera flights, the turn, the path's drawing, the S-meter's smoothing
+// and the sun: night falls in the globe's shader (geo/night.ts), the terminator moving as it does.
+// Towers rise and sink as their sites come on and go off the air (`stableSites`).
 // While a band scan runs, lock-on rests: the camera holds over the QTH, a sonar pulse spreads
 // from it, and at each step the sites on the air on that channel flash, sized by the reading
 // (a signal also sends an arc home). When the scan ends, the sites it logged pulse green, framed
@@ -14,21 +18,24 @@
 // The canvas may cover the whole window, behind the panels (styles.css, `data-globe="full"`):
 // the globe is then centred on the stage (`globeOffset`) and sized for it, the rest is overflow.
 
-import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import GlobeGL, { type GlobeMethods } from 'react-globe.gl';
-import { CanvasTexture, MeshPhongMaterial, SRGBColorSpace } from 'three';
-import { angleDeg, clamp, easeInOut, fitAltitude, frameAltitude, frameWithHome, fromVec, greatCircle, midpoint, pingAlpha, pingRadius, slerp, toVec, type LatLon } from '../geo/geo';
+import { BufferAttribute, BufferGeometry, CanvasTexture, Line, LineBasicMaterial, MeshPhongMaterial, SRGBColorSpace } from 'three';
+import { altitudeAt, angleDeg, clamp, easeInOut, fitAltitude, frameAltitude, frameWithHome, fromVec, greatCircle, hermiteEase, initialSlope, midpoint, pingAlpha, pingRadius, receivedRing, slerp, sunVec, toVec, type LatLon, type Vec3 } from '../geo/geo';
+import { applyNight, type Night } from '../geo/night';
 import { GlobeTexture, makeStars } from '../geo/texture';
 import { flagUrl } from '../catalog/flags';
 import { useT } from '../i18n';
 import { SIGNAL_DB } from './scan';
+import { stableSites } from './stableSites';
 import type { Candidate } from '../types/generated/Candidate';
 import type { Qth } from '../types/generated/Qth';
 import type { ScanPing } from '../types/generated/ScanPing';
 import type { SiteDot } from '../types/generated/SiteDot';
 
 const REDUCE = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-const TEXTURE_REFRESH_MS = 120_000;
+/** How often the sun moves (a uniform: this costs nothing). */
+const SUN_MS = 1000;
 /** Texture width; capped by the GPU's limit. */
 const TEXTURE_WIDTH = 4096;
 /** Camera altitudes, in globe radii, for a square view. */
@@ -43,6 +50,14 @@ const SCAN_ALT = 2.8, PING_MS = 1600, ARC_MS = 2400, FINALE_MS = 4000, MAX_PINGS
 /** While scanning the camera eases this often towards the sites pinged in the last `FOLLOW_SPAN_MS`
  *  (most transmitters may face away from the QTH), unless it is nearly there already. */
 const FOLLOW_MS = 6000, FOLLOW_SPAN_MS = 15_000, FOLLOW_MIN_DEG = 10;
+/** The turn's speed, and how fast it eases in and out (ms; out quicker, so a hovered dot stays put). */
+const SPIN = 0.45, SPIN_IN_MS = 800, SPIN_OUT_MS = 250;
+/** A station chosen this soon after another one (tuning through them) flies once, to the last. */
+const SETTLE_MS = 150;
+/** How long the route takes to draw itself home; the S-meter's smoothing; a tower's rise. */
+const ROUTE_MS = 1300, LEVEL_MS = 400, TOWER_MS = 700;
+/** A flight leaving slower than this (ease slope) leaves from rest. */
+const MOVING = 0.05;
 
 /** A 1×1 ocean-coloured image: three-globe only reports "ready" after loading an image. */
 function placeholder(): string {
@@ -59,11 +74,13 @@ const PING_PX_PER_DEG = 8;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, REDUCE ? 0 : ms));
 
 interface Pin { lat: number; lng: number; el: HTMLElement }
-interface Ring { lat: number; lng: number; maxR: number; speed: number; period: number; rgb: string; alpha?: number }
+/** `live`: the "received" ring, sized and paced by the S-meter as it reads. */
+interface Ring { lat: number; lng: number; maxR: number; speed: number; period: number; rgb: string; alpha?: number; live?: boolean }
 interface Arc { sLat: number; sLng: number; eLat: number; eLng: number; dash: number; gap: number; anim: number; stroke: number; colors: string[] }
-interface Path { pts: LatLon[] }
-interface Fx { station: Pin | null; rings: Ring[]; arcs: Arc[]; paths: Path[] }
-const NO_FX: Fx = { station: null, rings: [], arcs: [], paths: [] };
+/** The great-circle path from a transmitter home (drawn by `GlobeView` itself, to draw it on). */
+interface Path { site: LatLon }
+interface Fx { station: Pin | null; rings: Ring[]; arcs: Arc[]; path: Path | null }
+const NO_FX: Fx = { station: null, rings: [], arcs: [], path: null };
 /** A scan's pings (glowing markers that pulse once) and arcs, each until a time (performance.now()). */
 interface ScanFx { marks: (Pin & { until: number })[]; arcs: (Arc & { until: number })[] }
 const NO_SCAN_FX: ScanFx = { marks: [], arcs: [] };
@@ -109,27 +126,41 @@ const siteColor = (s: SiteDot, active: boolean, logged: boolean) =>
 const siteRadius = (s: SiteDot, active: boolean, logged: boolean) => (active ? 0.6 : s.on ? 0.45 : 0.32) + (logged && !active ? 0.1 : 0);
 const siteAltitude = (s: SiteDot, active: boolean) => (active ? 0.05 : s.on ? 0.012 + Math.min(0.03, s.on * 0.002) : 0.003);
 
-function route(site: LatLon, qth: LatLon): Pick<Fx, 'arcs' | 'paths'> {
+function route(site: LatLon, qth: LatLon): Pick<Fx, 'arcs' | 'path'> {
   const [a, b] = [site, qth];
   return {
     arcs: [
       { sLat: a.lat, sLng: a.lon, eLat: b.lat, eLng: b.lon, dash: 1, gap: 0, anim: 0, stroke: 0.22, colors: [`rgba(${AMBER},0.4)`, `rgba(${COOL},0.4)`] },
       { sLat: a.lat, sLng: a.lon, eLat: b.lat, eLng: b.lon, dash: 0.16, gap: 1.2, anim: 2600, stroke: 0.55, colors: ['rgba(255,228,175,1)', `rgba(${COOL},1)`] },
     ],
-    paths: [{ pts: greatCircle(a, b, Math.max(8, Math.round(angleDeg(a, b) / 2))) }],
+    path: { site },
   };
 }
+
+/** The great-circle path from `site` to `qth` as a line just above the ground (`coords`: the
+ *  globe's), a vertex per degree, to be drawn on with its draw range. */
+function routeLine(site: LatLon, qth: LatLon, coords: GlobeMethods['getCoords']): Line {
+  const pts = greatCircle(site, qth, Math.max(16, Math.round(angleDeg(site, qth))));
+  const pos = new Float32Array(pts.length * 3);
+  pts.forEach((p, i) => {
+    const c = coords(p.lat, p.lon, 0.004);
+    pos.set([c.x, c.y, c.z], i * 3);
+  });
+  const geom = new BufferGeometry();
+  geom.setAttribute('position', new BufferAttribute(pos, 3));
+  return new Line(geom, new LineBasicMaterial({ color: 0xffc882, transparent: true, opacity: 0.4, depthWrite: false }));
+}
+
+/** A camera flight under way: from `a` to `b` (unit vectors) and altitude `alt0` to `alt1` over
+ *  `ms` from `t0`, leaving with ease slope `v0`. */
+interface Flight { id: number; a: Vec3; b: Vec3; alt0: number; alt1: number; bump: number; ms: number; t0: number; v0: number; done: (landed: boolean) => void }
 
 // Accessors live out here (or in useCallback) so each render hands the globe the same functions:
 // a new `htmlElement` makes three-globe rebuild every pin, which replays their fade-in (a blink),
 // and any other new accessor re-applies its whole layer.
 const pinEl = (d: object) => (d as Pin).el;
-const ringColor = (d: object) => (t: number) => `rgba(${(d as Ring).rgb},${(Math.pow(1 - t, 1.6) * 0.9 * ((d as Ring).alpha ?? 1)).toFixed(3)})`;
-const pathLat = (p: object) => (p as LatLon).lat;
-const pathLng = (p: object) => (p as LatLon).lon;
-const pathColor = () => 'rgba(255,200,130,0.4)';
 
-const qthRing = (q: LatLon): Ring =>({ lat: q.lat, lng: q.lon, maxR: 4.5, speed: 2, period: 2200, rgb: COOL });
+const qthRing = (q: LatLon): Ring => ({ lat: q.lat, lng: q.lon, maxR: 4.5, speed: 2, period: 2200, rgb: COOL, live: true });
 const sonarRing = (q: LatLon): Ring => ({ lat: q.lat, lng: q.lon, maxR: 25, speed: 6, period: 2500, rgb: COOL, alpha: 0.6 });
 
 interface Props {
@@ -145,6 +176,8 @@ interface Props {
   failedMsg: string;
   /** Every transmitter site with its on-air count. */
   sites: SiteDot[];
+  /** The S-meter while the rig is on (dB over S9). */
+  strengthDb: number | null;
   activeSite: number | null;
   /** Sites of stations a band scan logged. */
   loggedSites: ReadonlySet<number>;
@@ -157,7 +190,7 @@ interface Props {
   siteLabel: (s: SiteDot) => { country: string; onAir: string };
 }
 
-function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQth, sites, activeSite, loggedSites, scan, finale, onSite, siteLabel }: Props) {
+function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQth, sites, strengthDb, activeSite, loggedSites, scan, finale, onSite, siteLabel }: Props) {
   const t = useT();
   const stage = useRef<HTMLDivElement>(null);
   const globe = useRef<GlobeMethods>(undefined);
@@ -165,10 +198,21 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
   const placeholderUrl = useMemo(placeholder, []);
   // our own material (three-globe's default), so the drawn texture can be swapped in
   const material = useMemo(() => new MeshPhongMaterial({ color: 0x000000 }), []);
-  const texture = useRef<{ tex: CanvasTexture; timer: ReturnType<typeof setInterval> } | null>(null);
+  const texture = useRef<{ tex: CanvasTexture; night: Night } | null>(null);
   const [fx, setFx] = useState<Fx>(NO_FX);
   const [ready, setReady] = useState(false);
   const seq = useRef(0), flight = useRef(0), grabbed = useRef(-1);
+  /** The flight under way, and the camera's motion (per ms) for the next one to carry on. */
+  const flying = useRef<Flight | null>(null);
+  const motion = useRef({ at: -1, v: [0, 0, 1] as Vec3, ln: 0, vel: [0, 0, 0] as Vec3, lnRate: 0 });
+  /** The turn's target speed (the frame loop eases the controls' speed to it). */
+  const spin = useRef(0);
+  /** The route's line and when it started drawing (`ms` 0: drawn). */
+  const routing = useRef<{ line: Line; t0: number; ms: number } | null>(null);
+  /** The S-meter as the received ring shows it: smoothed, null without a reading. */
+  const strength = useRef(strengthDb);
+  strength.current = strengthDb;
+  const level = useRef<number | null>(null);
   const qthRef = useRef(qth);
   qthRef.current = qth;
   const frameRef = useRef(framing);
@@ -187,6 +231,8 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
   selRef.current = sel;
   const interact = useRef(onInteract);
   interact.current = onInteract;
+  const handlers = useRef({ onQth, onSite, siteLabel });
+  handlers.current = { onQth, onSite, siteLabel };
   /** When the user last touched the globe (performance.now()). */
   const touched = useRef(-Infinity);
   /** The pointer is on a transmitter site. */
@@ -234,49 +280,49 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
   useEffect(() => {
     if (!ready || REDUCE) return;
     const id = setInterval(() => {
-      if (idle()) globe.current!.controls().autoRotate = true;
+      if (idle()) spin.current = SPIN;
     }, 5000);
     return () => clearInterval(id);
   }, [ready, idle]);
 
   useEffect(() => () => {
     if (texture.current) {
-      clearInterval(texture.current.timer);
       texture.current.tex.dispose();
+      texture.current.night.dispose();
       texture.current = null;
     }
   }, []);
 
-  /** Swap the placeholder for the drawn texture, then redraw it in place every 2 minutes. */
+  /** Swap the placeholder for the drawn texture, shaded for day and night by the sun. */
   const loadTexture = useCallback(async (g: GlobeMethods) => {
-    const max = g.renderer().capabilities.maxTextureSize;
-    const gt = await GlobeTexture.create(Math.min(TEXTURE_WIDTH, max));
+    const caps = g.renderer().capabilities;
+    const gt = await GlobeTexture.create(Math.min(TEXTURE_WIDTH, caps.maxTextureSize));
     if (texture.current || !globe.current) return;
-    gt.render(new Date());
-    const tex = new CanvasTexture(gt.canvas);
+    const tex = new CanvasTexture(gt.base);
     tex.colorSpace = SRGBColorSpace;
-    tex.anisotropy = g.renderer().capabilities.getMaxAnisotropy();
+    tex.anisotropy = caps.getMaxAnisotropy();
+    const lights = new CanvasTexture(gt.lights);
+    lights.anisotropy = tex.anisotropy;
     material.map?.dispose(); // the placeholder
     material.map = tex;
-    material.needsUpdate = true;
-    const timer = setInterval(() => {
-      gt.render(new Date());
-      tex.needsUpdate = true;
-    }, TEXTURE_REFRESH_MS);
-    texture.current = { tex, timer };
+    const night = applyNight(material, lights);
+    night.setSun(sunVec(new Date()));
+    texture.current = { tex, night };
   }, [material]);
 
   const onReady = useCallback(() => {
     const g = globe.current!;
     g.pointOfView({ lat: qthRef.current.lat, lng: qthRef.current.lon, altitude: fit(START_ALT) }, 0);
     const ctl = g.controls();
+    // left on: the frame loop eases its speed in and out (`spin`)
     ctl.autoRotate = !REDUCE;
-    ctl.autoRotateSpeed = 0.45;
+    ctl.autoRotateSpeed = 0;
+    spin.current = SPIN;
     ctl.enablePan = false;
     ctl.minDistance = 100 * (1 + MIN_ALT);
     ctl.maxDistance = 100 * (1 + fit(MAX_ALT));
     ctl.addEventListener('start', () => {
-      ctl.autoRotate = false;
+      spin.current = ctl.autoRotateSpeed = 0;
       flight.current++;
       grabbed.current = seq.current;
       touched.current = performance.now();
@@ -286,9 +332,13 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
     loadTexture(g).catch((e) => console.warn('globe texture:', e));
   }, [loadTexture, fit]);
 
+  /** Fly the camera (the frame loop moves it): true when it lands, false when something else
+   *  took the camera first. A flight carries on the camera's motion, a turn included. */
   const fly = useCallback((lat: number, lon: number, alt: number, ms: number, bump: number) => {
     const g = globe.current!;
     const id = ++flight.current;
+    flying.current?.done(false);
+    flying.current = null;
     return new Promise<boolean>((resolve) => {
       const p0 = g.pointOfView();
       if (REDUCE || ms <= 0) {
@@ -296,22 +346,16 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
         resolve(true);
         return;
       }
-      const a = toVec(p0.lat, p0.lng), b = toVec(lat, lon), t0 = performance.now();
-      const step = (now: number) => {
-        if (id !== flight.current) return resolve(false);
-        const k = clamp((now - t0) / ms, 0, 1), e = easeInOut(k);
-        const v = fromVec(slerp(a, b, e));
-        g.pointOfView({ lat: v.lat, lng: v.lon, altitude: p0.altitude + (alt - p0.altitude) * e + bump * Math.sin(Math.PI * e) }, 0);
-        if (k < 1) requestAnimationFrame(step);
-        else resolve(true);
-      };
-      requestAnimationFrame(step);
+      spin.current = g.controls().autoRotateSpeed = 0; // the flight takes the turn's speed over
+      const a = toVec(p0.lat, p0.lng), b = toVec(lat, lon), m = motion.current;
+      const v0 = initialSlope(a, m.vel, b, m.lnRate, Math.log1p(p0.altitude), Math.log1p(alt), ms);
+      flying.current = { id, a, b, alt0: p0.altitude, alt1: alt, bump, ms, t0: performance.now(), v0, done: resolve };
     });
   }, []);
 
   /** The user took the camera: no automatic framing for this lock-on, no turning for a while. */
   const grab = useCallback(() => {
-    globe.current!.controls().autoRotate = false;
+    spin.current = globe.current!.controls().autoRotateSpeed = 0;
     grabbed.current = seq.current;
     touched.current = performance.now();
     interact.current();
@@ -357,10 +401,15 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
     }
     const site = { lat: sel.site.lat, lon: sel.site.lon };
     const on = sel.air.on;
+    setFx(NO_FX);
     (async () => {
+      // tuning through stations: fly to where it stops
+      if (was !== null) {
+        await sleep(SETTLE_MS);
+        if (my !== seq.current) return;
+      }
       const g = globe.current!;
-      g.controls().autoRotate = false;
-      setFx(NO_FX);
+      spin.current = 0;
       const p0 = g.pointOfView();
       const mv = angleDeg({ lat: p0.lat, lon: p0.lng }, site);
       await fly(site.lat, site.lon, fit(LOCK_ALT), Math.round(1500 + 1700 * Math.min(1, mv / 150)), 0.5 + 1.4 * Math.min(1, mv / 120));
@@ -371,7 +420,8 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
       if (!on) return;
       await sleep(450); if (my !== seq.current) return;
       setFx((f) => ({ ...f, ...route(site, qthRef.current) }));
-      await sleep(1500); if (my !== seq.current) return;
+      // received when the path lands
+      await sleep(ROUTE_MS); if (my !== seq.current) return;
       setFx((f) => ({ ...f, rings: [...f.rings, qthRing(qthRef.current)] }));
       if (!frameRef.current || grabbed.current === my) return;
       await sleep(1100); if (my !== seq.current || grabbed.current === my) return;
@@ -393,7 +443,7 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
     recent.current = [];
     setFx(NO_FX);
     setScanFx(NO_SCAN_FX);
-    globe.current!.controls().autoRotate = false;
+    spin.current = 0;
     if (handsOff()) {
       const q = qthRef.current;
       fly(q.lat, q.lon, fit(SCAN_ALT), 1600, 0.2);
@@ -475,6 +525,97 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
     return () => clearInterval(id);
   }, [scanning]);
 
+  // The route draws itself from the transmitter home; moving the QTH redraws it at once.
+  const drawn = useRef<Path | null>(null);
+  useEffect(() => {
+    const g = globe.current;
+    if (!ready || !g || !fx.path) return;
+    const line = routeLine(fx.path.site, qth, g.getCoords);
+    const ms = REDUCE || drawn.current === fx.path ? 0 : ROUTE_MS;
+    drawn.current = fx.path;
+    line.geometry.setDrawRange(0, ms ? 0 : Infinity);
+    g.scene().add(line);
+    routing.current = { line, t0: performance.now(), ms };
+    return () => {
+      g.scene().remove(line);
+      line.geometry.dispose();
+      (line.material as LineBasicMaterial).dispose();
+      routing.current = null;
+    };
+  }, [ready, fx.path, qth]);
+
+  // The frame loop: flights, the turn, the route's drawing, the S-meter and the sun.
+  useEffect(() => {
+    if (!ready || paused) return;
+    const g = globe.current!, ctl = g.controls();
+    let raf = 0, last = 0, sunAt = 0;
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick);
+      const dt = last ? clamp(now - last, 1, 100) : 16;
+      last = now;
+
+      const f = flying.current;
+      if (f && f.id !== flight.current) {
+        flying.current = null;
+        f.done(false);
+      } else if (f) {
+        const k = clamp((now - f.t0) / f.ms, 0, 1);
+        const e = f.v0 > MOVING ? hermiteEase(k, f.v0) : easeInOut(k);
+        const v = fromVec(slerp(f.a, f.b, e));
+        g.pointOfView({ lat: v.lat, lng: v.lon, altitude: altitudeAt(f.alt0, f.alt1, f.bump, e) }, 0);
+        if (k >= 1) {
+          flying.current = null;
+          f.done(true);
+        }
+      }
+
+      // the camera's motion (smoothed a little), for the next flight to carry on
+      const p = g.pointOfView(), m = motion.current;
+      const v = toVec(p.lat, p.lng), ln = Math.log1p(p.altitude);
+      if (m.at >= 0) {
+        const s = 1 - Math.exp(-dt / 50);
+        for (let i = 0; i < 3; i++) m.vel[i] += ((v[i] - m.v[i]) / dt - m.vel[i]) * s;
+        m.lnRate += ((ln - m.ln) / dt - m.lnRate) * s;
+      }
+      Object.assign(m, { at: now, v, ln });
+
+      if (ctl.autoRotate) {
+        const tau = spin.current < ctl.autoRotateSpeed ? SPIN_OUT_MS : SPIN_IN_MS;
+        ctl.autoRotateSpeed += (spin.current - ctl.autoRotateSpeed) * (1 - Math.exp(-dt / tau));
+        if (Math.abs(ctl.autoRotateSpeed - spin.current) < 1e-3) ctl.autoRotateSpeed = spin.current;
+      }
+
+      const r = routing.current;
+      if (r && r.ms) {
+        const k = clamp((now - r.t0) / r.ms, 0, 1);
+        r.line.geometry.setDrawRange(0, Math.ceil(easeInOut(k) * r.line.geometry.getAttribute('position').count));
+        if (k >= 1) r.ms = 0;
+      }
+
+      const db = REDUCE ? null : strength.current, lv = level.current;
+      level.current = db === null ? null : lv === null ? db : lv + (db - lv) * (1 - Math.exp(-dt / LEVEL_MS));
+
+      if (now - sunAt > SUN_MS) {
+        sunAt = now;
+        texture.current?.night.setSun(sunVec(new Date()));
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [ready, paused]);
+
+  // the received ring follows the S-meter ring by ring (three-globe reads these as it sends one)
+  const ringMaxR = useCallback((d: object) => ((d as Ring).live ? receivedRing(level.current).maxR : (d as Ring).maxR), []);
+  const ringSpeed = useCallback((d: object) => ((d as Ring).live ? receivedRing(level.current).speed : (d as Ring).speed), []);
+  const ringPeriod = useCallback((d: object) => ((d as Ring).live ? receivedRing(level.current).period : (d as Ring).period), []);
+  const ringColor = useCallback((d: object) => {
+    const r = d as Ring;
+    return (t: number) => {
+      const a = r.live ? receivedRing(level.current).alpha : r.alpha ?? 1;
+      return `rgba(${r.rgb},${(Math.pow(1 - t, 1.6) * 0.9 * a).toFixed(3)})`;
+    };
+  }, []);
+
   const sonar = useMemo(() => sonarRing(qth), [qth]);
   const rings = useMemo(() => (scanning && !REDUCE ? [...fx.rings, sonar] : fx.rings), [fx.rings, scanning, sonar]);
   const arcs = useMemo(() => [...fx.arcs, ...scanFx.arcs], [fx.arcs, scanFx.arcs]);
@@ -486,6 +627,7 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
       return {
         ...f,
         ...route({ lat: sel.site.lat, lon: sel.site.lon }, qth),
+        path: f.path, // the same path: redrawn at once, not drawn on again
         rings: f.rings.filter((r) => r.rgb !== COOL).concat([qthRing(qth)]),
       };
     });
@@ -497,10 +639,13 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
     const ctl = globe.current?.controls();
     if (!ctl) return;
     hovering.current = !!d;
-    if (d) ctl.autoRotate = false;
-    else if (idle()) ctl.autoRotate = true;
+    if (d) spin.current = 0;
+    else if (idle()) spin.current = SPIN;
   }, [idle]);
 
+  const siteCache = useRef(new Map<number, SiteDot>());
+  const shownSites = useRef<readonly SiteDot[]>([]);
+  const points = useMemo(() => (shownSites.current = stableSites(siteCache.current, shownSites.current, sites)), [sites]);
   const qthPin = useMemo<Pin>(() => ({ lat: qth.lat, lng: qth.lon, el: mkPin('qth', 'QTH', qth.name) }), [qth]);
   const pins = useMemo(() => [qthPin, ...(fx.station ? [fx.station] : []), ...scanFx.marks], [qthPin, fx.station, scanFx.marks]);
   const stars = useMemo(() => makeStars(), []);
@@ -509,11 +654,16 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
   const pointColor = useCallback((d: object) => siteColor(d as SiteDot, (d as SiteDot).id === activeSite, loggedSites.has((d as SiteDot).id)), [activeSite, loggedSites]);
   const siteTip = useCallback((d: object) => {
     const s = d as SiteDot;
-    const l = siteLabel(s);
+    const l = handlers.current.siteLabel(s);
     const url = flagUrl(s.flag);
     const flag = url ? `<img class="flag" src="${esc(url)}" alt="">` : '';
     return `<div class="site-tip"><b>${flag}${esc(s.name)}</b><span>${esc(l.country)}</span><span>${esc(l.onAir)}</span></div>`;
-  }, [siteLabel]);
+  }, []);
+  const onGlobeClick = useCallback((c: { lat: number; lng: number }) => {
+    interact.current();
+    handlers.current.onQth({ name: `${c.lat.toFixed(1)}°, ${c.lng.toFixed(1)}°`, lat: c.lat, lon: c.lng });
+  }, []);
+  const onPointClick = useCallback((d: object) => handlers.current.onSite((d as SiteDot).id), []);
 
   return (
     <>
@@ -534,11 +684,8 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
             atmosphereAltitude={0.17}
             showGraticules={false}
             onGlobeReady={onReady}
-            onGlobeClick={(c) => {
-              interact.current();
-              onQth({ name: `${c.lat.toFixed(1)}°, ${c.lng.toFixed(1)}°`, lat: c.lat, lon: c.lng });
-            }}
-            pointsData={sites}
+            onGlobeClick={onGlobeClick}
+            pointsData={points as object[]}
             pointLat="lat"
             pointLng="lon"
             pointAltitude={pointAltitude}
@@ -546,10 +693,10 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
             pointColor={pointColor}
             pointResolution={10}
             pointsMerge={false}
-            pointsTransitionDuration={0}
+            pointsTransitionDuration={REDUCE ? 0 : TOWER_MS}
             pointLabel={siteTip}
             onPointHover={onPointHover}
-            onPointClick={(d) => onSite((d as SiteDot).id)}
+            onPointClick={onPointClick}
             htmlElementsData={pins}
             htmlLat="lat"
             htmlLng="lng"
@@ -561,9 +708,9 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
             ringLng="lng"
             ringAltitude={0.003}
             ringColor={ringColor}
-            ringMaxRadius="maxR"
-            ringPropagationSpeed="speed"
-            ringRepeatPeriod="period"
+            ringMaxRadius={ringMaxR}
+            ringPropagationSpeed={ringSpeed}
+            ringRepeatPeriod={ringPeriod}
             arcsData={arcs}
             arcStartLat="sLat"
             arcStartLng="sLng"
@@ -576,14 +723,6 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
             arcDashAnimateTime="anim"
             arcAltitudeAutoScale={0.42}
             arcsTransitionDuration={1400}
-            pathsData={fx.paths}
-            pathPoints="pts"
-            pathPointLat={pathLat}
-            pathPointLng={pathLng}
-            pathPointAlt={0.004}
-            pathColor={pathColor}
-            pathStroke={0.2}
-            pathTransitionDuration={0}
           />
         )}
       </div>
@@ -610,10 +749,11 @@ class GlobeBoundary extends Component<{ msg: string; children: ReactNode }, { fa
   }
 }
 
-export function Globe(props: Props) {
+/** Renders again only when a prop changes, so pass stable callbacks. */
+export const Globe = memo(function Globe(props: Props) {
   return (
     <GlobeBoundary msg={props.failedMsg}>
       <GlobeView {...props} />
     </GlobeBoundary>
   );
-}
+});
