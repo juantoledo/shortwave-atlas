@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1](https://github.com/juantoledo/shortwave-atlas/compare/v0.8.0...v0.8.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* smoother globe animations, and stations keep their mode and freq… ([c26e1f3](https://github.com/juantoledo/shortwave-atlas/commit/c26e1f3684fe145f7731f7d3191b493b5ef6fb33))
+* smoother globe animations, and stations keep their mode and frequency ([aa42b86](https://github.com/juantoledo/shortwave-atlas/commit/aa42b865b57a4ed560d118a4351ee2e86b769e45))
+
 ## [0.8.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.7.0...v0.8.0) (2026-10-11)
 
 
