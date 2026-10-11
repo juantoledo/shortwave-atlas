@@ -25,11 +25,16 @@ export function SourcesSection({ api, meta, mine, onError }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<{ name: string; json: string; n: number | null } | null>(null);
   const [report, setReport] = useState<ImportReport | null>(null);
+  // the desktop webview saves to Downloads without a word: say so
+  const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const exportFile = async () => {
     try {
-      downloadText(exportName(new Date()), await api.exportUserStations());
+      const name = exportName(new Date());
+      downloadText(name, await api.exportUserStations());
+      setSaved(name);
+      setReport(null);
     } catch (e) {
       onError(e);
     }
@@ -38,6 +43,7 @@ export function SourcesSection({ api, meta, mine, onError }: Props) {
     if (input.current) input.current.value = '';
     if (!f) return;
     setReport(null);
+    setSaved(null);
     const json = await readText(f, MAX_FILE);
     if (json === null) return onError(t.importTooBig);
     setFile({ name: f.name, json, n: stationsIn(json) });
@@ -78,6 +84,7 @@ export function SourcesSection({ api, meta, mine, onError }: Props) {
           <input ref={input} type="file" accept=".json,application/json" hidden onChange={(e) => void pick(e.currentTarget.files?.[0])} />
         </div>
         <small>{t.stationsFileHelp}</small>
+        {saved && <p className="note" role="status">{t.exportSaved(saved)}</p>}
       </div>
       {file && (
         <div className="import-ask" role="alertdialog" aria-label={t.importStations}>

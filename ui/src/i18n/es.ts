@@ -404,6 +404,7 @@ export const es: Messages = {
   stationsFile: 'Tus estaciones en un archivo',
   exportStations: 'Exportar',
   importStations: 'Importar',
+  exportSaved: (name) => `Se guardó en tu carpeta de Descargas como ${name}.`,
   stationsFileHelp: 'Un archivo JSON: guarda una copia o lleva tus estaciones a otro computador.',
   importAsk: (file, n) => `${file} tiene ${n} estaci${n === 1 ? 'ón' : 'ones'}. ¿Unirlas a las tuyas o reemplazar las tuyas por ellas?`,
   importMerge: 'Unir',

@@ -417,6 +417,7 @@ export const en = {
   stationsFile: 'Your stations in a file',
   exportStations: 'Export',
   importStations: 'Import',
+  exportSaved: (name: string) => `Saved to your Downloads folder as ${name}.`,
   stationsFileHelp: 'A JSON file: keep a copy, or take your stations to another computer.',
   importAsk: (file: string, n: number) => `${file} has ${n} station${n === 1 ? '' : 's'}. Merge them with yours, or replace yours with them?`,
   importMerge: 'Merge',
