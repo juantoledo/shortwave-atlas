@@ -146,12 +146,21 @@ impl RigState {
 #[serde(tag = "cmd", rename_all = "snake_case")]
 #[ts(export)]
 pub enum RigCommand {
-    SetFreq { hz: u32 },
+    SetFreq {
+        hz: u32,
+    },
     /// Tune to a station: its frequency, then its mode once the rig is there. A rig that
     /// changes band to get there may recall the mode it last used on that band (FTDX-10).
-    Tune { hz: u32, mode: Mode },
-    SetMode { mode: Mode },
-    SetPower { on: bool },
+    Tune {
+        hz: u32,
+        mode: Mode,
+    },
+    SetMode {
+        mode: Mode,
+    },
+    SetPower {
+        on: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
