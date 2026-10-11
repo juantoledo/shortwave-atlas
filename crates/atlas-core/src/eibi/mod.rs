@@ -1,4 +1,4 @@
-//! EiBi shortwave schedules (http://www.eibispace.de/dx/): `sked-<season>.csv` plus the
+//! EiBi shortwave schedules (http://www.eibispace.de/): `sked-<season>.csv` plus the
 //! lookup tables in README.TXT, turned into broadcast entries with resolved transmitter
 //! sites. Pure: the caller reads the files.
 //!
@@ -419,7 +419,7 @@ impl Parsed {
             name: "EiBi".into(),
             kind: SourceKind::Schedule,
             editable: false,
-            url: Some("http://www.eibispace.de/dx/".into()),
+            url: Some("http://www.eibispace.de/".into()),
             version: report.source_file.clone(),
             season,
             report: Some(report),
