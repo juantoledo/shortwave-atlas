@@ -1,8 +1,9 @@
 //! Band scans: the channel grid a band is swept on, what a scan stores, what it found (signals
 //! matched to the stations EiBi had on the air, and the stations it expected but did not hear),
-//! and the logbook: every station a scan has logged, joined to the running catalog.
+//! the logbook: every station a scan has logged, joined to the running catalog, and the signals
+//! no station explained, gathered across scans.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -163,7 +164,7 @@ pub struct StationRef {
 type Key<'a> = (u32, &'a str, &'a str, &'a str, &'a str);
 
 impl StationRef {
-    fn of(cat: &Catalog, st: &Station, unix: i64) -> Self {
+    pub(crate) fn of(cat: &Catalog, st: &Station, unix: i64) -> Self {
         let site = cat.site(st.site);
         let slot = st.slots.iter().find(|s| slot_on(s, unix));
         Self {
@@ -180,6 +181,20 @@ impl StationRef {
 
     fn key(&self) -> Key<'_> {
         (self.freq_hz, &self.name, &self.itu, &self.site_itu, &self.site_name)
+    }
+
+    /// The same station in `cat`, if this version of the schedule still has it.
+    pub(crate) fn find<'c>(&self, cat: &'c Catalog) -> Option<&'c Station> {
+        cat.between(self.freq_hz, self.freq_hz).find(|st| {
+            st.name == self.name
+                && st.itu == self.itu
+                && cat.site(st.site).is_some_and(|s| s.itu == self.site_itu && s.name == self.site_name)
+        })
+    }
+
+    /// The same station's key: frequency, name, country and site.
+    pub(crate) fn same(&self, other: &StationRef) -> bool {
+        self.key() == other.key()
     }
 }
 
@@ -495,6 +510,97 @@ pub fn logbook<'a>(scans: impl IntoIterator<Item = &'a ScanSummary>, cat: &Catal
     out.into_values().collect()
 }
 
+/// A signal no station on the air explained, on one frequency across the scans that heard it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Signal {
+    /// Where it was strongest.
+    pub freq_hz: u32,
+    /// Unix seconds of the first and the last time.
+    #[ts(type = "number")]
+    pub first: i64,
+    #[ts(type = "number")]
+    pub last: i64,
+    /// dB relative to S9.
+    pub best_db: i16,
+    /// Scans that heard it.
+    pub count: u32,
+    /// The newest of those scans.
+    pub last_scan: String,
+}
+
+/// The unidentified signals of `scans`, by frequency: peaks within `LOOKUP_TOLERANCE_HZ` of the
+/// lowest of a run count as one signal.
+pub fn unidentified<'a>(scans: impl IntoIterator<Item = &'a ScanSummary>) -> Vec<Signal> {
+    let mut hits: Vec<(&Peak, &str)> = scans
+        .into_iter()
+        .flat_map(|s| s.peaks.iter().filter(|p| p.verdict == Verdict::Unidentified).map(move |p| (p, s.id.as_str())))
+        .collect();
+    hits.sort_by_key(|(p, _)| p.freq_hz);
+    let mut out: Vec<Signal> = vec![];
+    let mut start = 0;
+    for (p, scan) in hits {
+        match out.last_mut() {
+            Some(s) if p.freq_hz - start <= LOOKUP_TOLERANCE_HZ => {
+                if p.db > s.best_db {
+                    s.best_db = p.db;
+                    s.freq_hz = p.freq_hz;
+                }
+                s.first = s.first.min(p.at);
+                if p.at >= s.last {
+                    s.last = p.at;
+                    s.last_scan = scan.to_string();
+                }
+                s.count += 1;
+            }
+            _ => {
+                start = p.freq_hz;
+                out.push(Signal {
+                    freq_hz: p.freq_hz,
+                    first: p.at,
+                    last: p.at,
+                    best_db: p.db,
+                    count: 1,
+                    last_scan: scan.to_string(),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// One scan's stations as rows of the running catalog: those it heard (with the reading) and
+/// those it missed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ScanMarks {
+    pub heard: HashMap<u32, i16>,
+    pub missed: HashSet<u32>,
+}
+
+impl ScanMarks {
+    /// Every station id the scan mentions.
+    pub fn ids(&self) -> HashSet<u32> {
+        self.heard.keys().chain(&self.missed).copied().collect()
+    }
+}
+
+/// What `scan` heard and missed, by station id in `cat` (stations it no longer has are left out).
+pub fn scan_marks(cat: &Catalog, scan: &ScanSummary) -> ScanMarks {
+    let mut m = ScanMarks::default();
+    for p in scan.peaks.iter().filter(|p| p.verdict != Verdict::Unidentified) {
+        for st in p.stations.iter().filter_map(|r| r.find(cat)) {
+            let db = m.heard.entry(st.id).or_insert(p.db);
+            *db = (*db).max(p.db);
+        }
+    }
+    for st in scan.missed.iter().filter_map(|r| r.find(cat)) {
+        if !m.heard.contains_key(&st.id) {
+            m.missed.insert(st.id);
+        }
+    }
+    m
+}
+
 /// A scan's id: when it started (UTC) and the band, `2026-10-10T143205Z-49m`.
 pub fn scan_id(started: i64, band_id: &str) -> String {
     let (y, m, d) = civil_from_days(started.div_euclid(SECS_PER_DAY) as i32);
@@ -517,7 +623,7 @@ mod tests {
     use crate::calendar::days_from_civil;
     use crate::eibi::{parse, tests::files};
     use crate::rig::default_coverage;
-    use crate::stations::StationQuery;
+    use crate::stations::{Lens, StationQuery};
 
     fn band(r: ItuRegion, id: &str) -> Band {
         dial_bands(r).into_iter().find(|b| b.id == id).unwrap()
@@ -725,12 +831,54 @@ mod tests {
         assert!(!logbook(&scans[2..], &c)[0].sure);
         // the logged set filters the station list
         let ids = log.iter().map(|l| l.station_id).collect();
-        let q = StationQuery { logged: true, facets: true, ..Default::default() };
+        let q = StationQuery { lens: Lens::Heard, facets: true, ..Default::default() };
         let page = c.search_in(&q, at(10, 0), Some(&ids));
         assert_eq!(page.total, 1);
         assert_eq!(page.items[0].id, st.id);
         assert_eq!(page.facets.unwrap().bands.values().sum::<u32>(), 1);
         assert_eq!(c.search_in(&q, at(10, 0), None).total, 0);
+    }
+
+    #[test]
+    fn unidentified_signals_gather_across_scans() {
+        let peak = |khz: u32, db: i16, at: i64| Peak {
+            freq_hz: khz * 1000,
+            db,
+            at,
+            verdict: Verdict::Unidentified,
+            stations: vec![],
+        };
+        let mut a = summary(vec![peak(5905, -20, 100), peak(6200, -12, 100)]);
+        a.id = "a".into();
+        let mut b = summary(vec![peak(5906, -10, 300), peak(5950, -30, 300)]);
+        b.id = "b".into();
+        // a sure peak is not a signal of unknown origin
+        b.peaks.push(Peak { verdict: Verdict::Sure, ..peak(6070, 0, 300) });
+        let got = unidentified([&a, &b]);
+        let brief: Vec<(u32, i16, u32, &str)> =
+            got.iter().map(|s| (s.freq_hz / 1000, s.best_db, s.count, s.last_scan.as_str())).collect();
+        assert_eq!(brief, [(5906, -10, 2, "b"), (5950, -30, 1, "b"), (6200, -12, 1, "a")]);
+        assert_eq!((got[0].first, got[0].last), (100, 300));
+        assert!(unidentified([]).is_empty());
+    }
+
+    #[test]
+    fn a_scan_marks_its_stations_in_the_catalog() {
+        let c = catalog();
+        let (a, b) = (c.station(0).unwrap(), c.station(3).unwrap());
+        let r = |st: &Station| StationRef::of(&c, st, at(10, 0));
+        let mut gone = r(b);
+        gone.site_name = "Nowhere".into();
+        let mut s = summary(vec![
+            Peak { freq_hz: a.freq_hz, db: -20, at: 0, verdict: Verdict::Sure, stations: vec![r(a)] },
+            Peak { freq_hz: a.freq_hz, db: -8, at: 0, verdict: Verdict::Ambiguous, stations: vec![r(a), gone.clone()] },
+        ]);
+        s.missed = vec![r(b), gone];
+        let m = scan_marks(&c, &s);
+        assert_eq!(m.heard, HashMap::from([(a.id, -8)]));
+        assert_eq!(m.missed, HashSet::from([b.id]));
+        assert_eq!(m.ids(), HashSet::from([a.id, b.id]));
+        assert_eq!(r(a).find(&c).map(|st| st.id), Some(a.id));
     }
 
     #[test]

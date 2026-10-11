@@ -16,7 +16,7 @@ tune into a place on the map. Spin the dial and the globe flies to the transmitt
 from your station across the live day/night line, and tells you who's on the air, how far away
 they are, which way to point your antenna and when they broadcast next.
 
-![Shortwave Atlas tuned to Radio France Int. on 11790 kHz: the station list filtered to French stations on the air, the globe with the route from Issoudun to the QTH, the station card, the 25 m band dial with a scan profile, and the audio waterfall](docs/images/screenshot.png)
+![Shortwave Atlas in Spanish, tuned to NHK Radio Japan on 11860 kHz: the station list searched for "nh" with the All, Heard and Favorites lenses, the globe over East Asia with the Yamata transmitter marked, the station card showing it logged by three scans, the 25 m band dial with a scan profile, and the audio waterfall](docs/images/screenshot.png)
 
 <table>
 <tr>
@@ -222,8 +222,9 @@ conventional commit messages. Every release ships with checksums, SBOMs and buil
 The globe rasters in `ui/src/assets/globe/` are built by `assets/make_globe_rasters.py`.
 
 ## Status
-Early, and in active use. As of 0.5: the EiBi catalog with search and filters, remote access from a
-browser, the rig's audio with a waterfall, the band scan with a logbook, installers for Linux,
+Early, and in active use. As of 0.6: the EiBi catalog with search and filters, remote access from a
+browser, the rig's audio with a waterfall, the band scan with a logbook, favorites, a station list with
+three views (the whole schedule, what your scans heard, your favorites), installers for Linux,
 Windows and macOS (with signed in-app updates on Windows, macOS and the AppImage), and English and
 Spanish.
 

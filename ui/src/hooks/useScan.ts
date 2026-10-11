@@ -73,6 +73,16 @@ export function useScan(api: Api | null, onError: (e: unknown) => void) {
       onError(e);
     }
   }, [api, onError, reload]);
+  const removeAll = useCallback(async () => {
+    if (!api) return;
+    try {
+      await api.deleteScans();
+      cache.current.clear();
+      reload();
+    } catch (e) {
+      onError(e);
+    }
+  }, [api, onError, reload]);
   /** A saved scan with its samples (asked once). */
   const load = useCallback((id: string): Promise<Scan> => {
     if (!api) return Promise.reject(new Error('not connected'));
@@ -87,7 +97,7 @@ export function useScan(api: Api | null, onError: (e: unknown) => void) {
 
   const logged = useMemo(() => new Map(logbook.map((l) => [l.station_id, l])), [logbook]);
   const loggedSites = useMemo(() => new Set(logbook.map((l) => l.site_id)), [logbook]);
-  return { status, finished, scans, logged, loggedSites, start, stop, remove, load };
+  return { status, finished, scans, logged, loggedSites, start, stop, remove, removeAll, load };
 }
 
 export type ScanApi = ReturnType<typeof useScan>;

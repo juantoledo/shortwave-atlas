@@ -5,6 +5,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AudioOff, AudioPanel, type AudioKeys } from './components/AudioPanel';
 import { Dossier } from './components/Dossier';
+import { FavStar } from './components/FavStar';
+import { asMode, favAt } from './components/favorites';
 import { Globe } from './components/Globe';
 import { Help } from './components/Help';
 import { Hud } from './components/Hud';
@@ -16,20 +18,22 @@ import { StationList } from './components/StationList';
 import { TopBar } from './components/TopBar';
 import { Tuner, useBandWindow } from './components/Tuner';
 import { DEFAULT_COVERAGE, HF_SPAN } from './components/dial';
-import { noiseFloor } from './components/scan';
+import { bandOf, noiseFloor } from './components/scan';
 import { UpdateBanner } from './components/UpdateBanner';
 import { makeNames, NamesProvider } from './catalog/names';
 import { NO_FILTERS, useCandidates, useCore, useDial, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
 import { PHONE, useMedia } from './hooks/useMedia';
+import { useFavorites } from './hooks/useFavorites';
 import { useBandScans, useScan } from './hooks/useScan';
 import { useUpdate } from './hooks/useUpdate';
-import { I18nProvider, pickMessages } from './i18n';
+import { fmtStamp, I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
 import { stepIndex, type Action } from './keys/keymap';
 import { useKeys } from './keys/useKeys';
 import type { Band } from './types/generated/Band';
 import type { Candidate } from './types/generated/Candidate';
 import type { Mode } from './types/generated/Mode';
+import type { OffSchedule } from './types/generated/OffSchedule';
 import type { Qth } from './types/generated/Qth';
 import type { SiteDot } from './types/generated/SiteDot';
 import type { StationRow } from './types/generated/StationRow';
@@ -85,9 +89,12 @@ export function App() {
   const win = useBandWindow(freqHz, dialBands, overview?.on_hz ?? NO_HZ);
   const names = useMemo(() => makeNames(meta, t), [meta, t]);
   const scan = useScan(api, onError);
+  const favs = useFavorites(api, onError);
   const bandScans = useBandScans(scan, win.w.band?.id ?? null);
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
-  const search = useStationSearch(api, filters, filters.logged ? scan.logged : null);
+  // the lenses change with the logbook and the favorites
+  const lensKey = useMemo(() => ({}), [scan.logged, favs.views]);
+  const search = useStationSearch(api, filters, lensKey);
   const cands = useCandidates(api, on ? freqHz : null, `${qth?.lat},${qth?.lon},${now.getTime()}`);
 
   // Keep the chosen station while it is still a candidate; otherwise take the best one.
@@ -100,6 +107,12 @@ export function App() {
 
   const sites = overview?.sites ?? [];
   const siteName = filters.site === null ? null : sites.find((s) => s.id === filters.site)?.name ?? null;
+  const scanSel = filters.scan === null ? null : scan.scans.find((s) => s.id === filters.scan) ?? null;
+  const scanName = scanSel && `${names.dialBand(bandOf(scanSel))} · ${fmtStamp(t, scanSel.started)}`;
+  // the scan the list was narrowed to was deleted
+  useEffect(() => {
+    if (filters.scan !== null && !scan.scans.some((s) => s.id === filters.scan)) setFilters((f) => ({ ...f, scan: null }));
+  }, [filters.scan, scan.scans]);
   const siteLabel = useCallback((s: SiteDot) => ({ country: names.country(s.itu), onAir: t.siteOnAir(s.on, s.total) }), [names, t]);
   const pickSite = (id: number) => {
     setFilters((f) => ({ ...f, site: f.site === id ? null : id }));
@@ -110,11 +123,18 @@ export function App() {
   const [powerBusy, setPowerBusy] = useState(false);
 
   const setMode = (mode: Mode) => api?.rig({ cmd: 'set_mode', mode }).catch(onError);
-  const pick = (r: StationRow) => {
+  const tuneAs = (hz: number, mode: Mode | null) => {
     // AM-N is still AM: a broadcast keeps the narrow filter the listener chose
-    if (rig.mode !== r.mode && !(r.mode === 'AM' && rig.mode === 'AMN')) setMode(r.mode);
-    tune(r.freq_hz);
+    if (mode && rig.mode !== mode && !(mode === 'AM' && rig.mode === 'AMN')) setMode(mode);
+    tune(hz);
+  };
+  const pick = (r: StationRow) => {
+    tuneAs(r.freq_hz, r.mode);
     setWanted(r.id);
+  };
+  const pickOff = (o: OffSchedule) => {
+    tuneAs(o.freq_hz, o.mode);
+    setWanted(null);
   };
   const choose = (c: Candidate) => {
     setWanted(c.station.id);
@@ -154,6 +174,29 @@ export function App() {
     [st],
   );
   const finale = useMemo(() => scan.finished && { key: scan.finished.id, sites: scan.finished.sites }, [scan.finished]);
+  // a scan finished: the top bar's Scans button says so until they are opened
+  const [scansNew, setScansNew] = useState(false);
+  useEffect(() => { if (scan.finished) setScansNew(true); }, [scan.finished]);
+  const openScans = (id: string | null = null) => {
+    setScansNew(false);
+    setSheet({ kind: 'scans', id });
+  };
+  // the station list narrowed to a scan, or showing the favorites
+  const showScan = (id: string) => {
+    setSheet(null);
+    setFilters((f) => ({ ...f, scan: id, lens: 'all' }));
+    if (phone) setView('browse');
+  };
+  const toggleFavorites = () => {
+    const to = filters.lens === 'favorites' ? 'all' : 'favorites';
+    setFilters((f) => ({ ...f, lens: to }));
+    if (phone && to === 'favorites') setView('browse');
+  };
+
+  // the stars: the station shown, and the tuned frequency (with the station if it is on it)
+  const selFav = sel ? favs.byStation.get(sel.station.id) ?? null : null;
+  const tunedStation = sel && sel.station.freq_hz === freqHz ? sel.station.id : null;
+  const tunedFav = on ? favAt(favs.views, freqHz, tunedStation)?.favorite ?? null : null;
 
   // the keyboard (keys/keymap.ts): typing anywhere starts a new search
   const searchRef = useRef<HTMLInputElement>(null);
@@ -209,8 +252,11 @@ export function App() {
     : rig.link === 'down' ? t.linkDown
     : rig.power === 'unknown' ? t.noAnswer
     : '';
-  const count = search.loading && !search.rows.length ? '…' : t.resultCount(search.total, search.onAir);
-  const shortCount = search.loading && !search.rows.length ? '' : search.total.toLocaleString(t.locale);
+  // Heard is what the scans heard: no schedule count there
+  const heardList = filters.lens === 'heard' && filters.scan === null;
+  const counting = search.loading && !search.rows.length && !search.heard.length;
+  const count = counting ? '…' : heardList ? t.heardCount(search.total) : t.resultCount(search.total, search.onAir);
+  const shortCount = counting ? '' : search.total.toLocaleString(t.locale);
 
   return (
     <I18nProvider value={t}>
@@ -227,6 +273,10 @@ export function App() {
           onConfirmOff={() => { setAskOff(false); setPower(false); }}
           onCancelOff={() => setAskOff(false)}
           onSetup={() => openSettings('rig')}
+          onScans={() => openScans()}
+          scansNew={scansNew}
+          onFavorites={toggleFavorites}
+          favOn={filters.lens === 'favorites'}
           onHelp={() => openHelp()}
           onSettings={() => openSettings()}
           update={api && <UpdateBanner update={update} transport={api.transport.kind} onError={onError} />}
@@ -267,9 +317,15 @@ export function App() {
             facets={search.facets}
             loading={search.loading}
             siteName={siteName}
+            scanName={scanName}
             selId={sel?.station.id ?? null}
             logged={scan.logged}
+            favs={favs.byStation}
+            off={search.off}
+            heard={search.heard}
+            scanDb={search.scanDb}
             onPick={pick}
+            onPickOff={pickOff}
             onTuneHz={tune}
             onMore={search.more}
             searchRef={searchRef}
@@ -286,6 +342,14 @@ export function App() {
             meta={meta}
             now={now}
             logged={scan.logged}
+            star={sel && (
+              <FavStar
+                fav={selFav}
+                onAdd={() => favs.add({ freq_hz: sel.station.freq_hz, mode: sel.station.mode, label: null, station_id: sel.station.id })}
+                onRename={(label) => selFav && favs.rename(selFav.id, label)}
+                onRemove={() => selFav && favs.remove(selFav.id)}
+              />
+            )}
             onChoose={choose}
           />
         </section>
@@ -308,10 +372,17 @@ export function App() {
                 on={on}
                 band={win.w.band}
                 status={scan.status}
-                last={bandScans.summary}
                 onStart={scan.start}
                 onStop={scan.stop}
-                onOpen={(id) => setSheet({ kind: 'scans', id })}
+              />
+            }
+            star={
+              <FavStar
+                fav={tunedFav}
+                disabled={!on || freqHz === null}
+                onAdd={() => freqHz !== null && favs.add({ freq_hz: freqHz, mode: asMode(rig.mode), label: null, station_id: tunedStation })}
+                onRename={(label) => tunedFav && favs.rename(tunedFav.id, label)}
+                onRemove={() => tunedFav && favs.remove(tunedFav.id)}
               />
             }
             expanded={dockOpen}
@@ -348,8 +419,9 @@ export function App() {
           <Scans
             scan={scan}
             openId={sheet.id}
-            onOpen={(id) => setSheet({ kind: 'scans', id })}
+            onOpen={(id) => openScans(id)}
             onTune={tune}
+            onShow={showScan}
             onClose={() => setSheet(null)}
           />
         )}

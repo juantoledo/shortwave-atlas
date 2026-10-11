@@ -7,7 +7,9 @@ import { clampToCoverage } from '../components/dial';
 import type { Candidate } from '../types/generated/Candidate';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
 import type { Dial } from '../types/generated/Dial';
+import type { HeardRow } from '../types/generated/HeardRow';
 import type { Info } from '../types/generated/Info';
+import type { OffSchedule } from '../types/generated/OffSchedule';
 import type { Overview } from '../types/generated/Overview';
 import type { RigState } from '../types/generated/RigState';
 import type { RxRange } from '../types/generated/RxRange';
@@ -129,23 +131,29 @@ export function useOverview(api: Api | null) {
 }
 
 export type Filters = Omit<StationQuery, 'offset' | 'limit' | 'facets'>;
-export const NO_FILTERS: Filters = { q: '', on_air: false, logged: false, bands: [], langs: [], countries: [], regions: [], site: null };
+export const NO_FILTERS: Filters = { q: '', bands: [], langs: [], countries: [], regions: [], site: null, lens: 'all', scan: null, sort: 'freq' };
 
 interface SearchState {
   rows: StationRow[];
   total: number;
   onAir: number;
   facets: StationPage['facets'];
+  /** Rows the schedule has none for (signals, favorites), all of them. */
+  off: OffSchedule[];
+  /** The Heard lens: stations and signals in one list, paged like `rows`. */
+  heard: HeardRow[];
+  /** Under a scan filter: what it read on each loaded row it heard. */
+  scanDb: Record<number, number>;
   loading: boolean;
 }
 
 /** The station list for `filters`: first page on change (debounced), more on demand, and
  *  the loaded rows refreshed each minute (on-air dots) and when `refresh` changes. */
 export function useStationSearch(api: Api | null, filters: Filters, refresh: unknown = null) {
-  const [st, setSt] = useState<SearchState>({ rows: [], total: 0, onAir: 0, facets: null, loading: true });
+  const [st, setSt] = useState<SearchState>({ rows: [], total: 0, onAir: 0, facets: null, off: [], heard: [], scanDb: {}, loading: true });
   const seq = useRef(0);
   const shown = useRef(0);
-  shown.current = st.rows.length;
+  shown.current = st.rows.length + st.heard.length;
   const key = JSON.stringify(filters);
 
   /** Load rows [0, n) in pages, replacing what is shown. */
@@ -154,12 +162,19 @@ export function useStationSearch(api: Api | null, filters: Filters, refresh: unk
     const my = ++seq.current;
     const first = await api.search({ ...filters, offset: 0, limit: PAGE_ROWS, facets: true });
     const rows = [...first.items];
-    while (rows.length < Math.min(n, first.total)) {
-      const p = await api.search({ ...filters, offset: rows.length, limit: 200, facets: false });
-      if (!p.items.length) break;
+    const heard = [...first.heard];
+    const scanDb = { ...first.scan_db };
+    // a page holds either rows or Heard entries
+    while (rows.length + heard.length < Math.min(n, first.total)) {
+      const p = await api.search({ ...filters, offset: rows.length + heard.length, limit: 200, facets: false });
+      if (!p.items.length && !p.heard.length) break;
       rows.push(...p.items);
+      heard.push(...p.heard);
+      Object.assign(scanDb, p.scan_db);
     }
-    if (my === seq.current) setSt({ rows, total: first.total, onAir: first.on_air, facets: first.facets, loading: false });
+    if (my === seq.current) {
+      setSt({ rows, total: first.total, onAir: first.on_air, facets: first.facets, off: first.off_schedule, heard, scanDb, loading: false });
+    }
   }, [api, key, refresh]); // `key` stands for `filters`
 
   useEffect(() => {

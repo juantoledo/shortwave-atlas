@@ -68,6 +68,9 @@ export function noiseFloor(samples: readonly (number | null)[]): number | null {
 /** dB over the noise floor that make a signal (the core's `SIGNAL_DB`). */
 export const SIGNAL_DB = 6;
 
+/** A scan's band, for `Names.dialBand`. */
+export const bandOf = (s: ScanSummary) => ({ id: s.band_id, label: s.band_label, kind: s.band_kind });
+
 /** Stations a scan logged (signals with a match), and those it expected (logged + missed). */
 export function tally(s: ScanSummary): { logged: number; expected: number; signals: number } {
   const logged = s.peaks.reduce((n, p) => n + (p.verdict === 'unidentified' ? 0 : p.stations.length), 0);

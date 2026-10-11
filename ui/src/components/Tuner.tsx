@@ -122,6 +122,8 @@ interface Props {
   profiles: { now: Profile | null; ghost: Profile | null };
   /** The scan controls (`ScanBar`). */
   scanBar: ReactNode;
+  /** The favorite star for the tuned frequency. */
+  star: ReactNode;
   /** Phones: the folded controls are showing. */
   expanded: boolean;
   onExpand: () => void;
@@ -129,7 +131,7 @@ interface Props {
   onMode: (m: Mode) => void;
 }
 
-export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, spans, coverage, win, profiles, scanBar, expanded, onExpand, onTune, onMode }: Props) {
+export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, spans, coverage, win, profiles, scanBar, star, expanded, onExpand, onTune, onMode }: Props) {
   const t = useT();
   const names = useNames();
   const shown = freqHz === null ? '' : fmtReadout(freqHz);
@@ -202,6 +204,7 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
               onWheel={(e) => nudge(e.deltaY < 0 ? 1 : -1)}
             />
             <span className="unit">Hz</span>
+            {star}
           </div>
           <div className="seg" role="radiogroup" aria-label={t.mode}>
             {MODES.map((m, i) => (

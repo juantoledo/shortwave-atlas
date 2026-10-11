@@ -1,6 +1,8 @@
-// The scans: every saved band scan, newest first, and one scan opened: its strength profile with
-// the signals marked, the signals strongest first with who they are, and the stations that were
-// on the air but not heard. A row tunes there; the sheet stays open to go through them.
+// The scans: every saved band scan, newest first, each deletable (or all at once, after
+// asking), and one scan opened: its strength profile with the signals marked, the signals
+// strongest first with who they are, and the stations that were on the air but not heard. A row
+// tunes there and the sheet stays open; "Show in the station list" closes it and narrows the
+// list to the scan, to go through it with the globe in view.
 
 import { useEffect, useRef, useState } from 'react';
 import { useNames } from '../catalog/names';
@@ -12,7 +14,7 @@ import type { StationRef } from '../types/generated/StationRef';
 import { Confirm } from './Confirm';
 import { MARKS_W } from './dial';
 import { Flag } from './Flag';
-import { profilePath, stepKhz, tally } from './scan';
+import { bandOf, profilePath, stepKhz, tally } from './scan';
 import { Sheet } from './Sheet';
 
 interface Props {
@@ -21,18 +23,27 @@ interface Props {
   openId: string | null;
   onOpen: (id: string | null) => void;
   onTune: (hz: number) => void;
+  /** Narrow the station list to this scan. */
+  onShow: (id: string) => void;
   onClose: () => void;
 }
 
 const khz = (hz: number) => String(hz / 1000);
-const bandOf = (s: ScanSummary) => ({ id: s.band_id, label: s.band_label, kind: s.band_kind });
 
 function Station({ r }: { r: StationRef }) {
   const names = useNames();
   return <><Flag flag={r.flag} title={names.country(r.itu)} />{r.name}</>;
 }
 
-function Detail({ s, full, onTune, onDelete }: { s: ScanSummary; full: Scan | null; onTune: (hz: number) => void; onDelete: () => void }) {
+interface DetailProps {
+  s: ScanSummary;
+  full: Scan | null;
+  onTune: (hz: number) => void;
+  onShow: () => void;
+  onDelete: () => void;
+}
+
+function Detail({ s, full, onTune, onShow, onDelete }: DetailProps) {
   const t = useT();
   const names = useNames();
   const [asking, setAsking] = useState(false);
@@ -57,6 +68,7 @@ function Detail({ s, full, onTune, onDelete }: { s: ScanSummary; full: Scan | nu
         <div className="axis"><span>{khz(s.first_hz)}</span><span>kHz</span><span>{String(hi)}</span></div>
       </div>
       <p className="scan-count">{t.scanCount(tl.signals, tl.logged, tl.expected)}</p>
+      <button className="btn primary scan-show" type="button" title={t.scanShowTitle} onClick={onShow}>{t.scanShowInList}</button>
 
       <h4 className="h"><span>{t.scanSignals}</span><span>{peaks.length}</span></h4>
       {peaks.length === 0 && <p className="empty-d">{t.scanNoSignals}</p>}
@@ -106,10 +118,42 @@ function Detail({ s, full, onTune, onDelete }: { s: ScanSummary; full: Scan | nu
   );
 }
 
-export function Scans({ scan, openId, onOpen, onTune, onClose }: Props) {
+interface ItemProps {
+  s: ScanSummary;
+  /** Its delete question is open. */
+  asking: boolean;
+  onOpen: () => void;
+  onAsk: (on: boolean) => void;
+  onDelete: () => void;
+}
+
+/** A saved scan in the list: opens it, or deletes it after asking. */
+function ScanItem({ s, asking, onOpen, onAsk, onDelete }: ItemProps) {
   const t = useT();
   const names = useNames();
+  const row = useRef<HTMLLIElement>(null);
+  const tl = tally(s);
+  return (
+    <li ref={row}>
+      <button type="button" onClick={onOpen}>
+        <b>{names.dialBand(bandOf(s))} <small>{fmtStamp(t, s.started)}</small></b>
+        <span>
+          {t.scanCount(tl.signals, tl.logged, tl.expected)}
+          {s.outcome.kind !== 'complete' && ` · ${t.scanOutcome[s.outcome.kind]}`}
+        </span>
+      </button>
+      <button className="icon-btn scan-del-one" type="button" aria-label={t.scanDeleteOne} title={t.scanDeleteOne} onClick={() => onAsk(!asking)}>✕</button>
+      {asking && <Confirm message={t.scanDeleteAsk} confirmLabel={t.scanDelete} onConfirm={() => { onAsk(false); onDelete(); }} onCancel={() => onAsk(false)} anchor={row} />}
+    </li>
+  );
+}
+
+export function Scans({ scan, openId, onOpen, onTune, onShow, onClose }: Props) {
+  const t = useT();
   const open = openId === null ? null : scan.scans.find((s) => s.id === openId) ?? null;
+  const [asking, setAsking] = useState<string | null>(null);
+  const [askAll, setAskAll] = useState(false);
+  const delAll = useRef<HTMLDivElement>(null);
   const [full, setFull] = useState<Scan | null>(null);
   const { load } = scan;
   useEffect(() => {
@@ -125,27 +169,29 @@ export function Scans({ scan, openId, onOpen, onTune, onClose }: Props) {
       {open ? (
         <div className="help-page">
           <button className="link" type="button" onClick={() => onOpen(null)}>‹ {t.scanAll}</button>
-          <Detail s={open} full={full} onTune={onTune} onDelete={() => { onOpen(null); void scan.remove(open.id); }} />
+          <Detail s={open} full={full} onTune={onTune} onShow={() => onShow(open.id)} onDelete={() => { onOpen(null); void scan.remove(open.id); }} />
         </div>
       ) : scan.scans.length === 0 ? (
         <p className="empty-d">{t.scansEmpty}</p>
       ) : (
-        <ul className="help-index scan-index">
-          {scan.scans.map((s) => {
-            const tl = tally(s);
-            return (
-              <li key={s.id}>
-                <button type="button" onClick={() => onOpen(s.id)}>
-                  <b>{names.dialBand(bandOf(s))} <small>{fmtStamp(t, s.started)}</small></b>
-                  <span>
-                    {t.scanCount(tl.signals, tl.logged, tl.expected)}
-                    {s.outcome.kind !== 'complete' && ` · ${t.scanOutcome[s.outcome.kind]}`}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          <ul className="help-index scan-index">
+            {scan.scans.map((s) => (
+              <ScanItem
+                key={s.id}
+                s={s}
+                asking={asking === s.id}
+                onOpen={() => onOpen(s.id)}
+                onAsk={(on) => setAsking(on ? s.id : null)}
+                onDelete={() => void scan.remove(s.id)}
+              />
+            ))}
+          </ul>
+          <div className="actions scan-del" ref={delAll}>
+            <button className="btn" type="button" onClick={() => setAskAll(true)}>{t.scanDeleteAll}</button>
+            {askAll && <Confirm message={t.scanDeleteAllAsk(scan.scans.length)} confirmLabel={t.scanDeleteAll} onConfirm={() => { setAskAll(false); void scan.removeAll(); }} onCancel={() => setAskAll(false)} anchor={delAll} />}
+          </div>
+        </>
       )}
     </Sheet>
   );

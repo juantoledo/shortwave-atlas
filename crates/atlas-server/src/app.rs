@@ -10,6 +10,7 @@ use atlas_core::api::{
 };
 use atlas_core::audio::{default_tuning, diagnose_audio, validate_audio, AudioChoice};
 use atlas_core::bands::{Dial, ItuRegion};
+use atlas_core::lens::{self, Known};
 use atlas_core::platform::Os;
 use atlas_core::scan::{plan, ScanRequest, ScanStatus};
 use atlas_core::setup::{validate_choice, BackendKind, RigChoice, RigModel};
@@ -20,6 +21,7 @@ use tokio::sync::OnceCell;
 
 use crate::audio::{backend, sound_cards, AudioHub};
 use crate::config::{save_audio, save_rig, save_update, AppConfig};
+use crate::favorites::FavoriteService;
 use crate::scan::{Context, ScanService};
 use crate::update::{InstallRefused, UpdateService, Updater};
 
@@ -42,6 +44,7 @@ pub struct Atlas {
     pub update: Arc<UpdateService>,
     /// Band scans and the logbook.
     pub scan: Arc<ScanService>,
+    pub favorites: Arc<FavoriteService>,
     /// Ourselves, for the background install task.
     me: Weak<Atlas>,
 }
@@ -51,15 +54,17 @@ fn invalid(message: impl Into<String>) -> ApiError {
 }
 
 impl Atlas {
-    /// Load stations, the saved QTH and scans (`scans_dir`), and start the rig and the update
-    /// checks. Needs a tokio runtime. `updater` is the desktop shell's, or a `ManifestUpdater`.
+    /// Load stations and, from `data_dir`, the saved QTH (`qth.json`), scans (`scans/`) and
+    /// favorites (`favorites.json`); then start the rig and the update checks. `None` keeps all of
+    /// them in memory (tests). Needs a tokio runtime. `updater` is the desktop shell's, or a
+    /// `ManifestUpdater`.
     pub fn start(
         config: AppConfig,
         config_path: Option<PathBuf>,
-        qth_file: Option<PathBuf>,
-        scans_dir: Option<PathBuf>,
+        data_dir: Option<PathBuf>,
         updater: Arc<dyn Updater>,
     ) -> Result<Arc<Self>, String> {
+        let qth_file = data_dir.as_ref().map(|d| d.join("qth.json"));
         if let Some(p) = &config.stations {
             tracing::warn!("`stations = {}` is no longer used; see `eibi_dir`", p.display());
         }
@@ -77,7 +82,8 @@ impl Atlas {
         let audio = AudioHub::new(config.audio.choice());
         let update = UpdateService::new(updater, &config.update, config.update_locked.clone());
         update.spawn_checks();
-        let scan = ScanService::new(scans_dir, stations.clone());
+        let scan = ScanService::new(data_dir.as_ref().map(|d| d.join("scans")), stations.clone());
+        let favorites = FavoriteService::new(data_dir.as_ref().map(|d| d.join("favorites.json")), stations.clone());
         Ok(Arc::new_cyclic(|me| Self {
             rig,
             audio,
@@ -90,6 +96,7 @@ impl Atlas {
             models: OnceCell::new(),
             update,
             scan,
+            favorites,
             me: me.clone(),
         }))
     }
@@ -270,8 +277,10 @@ impl Atlas {
                 json(serde_json::to_value(c))
             }
             Call::Search(q) => {
-                let logged = q.logged.then(|| self.scan.logged());
-                json(serde_json::to_value(self.stations.search_in(&q, now, logged.as_deref())))
+                let (logbook, signals, favorites) = (self.scan.logbook(), self.scan.signals(), self.favorites.list());
+                let scan = q.scan.as_deref().and_then(|id| self.scan.summary(id));
+                let known = Known { logbook: &logbook, signals: &signals, favorites: &favorites, scan: scan.as_ref() };
+                json(serde_json::to_value(lens::search(&self.stations, &q, now, &known)))
             }
             Call::Overview => json(serde_json::to_value(self.stations.overview(now))),
             Call::StationsMeta => json(serde_json::to_value(self.stations.meta(now))),
@@ -328,7 +337,21 @@ impl Atlas {
                 Ok(false) => Err(invalid("No such scan")),
                 Err(e) => Err(ApiError::internal(format!("Could not delete the scan: {e}"))),
             },
-            Call::Logbook => json(serde_json::to_value(self.scan.logbook())),
+            Call::DeleteScans => match self.scan.delete_all() {
+                Ok(n) => json(serde_json::to_value(n)),
+                Err(e) => Err(ApiError::internal(format!("Could not delete the scans: {e}"))),
+            },
+            Call::Logbook => json(serde_json::to_value(self.scan.logbook().as_slice())),
+            Call::Favorites => json(serde_json::to_value(self.favorites.views())),
+            Call::AddFavorite(req) => json(serde_json::to_value(self.favorites.add(&req, now)?)),
+            Call::RenameFavorite { id, label } => {
+                self.favorites.rename(&id, &label)?;
+                Ok(Value::Null)
+            }
+            Call::DeleteFavorite { id } => {
+                self.favorites.delete(&id)?;
+                Ok(Value::Null)
+            }
         }
     }
 }
@@ -351,8 +374,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn lookup_and_qth_round_trip() {
         let dir = std::env::temp_dir().join(format!("swatlas-test-{}", std::process::id()));
-        let qth_file = dir.join("qth.json");
-        let atlas = Atlas::start(AppConfig::default(), None, Some(qth_file.clone()), None, no_updates()).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
 
         // the first station in the list is found again by its frequency
         let page = atlas.call(Call::Search(StationQuery { limit: 1, ..Default::default() })).await.unwrap();
@@ -364,7 +386,8 @@ pub(crate) mod tests {
         atlas.call(Call::SetQth(madrid.clone())).await.unwrap();
         assert_eq!(atlas.qth(), madrid);
         // a new instance picks the saved QTH up
-        let again = Atlas::start(AppConfig::default(), None, Some(qth_file), None, no_updates()).unwrap();
+        assert!(dir.join("qth.json").is_file());
+        let again = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
         assert_eq!(again.qth(), madrid);
         let _ = std::fs::remove_dir_all(dir);
 
@@ -381,7 +404,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn sim_rig_is_driven_through_calls() {
-        let atlas = Atlas::start(AppConfig::default(), None, None, None, no_updates()).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), None, None, no_updates()).unwrap();
         let mut rx = atlas.rig.subscribe();
         while atlas.rig.state().power != Power::On {
             rx.changed().await.unwrap();
@@ -418,7 +441,8 @@ pub(crate) mod tests {
     async fn scans_run_save_stop_and_delete() {
         let dir = std::env::temp_dir().join(format!("swatlas-scan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let atlas = Atlas::start(AppConfig::default(), None, None, Some(dir.clone()), no_updates()).unwrap();
+        let scans = dir.join("scans");
+        let atlas = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
         let mut rx = atlas.rig.subscribe();
         while atlas.rig.state().power != Power::On {
             rx.changed().await.unwrap();
@@ -460,7 +484,7 @@ pub(crate) mod tests {
         assert_eq!((first["outcome"]["kind"].as_str(), first["rig"].as_str()), (Some("complete"), Some("sim")));
         let scan = atlas.call(Call::Scan { id: id.clone() }).await.unwrap();
         assert!(scan["samples"].as_array().unwrap().iter().all(|v| v.is_i64()), "{scan}");
-        assert!(dir.join(format!("{id}.json")).is_file());
+        assert!(scans.join(format!("{id}.json")).is_file());
         assert!(atlas.call(Call::Logbook).await.unwrap().is_array());
 
         // stopped by hand after a step: kept, and back where it was
@@ -485,12 +509,62 @@ pub(crate) mod tests {
         assert_eq!(atlas.rig.state().freq_hz, Some(9_500_000));
 
         // a new instance reads them back; deleting removes the file
-        let again = Atlas::start(AppConfig::default(), None, None, Some(dir.clone()), no_updates()).unwrap();
+        let again = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
         assert_eq!(again.call(Call::Scans).await.unwrap().as_array().unwrap().len(), 3);
         again.call(Call::DeleteScan { id: id.clone() }).await.unwrap();
-        assert!(!dir.join(format!("{id}.json")).exists());
+        assert!(!scans.join(format!("{id}.json")).exists());
         assert_eq!(again.call(Call::DeleteScan { id }).await.unwrap_err().kind, ErrorKind::Invalid);
         assert_eq!(again.call(Call::Scans).await.unwrap().as_array().unwrap().len(), 2);
+        assert_eq!(again.call(Call::DeleteScans).await.unwrap(), 2);
+        assert!(again.call(Call::Scans).await.unwrap().as_array().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn favorites_and_lenses_through_calls() {
+        use atlas_core::favorites::FavoriteRequest;
+        use atlas_core::rig::Mode;
+        use atlas_core::stations::{Lens, Sort};
+
+        let dir = std::env::temp_dir().join(format!("swatlas-favs-app-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let atlas = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
+        let page = atlas.call(Call::Search(StationQuery { limit: 1, ..Default::default() })).await.unwrap();
+        let st = &page["items"][0];
+        let (id, freq_hz) = (st["id"].as_u64().unwrap() as u32, st["freq_hz"].as_u64().unwrap() as u32);
+        let req = FavoriteRequest { freq_hz, mode: Mode::AM, label: None, station_id: Some(id) };
+        let fav = atlas.call(Call::AddFavorite(req)).await.unwrap();
+        assert_eq!(fav["label"], st["name"]);
+        let free =
+            FavoriteRequest { freq_hz: 14_230_000, mode: Mode::USB, label: Some("SSTV".into()), station_id: None };
+        let free = atlas.call(Call::AddFavorite(free)).await.unwrap();
+        let fav_id = fav["id"].as_str().unwrap().to_string();
+        atlas.call(Call::RenameFavorite { id: fav_id.clone(), label: "Mine".into() }).await.unwrap();
+
+        // the favorites lens: the station's row, and the free frequency off the schedule
+        let favs = StationQuery { lens: Lens::Favorites, ..Default::default() };
+        let page = atlas.call(Call::Search(favs.clone())).await.unwrap();
+        assert_eq!((page["total"].as_u64(), page["items"][0]["id"].as_u64()), (Some(1), Some(u64::from(id))));
+        assert_eq!(page["off_schedule"][0]["label"], "SSTV");
+        // nothing heard yet: the Heard list is empty, in any order
+        let q = StationQuery { lens: Lens::Heard, sort: Sort::Strongest, ..Default::default() };
+        let heard = atlas.call(Call::Search(q)).await.unwrap();
+        assert_eq!((heard["total"].as_u64(), heard["heard"].as_array().map(Vec::len)), (Some(0), Some(0)));
+
+        // kept across a restart
+        let again = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
+        let list = again.call(Call::Favorites).await.unwrap();
+        let labels: Vec<&str> =
+            list.as_array().unwrap().iter().map(|v| v["favorite"]["label"].as_str().unwrap()).collect();
+        assert_eq!(labels.len(), 2);
+        assert!(labels.contains(&"Mine") && labels.contains(&"SSTV"));
+        let mine = list.as_array().unwrap().iter().find(|v| v["favorite"]["label"] == "Mine").unwrap();
+        assert_eq!(mine["station_id"].as_u64(), Some(u64::from(id)));
+        again.call(Call::DeleteFavorite { id: free["id"].as_str().unwrap().into() }).await.unwrap();
+        let e = again.call(Call::DeleteFavorite { id: "nope".into() }).await.unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Invalid);
+        let page = again.call(Call::Search(favs)).await.unwrap();
+        assert!(page["off_schedule"].as_array().unwrap().is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -499,7 +573,7 @@ pub(crate) mod tests {
         let dir = std::env::temp_dir().join(format!("swatlas-audio-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("swatlas.toml");
-        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, None, no_updates()).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, no_updates()).unwrap();
 
         let tuning = default_tuning(Os::CURRENT);
         let bad = AudioChoice { enabled: true, device: "-f lavfi".into(), rate: 16_000, tuning };
@@ -531,7 +605,7 @@ pub(crate) mod tests {
         let dir = std::env::temp_dir().join(format!("swatlas-apply-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("swatlas.toml");
-        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, None, no_updates()).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, no_updates()).unwrap();
         assert_eq!(atlas.call(Call::Info).await.unwrap()["configured"], false);
 
         let bad = RigChoice {
@@ -580,7 +654,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("swatlas.toml");
         let fake = FakeUpdater::new(Packaging::Desktop { appimage: true }, Some("9.0.0"));
-        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, None, fake.clone()).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, fake.clone()).unwrap();
 
         let s = atlas.call(Call::UpdateStatus).await.unwrap();
         assert_eq!((s["state"]["state"].as_str(), s["install"]["kind"].as_str()), (Some("idle"), Some("auto")));

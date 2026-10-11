@@ -6,6 +6,9 @@ import type { AudioSettings } from '../types/generated/AudioSettings';
 import type { Candidate } from '../types/generated/Candidate';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
 import type { Dial } from '../types/generated/Dial';
+import type { Favorite } from '../types/generated/Favorite';
+import type { FavoriteRequest } from '../types/generated/FavoriteRequest';
+import type { FavoriteView } from '../types/generated/FavoriteView';
 import type { Info } from '../types/generated/Info';
 import type { Logged } from '../types/generated/Logged';
 import type { Overview } from '../types/generated/Overview';
@@ -65,5 +68,11 @@ export class Api {
   scans = () => this.transport.call({ cmd: 'scans' }) as Promise<ScanSummary[]>;
   scan = (id: string) => this.transport.call({ cmd: 'scan', args: { id } }) as Promise<Scan>;
   deleteScan = (id: string) => this.transport.call({ cmd: 'delete_scan', args: { id } }) as Promise<null>;
+  deleteScans = () => this.transport.call({ cmd: 'delete_scans' }) as Promise<number>;
   logbook = () => this.transport.call({ cmd: 'logbook' }) as Promise<Logged[]>;
+
+  favorites = () => this.transport.call({ cmd: 'favorites' }) as Promise<FavoriteView[]>;
+  addFavorite = (args: FavoriteRequest) => this.transport.call({ cmd: 'add_favorite', args }) as Promise<Favorite>;
+  renameFavorite = (id: string, label: string) => this.transport.call({ cmd: 'rename_favorite', args: { id, label } }) as Promise<null>;
+  deleteFavorite = (id: string) => this.transport.call({ cmd: 'delete_favorite', args: { id } }) as Promise<null>;
 }

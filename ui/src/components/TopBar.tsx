@@ -1,5 +1,6 @@
 // The window's top bar: name and version, what the rig is doing, the Ko-fi link, the UTC
-// clock, and the update, help, settings and power buttons (turning off asks first).
+// clock, and the update, scans, favorites, help, settings and power buttons (turning off asks
+// first).
 
 import { useRef, type ReactNode } from 'react';
 import { useNow } from '../hooks/useCore';
@@ -31,13 +32,19 @@ interface Props {
   onConfirmOff: () => void;
   onCancelOff: () => void;
   onSetup: () => void;
+  /** The saved scans; `scansNew`: one finished since they were last opened. */
+  onScans: () => void;
+  scansNew: boolean;
+  /** The station list's favorites; `favOn`: it shows them now. */
+  onFavorites: () => void;
+  favOn: boolean;
   onHelp: () => void;
   onSettings: () => void;
   /** The update pill, when there is one. */
   update: ReactNode;
 }
 
-export function TopBar({ info, status, on, powerBusy, powerDisabled, onPower, askOff, onConfirmOff, onCancelOff, onSetup, onHelp, onSettings, update }: Props) {
+export function TopBar({ info, status, on, powerBusy, powerDisabled, onPower, askOff, onConfirmOff, onCancelOff, onSetup, onScans, scansNew, onFavorites, favOn, onHelp, onSettings, update }: Props) {
   const t = useT();
   const power = useRef<HTMLDivElement>(null);
   const setup = info && !info.configured && info.backend === 'sim';
@@ -63,6 +70,15 @@ export function TopBar({ info, status, on, powerBusy, powerDisabled, onPower, as
         </a>
         <Clock />
         {update}
+        <button className="top-btn" type="button" aria-label={scansNew ? t.scansNew : t.scans} title={scansNew ? t.scansNew : t.scans} onClick={onScans}>
+          <svg className="top-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 14h2v-4H1zM5 14h2V5H5zM9 14h2V8H9zM13 14h2V2h-2z" /></svg>
+          <span className="top-txt">{t.scans}</span>
+          {scansNew && <span className="new-dot" />}
+        </button>
+        <button className="top-btn" type="button" aria-pressed={favOn} aria-label={t.favoritesBtn} title={t.favoritesBtn} onClick={onFavorites}>
+          <span className="top-ico" aria-hidden="true">★</span>
+          <span className="top-txt">{t.favoritesBtn}</span>
+        </button>
         <button className="icon-btn" type="button" aria-label={t.help} title={`${t.help} (F1)`} onClick={onHelp}>?</button>
         <button className="icon-btn" type="button" aria-label={t.settings} title={t.settings} onClick={onSettings}>⚙</button>
         <div className="power-wrap" ref={power}>

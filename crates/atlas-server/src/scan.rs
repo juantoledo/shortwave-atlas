@@ -1,18 +1,19 @@
 //! Band scans: running one on the rig a `ScanLink` lends, and the saved ones, one JSON file each
-//! in `scans/`, with the logbook built from them.
+//! in `scans/`, with the logbook and the unidentified signals gathered from them.
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use atlas_core::api::Qth;
 use atlas_core::scan::{
-    analyse, logbook, logged_sites, on_air_sites, scan_id, valid_id, Logged, Scan, ScanOutcome, ScanPing, ScanPlan,
-    ScanStatus, ScanSummary, FORMAT_VERSION, PINGS_KEPT, READS, READ_GAP_MS,
+    analyse, logbook, logged_sites, on_air_sites, scan_id, unidentified, valid_id, Logged, Scan, ScanOutcome, ScanPing,
+    ScanPlan, ScanStatus, ScanSummary, Signal, FORMAT_VERSION, PINGS_KEPT, READS, READ_GAP_MS,
 };
 use atlas_core::stations::Catalog;
 use atlas_rig::{ScanLink, ScanStop};
+
+use crate::files::write_atomic;
 
 fn now_secs() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
@@ -39,14 +40,14 @@ struct Inner {
     status: ScanStatus,
     /// Newest first.
     scans: Vec<Scan>,
-    logbook: Vec<Logged>,
-    logged: Arc<HashSet<u32>>,
+    logbook: Arc<Vec<Logged>>,
+    signals: Arc<Vec<Signal>>,
 }
 
 impl Inner {
     fn relog(&mut self, catalog: &Catalog) {
-        self.logbook = logbook(self.scans.iter().map(|s| &s.summary), catalog);
-        self.logged = Arc::new(self.logbook.iter().map(|l| l.station_id).collect());
+        self.logbook = Arc::new(logbook(self.scans.iter().map(|s| &s.summary), catalog));
+        self.signals = Arc::new(unidentified(self.scans.iter().map(|s| &s.summary)));
     }
 }
 
@@ -79,7 +80,12 @@ impl ScanService {
     /// Load the saved scans and their logbook (against `catalog`).
     pub fn new(dir: Option<PathBuf>, catalog: Arc<Catalog>) -> Arc<Self> {
         let scans = dir.as_deref().map(load).unwrap_or_default();
-        let mut inner = Inner { status: ScanStatus::Idle, scans, logbook: vec![], logged: Default::default() };
+        let mut inner = Inner {
+            status: ScanStatus::Idle,
+            scans,
+            logbook: Default::default(),
+            signals: Default::default(),
+        };
         inner.relog(&catalog);
         Arc::new(Self { dir, catalog, inner: Mutex::new(inner) })
     }
@@ -100,13 +106,19 @@ impl ScanService {
         self.lock().scans.iter().find(|s| s.summary.id == id).cloned()
     }
 
-    pub fn logbook(&self) -> Vec<Logged> {
+    /// One saved scan without its samples.
+    pub fn summary(&self, id: &str) -> Option<ScanSummary> {
+        self.lock().scans.iter().find(|s| s.summary.id == id).map(|s| s.summary.clone())
+    }
+
+    /// The stations the saved scans logged (the station list's Heard lens).
+    pub fn logbook(&self) -> Arc<Vec<Logged>> {
         self.lock().logbook.clone()
     }
 
-    /// Station ids in the logbook (the station list's "logged" filter).
-    pub fn logged(&self) -> Arc<HashSet<u32>> {
-        self.lock().logged.clone()
+    /// Signals no station explained, across the saved scans.
+    pub fn signals(&self) -> Arc<Vec<Signal>> {
+        self.lock().signals.clone()
     }
 
     /// Forget a scan and remove its file. `false` if there is no such scan.
@@ -127,15 +139,32 @@ impl ScanService {
         Ok(true)
     }
 
-    /// Write `scan` to `scans/<id>.json` (through a temporary file, so a crash leaves no half
-    /// a file).
+    /// Forget every saved scan and remove its file (other files in `scans/` stay). The scans
+    /// whose file could not be removed are kept, and the first such error is returned.
+    pub fn delete_all(&self) -> Result<u32, String> {
+        let mut inner = self.lock();
+        let mut failed = None;
+        let before = inner.scans.len();
+        inner.scans.retain(|s| {
+            let Some(dir) = &self.dir else { return false };
+            match std::fs::remove_file(dir.join(format!("{}.json", s.summary.id))) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                    failed.get_or_insert(e.to_string());
+                    true
+                }
+                _ => false,
+            }
+        });
+        let deleted = (before - inner.scans.len()) as u32;
+        inner.relog(&self.catalog);
+        failed.map_or(Ok(deleted), Err)
+    }
+
+    /// Write `scan` to `scans/<id>.json`.
     fn save(&self, scan: &Scan) -> Result<(), String> {
         let Some(dir) = &self.dir else { return Ok(()) };
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        let path = dir.join(format!("{}.json", scan.summary.id));
-        let tmp = path.with_extension("json.tmp");
         let json = serde_json::to_string(scan).expect("Scan serialises");
-        std::fs::write(&tmp, json).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
+        write_atomic(&dir.join(format!("{}.json", scan.summary.id)), &json).map_err(|e| e.to_string())
     }
 
     /// Sweep `plan` on the rig `link` lends, in the background; the status says how it goes.
@@ -313,6 +342,13 @@ mod tests {
         assert_eq!(again.delete("../swatlas.toml"), Ok(false));
         assert!(!dir.join("c.json").exists() && dir.join("a.json").exists());
         assert!(!dir.read_dir().unwrap().flatten().any(|e| e.path().to_string_lossy().ends_with(".tmp")));
+
+        // all at once: only the scans' own files go
+        assert_eq!(again.delete_all(), Ok(2));
+        assert!(again.summaries().is_empty() && again.logbook().is_empty());
+        assert!(!dir.join("a.json").exists() && !dir.join("b.json").exists());
+        assert!(dir.join("broken.json").exists() && dir.join("notes.txt").exists());
+        assert_eq!(again.delete_all(), Ok(0));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

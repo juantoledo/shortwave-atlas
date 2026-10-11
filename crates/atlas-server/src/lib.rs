@@ -4,6 +4,8 @@
 pub mod app;
 pub mod audio;
 pub mod config;
+pub mod favorites;
+pub mod files;
 pub mod scan;
 pub mod server;
 pub mod stations;

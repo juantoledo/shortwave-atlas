@@ -12,6 +12,7 @@ use crate::country::{country, Region};
 use crate::eibi::names::{band_of, bands, lang_name, target, target_region, Band};
 use crate::eibi::{ParseReport, Parsed};
 use crate::geo::{dist_bearing, sun_at, LatLon, Route, SunAt};
+use crate::lens::{HeardRow, OffSchedule};
 use crate::rig::Mode;
 use crate::schedule::{air_status_at, any_on, slot_on, today_parts, AirStatus, Slot, Window};
 use crate::text::fold;
@@ -21,6 +22,15 @@ pub const LOOKUP_TOLERANCE_HZ: u32 = 1_000;
 /// Rows per search page when the query asks for none, and the most it may ask for.
 pub const DEFAULT_LIMIT: u32 = 100;
 pub const MAX_LIMIT: u32 = 200;
+
+/// Rows per page for `q`.
+pub(crate) fn page_limit(q: &StationQuery) -> u32 {
+    if q.limit == 0 {
+        DEFAULT_LIMIT
+    } else {
+        q.limit.min(MAX_LIMIT)
+    }
+}
 
 /// A transmitter site.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -101,15 +111,39 @@ pub struct StationRow {
     pub target: String,
 }
 
+/// Which stations the list shows: the whole schedule, those a band scan logged, or the
+/// favorites.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum Lens {
+    #[default]
+    All,
+    Heard,
+    Favorites,
+}
+
+/// The order of the Heard lens (the others are by frequency).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum Sort {
+    #[default]
+    Freq,
+    /// Best reading first.
+    Strongest,
+    /// Last heard first.
+    Recent,
+}
+
 /// Station list filters. Values inside one filter are alternatives (OR); filters combine
-/// with AND. Language, region and "on the air" must hold for the same slot.
+/// with AND. Language and region must hold for the same slot.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[serde(default)]
 #[ts(export)]
 pub struct StationQuery {
     /// Free text (names, countries, languages, targets), or digits = a kHz prefix.
     pub q: String,
-    pub on_air: bool,
     /// Band ids (`49m`, or `oob` for out of band).
     pub bands: Vec<String>,
     /// EiBi language codes.
@@ -119,8 +153,11 @@ pub struct StationQuery {
     /// Target regions.
     pub regions: Vec<Region>,
     pub site: Option<u32>,
-    /// Only stations a band scan has logged (the server passes the logbook to `search_in`).
-    pub logged: bool,
+    pub lens: Lens,
+    /// Only the stations this saved scan heard or missed.
+    pub scan: Option<String>,
+    /// The Heard lens's order.
+    pub sort: Sort,
     pub offset: u32,
     /// 0 = `DEFAULT_LIMIT`; capped at `MAX_LIMIT`.
     pub limit: u32,
@@ -147,6 +184,14 @@ pub struct StationPage {
     pub on_air: u32,
     pub items: Vec<StationRow>,
     pub facets: Option<Facets>,
+    /// Under a scan filter: the reading of each row in `items` the scan heard (the others it
+    /// missed).
+    pub scan_db: BTreeMap<u32, i16>,
+    /// Signals and favorites the schedule has no row for, by frequency (not paged).
+    pub off_schedule: Vec<OffSchedule>,
+    /// The Heard lens instead of `items` and `off_schedule`: logged stations and unidentified
+    /// signals in one list, in `StationQuery::sort` order, paged (`total` counts both).
+    pub heard: Vec<HeardRow>,
 }
 
 /// A transmitter site on the globe.
@@ -505,12 +550,30 @@ impl Catalog {
         self.search_in(q, unix, None)
     }
 
-    /// `search`, where `q.logged` keeps only the station ids in `logged` (none without it).
-    pub fn search_in(&self, q: &StationQuery, unix: i64, logged: Option<&HashSet<u32>>) -> StationPage {
+    /// `search`, where a lens other than `All` or a scan filter keeps only the station ids in
+    /// `only` (none without it). `lens::search` works them out.
+    pub fn search_in(&self, q: &StationQuery, unix: i64, only: Option<&HashSet<u32>>) -> StationPage {
+        let limit = page_limit(q);
+        self.rows_where(q, unix, only, |n| n > q.offset && n - q.offset <= limit)
+    }
+
+    /// `search_in` without paging: every row that matches.
+    pub(crate) fn matching(&self, q: &StationQuery, unix: i64, only: Option<&HashSet<u32>>) -> StationPage {
+        self.rows_where(q, unix, only, |_| true)
+    }
+
+    /// The rows that match `q`, building only the `n`th ones (1-based) that `keep` says.
+    fn rows_where(
+        &self,
+        q: &StationQuery,
+        unix: i64,
+        only: Option<&HashSet<u32>>,
+        keep: impl Fn(u32) -> bool,
+    ) -> StationPage {
+        let restricted = q.lens != Lens::All || q.scan.is_some();
         let text = fold(q.q.trim());
         let terms: Vec<&str> = text.split_whitespace().collect();
         let khz_prefix = !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit() || b == b'.');
-        let limit = if q.limit == 0 { DEFAULT_LIMIT } else { q.limit.min(MAX_LIMIT) };
 
         let text_ok = |r: &Row| {
             if khz_prefix {
@@ -520,12 +583,11 @@ impl Catalog {
                 terms.iter().all(|t| r.hay.contains(t))
             }
         };
-        // per slot: (language matches, region matches, on the air)
-        let slot_tests = |r: &Row, i: usize| -> (bool, bool, bool) {
+        // per slot: (language matches, region matches)
+        let slot_tests = |r: &Row, i: usize| -> (bool, bool) {
             let lang = q.langs.is_empty() || r.slot_langs[i].iter().any(|l| q.langs.contains(l));
             let region = q.regions.is_empty() || q.regions.contains(&r.slot_regions[i]);
-            let on = !q.on_air || slot_on(&r.station.slots[i], unix);
-            (lang, region, on)
+            (lang, region)
         };
 
         let mut total = 0;
@@ -534,15 +596,15 @@ impl Catalog {
         let mut facets = Facets::default();
         for r in &self.rows {
             let base = q.site.is_none_or(|s| r.station.site == s)
-                && (!q.logged || logged.is_some_and(|l| l.contains(&r.station.id)))
+                && (!restricted || only.is_some_and(|l| l.contains(&r.station.id)))
                 && text_ok(r);
             if !base {
                 continue;
             }
             let band_ok = q.bands.is_empty() || q.bands.iter().any(|b| b == r.band);
             let country_ok = q.countries.is_empty() || q.countries.contains(&r.station.itu);
-            let tests: Vec<(bool, bool, bool)> = (0..r.station.slots.len()).map(|i| slot_tests(r, i)).collect();
-            let slot_ok = tests.iter().any(|&(l, g, o)| l && g && o);
+            let tests: Vec<(bool, bool)> = (0..r.station.slots.len()).map(|i| slot_tests(r, i)).collect();
+            let slot_ok = tests.iter().any(|&(l, g)| l && g);
 
             if q.facets {
                 if country_ok && slot_ok {
@@ -555,18 +617,14 @@ impl Catalog {
                     let langs: BTreeSet<&String> = tests
                         .iter()
                         .enumerate()
-                        .filter(|(_, &(_, g, o))| g && o)
+                        .filter(|(_, &(_, g))| g)
                         .flat_map(|(i, _)| r.slot_langs[i].iter())
                         .collect();
                     for l in langs {
                         *facets.langs.entry(l.clone()).or_default() += 1;
                     }
-                    let regions: BTreeSet<Region> = tests
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, &(l, _, o))| l && o)
-                        .map(|(i, _)| r.slot_regions[i])
-                        .collect();
+                    let regions: BTreeSet<Region> =
+                        tests.iter().enumerate().filter(|(_, &(l, _))| l).map(|(i, _)| r.slot_regions[i]).collect();
                     for g in regions {
                         *facets.regions.entry(g.id().to_string()).or_default() += 1;
                     }
@@ -580,16 +638,24 @@ impl Catalog {
             let on = now.iter().any(|&b| b);
             total += 1;
             on_air += u32::from(on);
-            if total > q.offset && items.len() < limit as usize {
+            if keep(total) {
                 // the matching slot, preferring one on the air
                 let pick = (0..tests.len())
-                    .filter(|&i| tests[i].0 && tests[i].1 && tests[i].2)
+                    .filter(|&i| tests[i].0 && tests[i].1)
                     .max_by_key(|&i| (now[i], std::cmp::Reverse(i)))
                     .unwrap_or(0);
                 items.push(self.row(r, on, pick));
             }
         }
-        StationPage { total, on_air, items, facets: q.facets.then_some(facets) }
+        StationPage {
+            total,
+            on_air,
+            items,
+            facets: q.facets.then_some(facets),
+            scan_db: BTreeMap::new(),
+            off_schedule: vec![],
+            heard: vec![],
+        }
     }
 
     fn row(&self, r: &Row, on: bool, slot: usize) -> StationRow {
@@ -777,20 +843,11 @@ mod tests {
         let c = catalog();
         let t = at(14, 45);
         let s = |f: fn(&mut StationQuery)| c.search(&query(f), t);
-        assert_eq!(names(&s(|q| q.on_air = true).items), [(5910, "Radio Bulgaria"), (6070, "China Radio Int.")]);
         assert_eq!(s(|q| q.bands = vec!["49m".into()]).total, 4);
         assert_eq!(s(|q| q.bands = vec!["oob".into(), "41m".into()]).total, 4); // 9002, 11000, 11010 + 7350
         assert_eq!(s(|q| q.countries = vec!["KOR".into()]).total, 3);
         assert_eq!(s(|q| q.langs = vec!["E".into()]).total, 4);
         assert_eq!(s(|q| q.regions = vec![Region::Am]).total, 2);
-        assert_eq!(
-            s(|q| {
-                q.langs = vec!["E".into()];
-                q.on_air = true;
-            })
-            .total,
-            1
-        );
         let page = s(|q| q.site = Some(0));
         assert!(page.items.iter().all(|r| r.site == 0));
     }
@@ -810,6 +867,9 @@ mod tests {
         assert_eq!(p.on_air, 2);
         let all = c.search(&query(|q| q.limit = 10_000), at(14, 45));
         assert_eq!(all.items.len(), 10);
+        // unpaged, for the Heard lens
+        let p = c.matching(&query(|q| q.limit = 3), at(14, 45), None);
+        assert_eq!((p.total, p.items.len(), p.on_air), (10, 10, 2));
     }
 
     #[test]

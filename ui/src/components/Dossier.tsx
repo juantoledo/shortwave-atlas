@@ -1,7 +1,7 @@
 // The station card: on-air status, transmitter, route, today's bar, other candidates, and every
 // broadcast slot. It fills its panel: the top part is fixed, the slots scroll in their own box.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNames } from '../catalog/names';
 import { compass, fmtDate, fmtDays, fmtDur, fmtKhz, fmtKm, fmtMonth, fmtStamp, hhmm, sLabel, useT, weekdayName, type Messages } from '../i18n';
 import type { AirStatus } from '../types/generated/AirStatus';
@@ -64,10 +64,12 @@ interface Props {
   now: Date;
   /** Stations a band scan logged, by id. */
   logged: ReadonlyMap<number, Logged>;
+  /** The favorite star for the station shown. */
+  star: ReactNode;
   onChoose: (c: Candidate) => void;
 }
 
-export function Dossier({ on, freqHz, sel, others, meta, now, logged, onChoose }: Props) {
+export function Dossier({ on, freqHz, sel, others, meta, now, logged, star, onChoose }: Props) {
   const t = useT();
   const names = useNames();
   const [allCands, setAllCands] = useState(false);
@@ -110,7 +112,10 @@ export function Dossier({ on, freqHz, sel, others, meta, now, logged, onChoose }
       <FlagBackdrop key={st.flag ?? ''} flag={st.flag} />
       <div className="d-top" key={st.id}>
         <Head t={t} air={sel.air} now={now} />
-        <h3 className="d-name"><Flag flag={st.flag} title={country} />{st.name}</h3>
+        <div className="d-title">
+          <h3 className="d-name"><Flag flag={st.flag} title={country} />{st.name}</h3>
+          {star}
+        </div>
         <p className="d-meta">
           {country}
           {slot && <> · {slot.lang ? names.lang(slot.lang) : ''}{slot.target && ` → ${names.target(slot.target)}`}</>}

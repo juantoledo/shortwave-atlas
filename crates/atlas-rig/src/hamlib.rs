@@ -17,6 +17,8 @@ use tokio::time::timeout;
 use crate::RigBackend;
 
 const TIMEOUT: Duration = Duration::from_secs(3);
+/// A tune across a ham band edge makes some rigs change band first (FTDX-10: ~3.3 s).
+const SET_FREQ_TIMEOUT: Duration = Duration::from_secs(10);
 /// Hamlib retries for ~6 s when the rig is off.
 const POWERSTAT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Powering on makes Hamlib wake the rig first.
@@ -65,6 +67,7 @@ impl Cmd {
 
     fn timeout(self) -> Duration {
         match self {
+            Self::SetFreq(_) => SET_FREQ_TIMEOUT,
             Self::GetPowerstat => POWERSTAT_TIMEOUT,
             Self::SetPowerstat(_) => SET_POWERSTAT_TIMEOUT,
             _ => TIMEOUT,

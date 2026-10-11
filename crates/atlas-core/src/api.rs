@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::audio::{AudioChoice, AudioHint, AudioStatus, AudioTuning};
+use crate::favorites::FavoriteRequest;
 use crate::geo::LatLon;
 use crate::platform::Os;
 use crate::rig::{CommandError, RigCommand, RigState};
@@ -103,8 +104,22 @@ pub enum Call {
     DeleteScan {
         id: String,
     },
+    /// Delete every saved scan (result: the number deleted).
+    DeleteScans,
     /// Every station a saved scan logged, by current station id (result: `Logged[]`).
     Logbook,
+    /// Favorites by frequency, with their stations in the running schedule (result:
+    /// `FavoriteView[]`).
+    Favorites,
+    /// Keep a frequency, or update the favorite already there (result: `Favorite`).
+    AddFavorite(FavoriteRequest),
+    RenameFavorite {
+        id: String,
+        label: String,
+    },
+    DeleteFavorite {
+        id: String,
+    },
 }
 
 /// Argument of `Call::SetUpdatePrefs`.
@@ -244,6 +259,8 @@ pub enum ServerMsg {
 mod tests {
     use super::*;
     use crate::country::Region;
+    use crate::rig::Mode;
+    use crate::stations::{Lens, Sort};
 
     #[test]
     fn call_json_shape() {
@@ -251,8 +268,9 @@ mod tests {
         assert_eq!(c, Call::Lookup { freq_hz: 13_570_000 });
         let c: Call = serde_json::from_str(r#"{"cmd":"search","args":{"q":"bbc"}}"#).unwrap();
         assert_eq!(c, Call::Search(StationQuery { q: "bbc".into(), ..Default::default() }));
+        // an older client's `on_air` is ignored
         let c: Call = serde_json::from_str(r#"{"cmd":"search","args":{"regions":["am"],"on_air":true}}"#).unwrap();
-        assert_eq!(c, Call::Search(StationQuery { regions: vec![Region::Am], on_air: true, ..Default::default() }));
+        assert_eq!(c, Call::Search(StationQuery { regions: vec![Region::Am], ..Default::default() }));
         let c: Call = serde_json::from_str(r#"{"cmd":"overview"}"#).unwrap();
         assert_eq!(c, Call::Overview);
         let c: Call = serde_json::from_str(r#"{"cmd":"stations_meta"}"#).unwrap();
@@ -263,6 +281,24 @@ mod tests {
         assert_eq!(c, Call::StartScan(ScanRequest { band_id: "49m".into(), step_hz: None, dwell_ms: None }));
         let c: Call = serde_json::from_str(r#"{"cmd":"delete_scan","args":{"id":"x"}}"#).unwrap();
         assert_eq!(c, Call::DeleteScan { id: "x".into() });
+        let c: Call = serde_json::from_str(r#"{"cmd":"delete_scans"}"#).unwrap();
+        assert_eq!(c, Call::DeleteScans);
+        let c: Call = serde_json::from_str(r#"{"cmd":"search","args":{"lens":"heard","scan":"s1"}}"#).unwrap();
+        assert_eq!(c, Call::Search(StationQuery { lens: Lens::Heard, scan: Some("s1".into()), ..Default::default() }));
+        let c: Call = serde_json::from_str(r#"{"cmd":"search","args":{"lens":"heard","sort":"strongest"}}"#).unwrap();
+        assert_eq!(c, Call::Search(StationQuery { lens: Lens::Heard, sort: Sort::Strongest, ..Default::default() }));
+        let c: Call = serde_json::from_str(
+            r#"{"cmd":"add_favorite","args":{"freq_hz":5905000,"mode":"AM","label":null,"station_id":3}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            c,
+            Call::AddFavorite(FavoriteRequest { freq_hz: 5_905_000, mode: Mode::AM, label: None, station_id: Some(3) })
+        );
+        let c: Call = serde_json::from_str(r#"{"cmd":"rename_favorite","args":{"id":"x","label":"y"}}"#).unwrap();
+        assert_eq!(c, Call::RenameFavorite { id: "x".into(), label: "y".into() });
+        let c: Call = serde_json::from_str(r#"{"cmd":"favorites"}"#).unwrap();
+        assert_eq!(c, Call::Favorites);
         let c: Call = serde_json::from_str(r#"{"cmd":"rig","args":{"cmd":"set_power","on":false}}"#).unwrap();
         assert_eq!(c, Call::Rig(RigCommand::SetPower { on: false }));
         let c: Call = serde_json::from_str(
