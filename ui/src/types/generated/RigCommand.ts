@@ -4,4 +4,4 @@ import type { Mode } from "./Mode";
 /**
  * Commands from a UI (Tauri `invoke` or WebSocket) to the rig.
  */
-export type RigCommand = { "cmd": "set_freq", hz: number, } | { "cmd": "set_mode", mode: Mode, } | { "cmd": "set_power", on: boolean, };
+export type RigCommand = { "cmd": "set_freq", hz: number, } | { "cmd": "tune", hz: number, mode: Mode, } | { "cmd": "set_mode", mode: Mode, } | { "cmd": "set_power", on: boolean, };

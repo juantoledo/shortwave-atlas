@@ -108,6 +108,12 @@ impl Mode {
             Self::FM => "FM",
         }
     }
+
+    /// The rig's mode (as it reports it) already serves for this one: the same, or AM-N for
+    /// AM (a broadcast keeps the narrow filter the listener chose).
+    pub fn satisfied_by(self, current: Option<&str>) -> bool {
+        current == Some(self.as_str()) || (self == Self::AM && current == Some(Self::AMN.as_str()))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -140,9 +146,21 @@ impl RigState {
 #[serde(tag = "cmd", rename_all = "snake_case")]
 #[ts(export)]
 pub enum RigCommand {
-    SetFreq { hz: u32 },
-    SetMode { mode: Mode },
-    SetPower { on: bool },
+    SetFreq {
+        hz: u32,
+    },
+    /// Tune to a station: its frequency, then its mode once the rig is there. A rig that
+    /// changes band to get there may recall the mode it last used on that band (FTDX-10).
+    Tune {
+        hz: u32,
+        mode: Mode,
+    },
+    SetMode {
+        mode: Mode,
+    },
+    SetPower {
+        on: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -170,7 +188,7 @@ impl RigCommand {
     /// not receive (`coverage`).
     pub fn validate(&self, coverage: &[RxRange]) -> Result<(), CommandError> {
         match *self {
-            Self::SetFreq { hz } if !coverage.iter().any(|r| r.contains_hz(hz)) => {
+            Self::SetFreq { hz } | Self::Tune { hz, .. } if !coverage.iter().any(|r| r.contains_hz(hz)) => {
                 Err(CommandError::Invalid("Frequency out of range".into()))
             }
             _ => Ok(()),
@@ -191,6 +209,18 @@ mod tests {
         let c: RigCommand = serde_json::from_str(r#"{"cmd":"set_mode","mode":"AMN"}"#).unwrap();
         assert_eq!(c, RigCommand::SetMode { mode: Mode::AMN });
         assert!(serde_json::from_str::<RigCommand>(r#"{"cmd":"set_mode","mode":"PKTUSB"}"#).is_err());
+        let c: RigCommand = serde_json::from_str(r#"{"cmd":"tune","hz":9500000,"mode":"AM"}"#).unwrap();
+        assert_eq!(c, RigCommand::Tune { hz: 9_500_000, mode: Mode::AM });
+    }
+
+    #[test]
+    fn a_mode_is_served_by_the_same_or_narrow_am() {
+        assert!(Mode::AM.satisfied_by(Some("AM")));
+        assert!(Mode::AM.satisfied_by(Some("AMN")));
+        assert!(!Mode::AMN.satisfied_by(Some("AM")));
+        assert!(!Mode::AM.satisfied_by(Some("USB")));
+        assert!(!Mode::USB.satisfied_by(Some("PKTUSB")));
+        assert!(!Mode::AM.satisfied_by(None));
     }
 
     #[test]
@@ -203,6 +233,7 @@ mod tests {
         let vu = [RxRange { lo_khz: 144_000, hi_khz: 146_000 }, RxRange { lo_khz: 430_000, hi_khz: 440_000 }];
         assert!(RigCommand::SetFreq { hz: 145_500_000 }.validate(&vu).is_ok());
         assert!(RigCommand::SetFreq { hz: 14_074_000 }.validate(&vu).is_err());
+        assert!(RigCommand::Tune { hz: 14_074_000, mode: Mode::USB }.validate(&vu).is_err());
         assert!(RigCommand::SetMode { mode: Mode::AM }.validate(&vu).is_ok());
     }
 

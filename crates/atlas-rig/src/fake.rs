@@ -14,6 +14,12 @@ struct Rig {
     fail_next: Option<String>,
     /// S-meter per frequency (else -54, S0).
     strength: HashMap<u32, i32>,
+    /// A band stack, like the FTDX-10's: tuning into another band (by whole MHz here) recalls
+    /// the mode last used there. Off unless `band_mode` set one.
+    bands: Option<HashMap<u32, String>>,
+    /// How far entering CW (or CWR) moves the frequency; leaving it moves it back (a rig that
+    /// shows CW with its pitch offset).
+    cw_shift: i32,
     log: Vec<String>,
     /// Every command, reads included.
     all: Vec<String>,
@@ -34,6 +40,8 @@ impl FakeRigctld {
             power: true,
             fail_next: None,
             strength: HashMap::new(),
+            bands: None,
+            cw_shift: 0,
             log: vec![],
             all: vec![],
         }));
@@ -71,6 +79,16 @@ impl FakeRigctld {
         self.rig.lock().await.all.clone()
     }
 
+    /// Keep a band stack, with `mode` last used in the band from `mhz` MHz.
+    pub async fn band_mode(&self, mhz: u32, mode: &str) {
+        self.rig.lock().await.bands.get_or_insert_default().insert(mhz, mode.into());
+    }
+
+    /// Entering CW moves the frequency by `hz`; leaving it moves it back.
+    pub async fn cw_shift(&self, hz: i32) {
+        self.rig.lock().await.cw_shift = hz;
+    }
+
     /// The S-meter reads `db` (relative to S9) while tuned to `hz`.
     pub async fn signal(&self, hz: u32, db: i32) {
         self.rig.lock().await.strength.insert(hz, db);
@@ -102,12 +120,27 @@ fn answer(rig: &mut Rig, line: &str) -> String {
         (Some("f"), _) => format!("{}\n", rig.freq),
         (Some("F"), Some(v)) => {
             rig.log.push(line.into());
-            rig.freq = v.parse().unwrap();
+            let (from, to) = (rig.freq, v.parse().unwrap());
+            if let Some(bands) = rig.bands.as_mut() {
+                if from / 1_000_000 != to / 1_000_000 {
+                    bands.insert(from / 1_000_000, rig.mode.clone());
+                    if let Some(m) = bands.get(&(to / 1_000_000)) {
+                        rig.mode = m.clone();
+                    }
+                }
+            }
+            rig.freq = to;
             ok
         }
         (Some("m"), _) => format!("{}\n3000\n", rig.mode),
         (Some("M"), Some(v)) => {
             rig.log.push(line.into());
+            let cw = |m: &str| matches!(m, "CW" | "CWR");
+            match (cw(&rig.mode), cw(v)) {
+                (false, true) => rig.freq = rig.freq.saturating_add_signed(rig.cw_shift),
+                (true, false) => rig.freq = rig.freq.saturating_add_signed(-rig.cw_shift),
+                _ => {}
+            }
             rig.mode = v.into();
             ok
         }
