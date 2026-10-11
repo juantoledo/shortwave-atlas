@@ -17,4 +17,8 @@ itu: string, flag: string | null, mode: Mode,
 /**
  * `Site::id`.
  */
-site: number, slots: Array<Slot>, };
+site: number, slots: Array<Slot>, 
+/**
+ * `SourceDesc::id` of the source it comes from, and its `Record::key` there.
+ */
+source: string, key: string, };

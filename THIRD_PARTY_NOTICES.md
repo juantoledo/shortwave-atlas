@@ -30,7 +30,7 @@ To rebuild it, or to build it from modified sources, run
 ## EiBi shortwave schedules
 
 The station schedules and transmitter sites (`data/eibi/source`, bundled into every build) are
-EiBi's files, unchanged: http://www.eibispace.de/dx/ by Eike Bierwirth. From its README.TXT:
+EiBi's files, unchanged: http://www.eibispace.de/ by Eike Bierwirth. From its README.TXT:
 "All my frequency lists are free of cost, and any person is absolutely free to download, use,
 copy, or distribute these files or to use them within third-party software."
 

@@ -10,7 +10,7 @@ use atlas_core::scan::{
     analyse, logbook, logged_sites, on_air_sites, scan_id, unidentified, valid_id, Logged, Scan, ScanOutcome, ScanPing,
     ScanPlan, ScanStatus, ScanSummary, Signal, FORMAT_VERSION, PINGS_KEPT, READS, READ_GAP_MS,
 };
-use atlas_core::stations::Catalog;
+use atlas_core::stations::{Catalog, CatalogCell};
 use atlas_rig::{ScanLink, ScanStop};
 
 use crate::files::write_atomic;
@@ -32,7 +32,7 @@ pub struct Context {
 pub struct ScanService {
     /// `scans/`; `None` keeps scans in memory only (tests).
     dir: Option<PathBuf>,
-    catalog: Arc<Catalog>,
+    catalog: Arc<CatalogCell>,
     inner: Mutex<Inner>,
 }
 
@@ -40,13 +40,16 @@ struct Inner {
     status: ScanStatus,
     /// Newest first.
     scans: Vec<Scan>,
+    /// Joined to the catalog of `generation`.
     logbook: Arc<Vec<Logged>>,
+    generation: u32,
     signals: Arc<Vec<Signal>>,
 }
 
 impl Inner {
     fn relog(&mut self, catalog: &Catalog) {
         self.logbook = Arc::new(logbook(self.scans.iter().map(|s| &s.summary), catalog));
+        self.generation = catalog.generation();
         self.signals = Arc::new(unidentified(self.scans.iter().map(|s| &s.summary)));
     }
 }
@@ -77,12 +80,17 @@ fn load(dir: &Path) -> Vec<Scan> {
 }
 
 impl ScanService {
-    /// Load the saved scans and their logbook (against `catalog`).
-    pub fn new(dir: Option<PathBuf>, catalog: Arc<Catalog>) -> Arc<Self> {
+    /// Load the saved scans and their logbook (against the running catalog).
+    pub fn new(dir: Option<PathBuf>, catalog: Arc<CatalogCell>) -> Arc<Self> {
         let scans = dir.as_deref().map(load).unwrap_or_default();
-        let mut inner =
-            Inner { status: ScanStatus::Idle, scans, logbook: Default::default(), signals: Default::default() };
-        inner.relog(&catalog);
+        let mut inner = Inner {
+            status: ScanStatus::Idle,
+            scans,
+            logbook: Default::default(),
+            generation: 0,
+            signals: Default::default(),
+        };
+        inner.relog(&catalog.get());
         Arc::new(Self { dir, catalog, inner: Mutex::new(inner) })
     }
 
@@ -107,9 +115,19 @@ impl ScanService {
         self.lock().scans.iter().find(|s| s.summary.id == id).map(|s| s.summary.clone())
     }
 
-    /// The stations the saved scans logged (the station list's Heard lens).
+    /// The stations the saved scans logged, as rows of the running catalog.
     pub fn logbook(&self) -> Arc<Vec<Logged>> {
-        self.lock().logbook.clone()
+        self.logbook_for(&self.catalog.get())
+    }
+
+    /// The logbook as rows of `cat` (the station list's Heard lens), joined again if the one kept
+    /// is of another generation.
+    pub fn logbook_for(&self, cat: &Catalog) -> Arc<Vec<Logged>> {
+        let mut inner = self.lock();
+        if inner.generation != cat.generation() {
+            inner.relog(cat);
+        }
+        inner.logbook.clone()
     }
 
     /// Signals no station explained, across the saved scans.
@@ -131,7 +149,7 @@ impl ScanService {
             }
         }
         inner.scans.remove(i);
-        inner.relog(&self.catalog);
+        inner.relog(&self.catalog.get());
         Ok(true)
     }
 
@@ -152,7 +170,7 @@ impl ScanService {
             }
         });
         let deleted = (before - inner.scans.len()) as u32;
-        inner.relog(&self.catalog);
+        inner.relog(&self.catalog.get());
         failed.map_or(Ok(deleted), Err)
     }
 
@@ -204,7 +222,7 @@ impl ScanService {
                     Ok(db) => {
                         times[i] = now_secs();
                         let db = db.map(|d| d.clamp(i16::MIN.into(), i16::MAX.into()) as i16);
-                        let sites = on_air_sites(&self.catalog, plan.freq(i), plan.step_hz, times[i]);
+                        let sites = on_air_sites(&self.catalog.get(), plan.freq(i), plan.step_hz, times[i]);
                         if let ScanStatus::Running { samples, pings, .. } = &mut self.lock().status {
                             samples[i] = db;
                             if pings.len() == PINGS_KEPT {
@@ -248,7 +266,9 @@ impl ScanService {
             (None, None) => ScanOutcome::Complete,
             (None, Some(_)) => ScanOutcome::Stopped,
         };
-        let found = analyse(&self.catalog, plan.first_hz, plan.step_hz, &samples, &times);
+        // one catalog for the matching, the logbook and the record of it
+        let cat = self.catalog.get();
+        let found = analyse(&cat, plan.first_hz, plan.step_hz, &samples, &times);
         let scan = Scan {
             summary: ScanSummary {
                 version: FORMAT_VERSION,
@@ -266,7 +286,7 @@ impl ScanService {
                 outcome,
                 qth: ctx.qth,
                 rig: ctx.rig,
-                eibi: self.catalog.source_file().to_string(),
+                sources: cat.stamps(),
                 noise_db: found.noise_db,
                 measured,
                 peaks: found.peaks,
@@ -277,10 +297,10 @@ impl ScanService {
         if let Err(e) = self.save(&scan) {
             tracing::warn!("could not save scan {id}: {e}");
         }
-        let sites = logged_sites(&self.catalog, &scan.summary.peaks);
+        let sites = logged_sites(&cat, &scan.summary.peaks);
         let mut inner = self.lock();
         inner.scans.insert(0, scan);
-        inner.relog(&self.catalog);
+        inner.relog(&cat);
         inner.status = ScanStatus::Done { id, sites };
     }
 }
@@ -308,7 +328,7 @@ mod tests {
                 outcome: ScanOutcome::Complete,
                 qth: Qth::default(),
                 rig: "sim".into(),
-                eibi: "sked-a26.csv".into(),
+                sources: vec![],
                 noise_db: Some(-50),
                 measured: 2,
                 peaks: vec![],
@@ -319,16 +339,79 @@ mod tests {
     }
 
     #[test]
+    fn the_logbook_follows_the_running_catalog() {
+        use atlas_core::rig::Mode;
+        use atlas_core::scan::{Peak, StationRef, Verdict};
+        use atlas_core::source::{Record, SiteSpec, SourceData, SourceDesc, SourceKind};
+
+        let cell = crate::sources::bundled_cell();
+        let svc = ScanService::new(None, cell.clone());
+        let cat = cell.get();
+        let st = cat.station(0).unwrap();
+        let site = cat.site(st.site).unwrap();
+        let r = StationRef {
+            source: st.source.clone(),
+            key: st.key.clone(),
+            freq_hz: st.freq_hz,
+            name: st.name.clone(),
+            itu: st.itu.clone(),
+            flag: st.flag.clone(),
+            site_name: site.name.clone(),
+            site_itu: site.itu.clone(),
+            lang: String::new(),
+            target: String::new(),
+        };
+        let mut s = scan("a", 10);
+        s.summary.peaks =
+            vec![Peak { freq_hz: st.freq_hz, db: -20, at: 10, verdict: Verdict::Sure, stations: vec![r] }];
+        {
+            let mut inner = svc.lock();
+            inner.scans.push(s);
+            inner.relog(&cat);
+        }
+        assert_eq!(svc.logbook().iter().map(|l| l.station_id).collect::<Vec<_>>(), [0]);
+
+        // a source with a station below every other: ids move up one, and the logbook with them
+        let eibi = crate::sources::bundled();
+        let early = SourceData {
+            desc: SourceDesc {
+                id: "test".into(),
+                name: "Test".into(),
+                kind: SourceKind::User,
+                editable: true,
+                url: None,
+                version: "1".into(),
+                season: None,
+                report: None,
+            },
+            records: vec![Record {
+                key: "x".into(),
+                freq_hz: 1_000,
+                mode: Mode::AM,
+                name: "Early".into(),
+                itu: "G".into(),
+                site: SiteSpec::Known(0),
+                slots: vec![],
+                notes: String::new(),
+            }],
+        };
+        cell.replace(Catalog::build(&[&eibi.data, &early], &eibi.vocabulary, &eibi.gazetteer));
+        assert_eq!(svc.logbook().iter().map(|l| l.station_id).collect::<Vec<_>>(), [1]);
+        // a snapshot of the old catalog still gets its own ids
+        assert_eq!(svc.logbook_for(&cat).iter().map(|l| l.station_id).collect::<Vec<_>>(), [0]);
+    }
+
+    #[test]
     fn files_load_newest_first_and_delete() {
         let dir = std::env::temp_dir().join(format!("swatlas-scans-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let svc = ScanService::new(Some(dir.clone()), crate::stations::bundled());
+        let svc = ScanService::new(Some(dir.clone()), crate::sources::bundled_cell());
         for (id, at) in [("a", 10), ("b", 30), ("c", 20)] {
             svc.save(&scan(id, at)).unwrap();
         }
         std::fs::write(dir.join("broken.json"), "{").unwrap();
         std::fs::write(dir.join("notes.txt"), "x").unwrap();
-        let again = ScanService::new(Some(dir.clone()), crate::stations::bundled());
+        let again = ScanService::new(Some(dir.clone()), crate::sources::bundled_cell());
         let ids: Vec<String> = again.summaries().into_iter().map(|s| s.id).collect();
         assert_eq!(ids, ["b", "c", "a"]);
         assert_eq!(again.scan("c").unwrap().samples.len(), 2);

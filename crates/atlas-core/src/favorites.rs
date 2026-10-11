@@ -9,6 +9,7 @@ use ts_rs::TS;
 
 use crate::rig::Mode;
 use crate::scan::StationRef;
+use crate::source::StationKey;
 use crate::stations::Catalog;
 
 /// `FavoritesFile::version` of what this build writes.
@@ -47,8 +48,8 @@ pub struct FavoriteRequest {
     pub mode: Mode,
     /// `None` = the station's name (or nothing, without a station).
     pub label: Option<String>,
-    /// `Station::id` in the running catalog.
-    pub station_id: Option<u32>,
+    /// The station heard there.
+    pub station: Option<StationKey>,
 }
 
 /// A favorite and its station in the running catalog (result of `Call::Favorites`).
@@ -84,9 +85,9 @@ pub fn add(list: &mut Vec<Favorite>, req: &FavoriteRequest, cat: &Catalog, now: 
         return Err("No frequency to keep".into());
     }
     let label = req.label.as_deref().map(clean_label).transpose()?;
-    let station = match req.station_id {
-        Some(id) => {
-            let st = cat.station(id).ok_or("That station is not in the schedule")?;
+    let station = match &req.station {
+        Some(k) => {
+            let st = cat.by_key(&k.source, &k.key).ok_or("That station is not in the catalog")?;
             Some(StationRef::of(cat, st, now))
         }
         None => None,
@@ -180,8 +181,13 @@ mod tests {
         Catalog::from_eibi(parse(&files()).unwrap())
     }
 
+    /// A request for the fixture's station `station_id`.
     fn req(freq_hz: u32, station_id: Option<u32>, label: Option<&str>) -> FavoriteRequest {
-        FavoriteRequest { freq_hz, mode: Mode::AM, label: label.map(Into::into), station_id }
+        let station = station_id.map(|id| match catalog().station(id) {
+            Some(st) => st.station_key(),
+            None => StationKey { source: "eibi".into(), key: "nowhere".into() },
+        });
+        FavoriteRequest { freq_hz, mode: Mode::AM, label: label.map(Into::into), station }
     }
 
     #[test]
@@ -245,7 +251,9 @@ mod tests {
         // next season the station moved: the favorite stays, without a row
         let mut moved = list[1].clone();
         moved.id = "moved".into();
-        moved.station.as_mut().unwrap().freq_hz += 5_000;
+        let st = moved.station.as_mut().unwrap();
+        st.freq_hz += 5_000;
+        st.key.clear(); // keyed by its fields again, as EiBi keys its rows
         list.push(moved);
         let r = resolve(&list, &c);
         assert_eq!(r.by_station.len(), 2);

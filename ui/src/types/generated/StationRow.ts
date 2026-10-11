@@ -12,4 +12,8 @@ on: boolean,
 /**
  * Language and target of the slot that matched (the one on the air if any).
  */
-lang: string, target: string, };
+lang: string, target: string, 
+/**
+ * `SourceDesc::id`, and the `Record::key` there.
+ */
+source: string, key: string, };

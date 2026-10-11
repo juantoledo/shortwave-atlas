@@ -1,20 +1,24 @@
-//! The station catalog: the EiBi schedule bundled at build time (`data/eibi`), or the
-//! files in `eibi_dir`.
+//! The data sources: the EiBi schedule bundled at build time (`data/eibi`), or the files in
+//! `eibi_dir`, and the listener's own stations (`user_stations`); and the catalog built from
+//! them.
 
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
-use atlas_core::eibi::{parse, EibiFiles, Parsed};
+use atlas_core::eibi::{parse, EibiFiles, EibiSource};
+use atlas_core::source::SourceData;
 use atlas_core::stations::Catalog;
+#[cfg(test)]
+use atlas_core::stations::CatalogCell;
 
 mod bundle {
     include!(concat!(env!("OUT_DIR"), "/eibi_bundle.rs"));
 }
 
-fn build(files: &EibiFiles, from: &str) -> Result<Arc<Catalog>, String> {
+fn read_eibi(files: &EibiFiles, from: &str) -> Result<Arc<EibiSource>, String> {
     let t = Instant::now();
-    let parsed: Parsed = parse(files).map_err(|e| format!("{from}: {e}"))?;
+    let parsed = parse(files).map_err(|e| format!("{from}: {e}"))?;
     let r = &parsed.report;
     r.check_strict().map_err(|e| format!("{from}: {e}"))?;
     tracing::info!(
@@ -30,30 +34,29 @@ fn build(files: &EibiFiles, from: &str) -> Result<Arc<Catalog>, String> {
     for w in &r.warnings {
         tracing::debug!("stations: {w}");
     }
-    Ok(Arc::new(Catalog::from_eibi(parsed)))
+    Ok(Arc::new(parsed.into_source()))
 }
 
 /// The bundled schedule, parsed once per process.
-pub fn bundled() -> Arc<Catalog> {
-    static CATALOG: OnceLock<Arc<Catalog>> = OnceLock::new();
-    CATALOG
-        .get_or_init(|| {
-            let files = EibiFiles {
-                csv: bundle::CSV,
-                csv_name: bundle::CSV_NAME,
-                readme: bundle::README,
-                overrides: bundle::OVERRIDES,
-                utility: bundle::UTILITY,
-            };
-            build(&files, "bundled").expect("the bundled EiBi data is checked by the tests")
-        })
-        .clone()
+pub fn bundled() -> Arc<EibiSource> {
+    static EIBI: OnceLock<Arc<EibiSource>> = OnceLock::new();
+    EIBI.get_or_init(|| {
+        let files = EibiFiles {
+            csv: bundle::CSV,
+            csv_name: bundle::CSV_NAME,
+            readme: bundle::README,
+            overrides: bundle::OVERRIDES,
+            utility: bundle::UTILITY,
+        };
+        read_eibi(&files, "bundled").expect("the bundled EiBi data is checked by the tests")
+    })
+    .clone()
 }
 
 /// Load the EiBi files from a directory laid out like `data/eibi`: `source/sked-*.csv` (exactly
 /// one) and `source/README.TXT`, plus optional `site_overrides.csv` and `utility_patterns.txt`
 /// (missing ones fall back to the bundled copies).
-pub fn load(dir: &Path) -> Result<Arc<Catalog>, String> {
+pub fn load(dir: &Path) -> Result<Arc<EibiSource>, String> {
     let src = dir.join("source");
     let mut csvs: Vec<_> = std::fs::read_dir(&src)
         .map_err(|e| format!("{}: {e}", src.display()))?
@@ -81,7 +84,20 @@ pub fn load(dir: &Path) -> Result<Arc<Catalog>, String> {
     let utility = optional("utility_patterns.txt", bundle::UTILITY)?;
     let csv_name = csv_path.file_name().and_then(|n| n.to_str()).unwrap_or("sked.csv");
     let files = EibiFiles { csv: &csv, csv_name, readme: &readme, overrides: &overrides, utility: &utility };
-    build(&files, &dir.display().to_string())
+    read_eibi(&files, &dir.display().to_string())
+}
+
+/// The catalog of EiBi and the listener's stations (`mine`), with EiBi's code names and sites.
+pub fn catalog(eibi: &EibiSource, mine: &SourceData) -> Catalog {
+    Catalog::build(&[&eibi.data, mine], &eibi.vocabulary, &eibi.gazetteer)
+}
+
+/// The bundled schedule's catalog without stations of the listener's, in a cell of its own
+/// (tests).
+#[cfg(test)]
+pub fn bundled_cell() -> Arc<CatalogCell> {
+    let eibi = bundled();
+    CatalogCell::new(catalog(&eibi, &atlas_core::user_stations::to_source(&[], &eibi.gazetteer)))
 }
 
 #[cfg(test)]
@@ -90,9 +106,12 @@ mod tests {
 
     #[test]
     fn bundled_data_loads() {
-        let c = bundled();
+        let s = bundled();
+        assert!(Arc::ptr_eq(&s, &bundled()));
+        let c = bundled_cell().get();
         assert!(c.len() > 1000, "{} rows", c.len());
-        assert!(Arc::ptr_eq(&c, &bundled()));
+        let ids: Vec<String> = c.meta(0).sources.into_iter().map(|s| s.id).collect();
+        assert_eq!(ids, ["eibi", "mine"]);
     }
 
     #[test]
@@ -107,9 +126,10 @@ mod tests {
         let csv =
             "kHz;Time(UTC);ITU;Station;Remarks;P\n6070;0000-2400;CAN;CFRX Toronto;;1\n9000;0000-0100;CAN;Volmet;;1\n";
         std::fs::write(dir.join("source/sked-b26.csv"), csv).unwrap();
-        let c = load(&dir).unwrap_or_else(|e| panic!("{e}"));
+        let eibi = load(&dir).unwrap_or_else(|e| panic!("{e}"));
+        let c = catalog(&eibi, &atlas_core::user_stations::to_source(&[], &eibi.gazetteer));
         assert_eq!(c.len(), 1); // the bundled utility patterns drop the Volmet
-        assert_eq!(c.meta(0).source.season.as_deref(), Some("B26"));
+        assert_eq!(c.meta(0).sources[0].season.as_deref(), Some("B26"));
 
         std::fs::write(dir.join("source/sked-b27.csv"), csv).unwrap();
         assert!(load(&dir).is_err());

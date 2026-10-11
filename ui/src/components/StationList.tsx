@@ -1,11 +1,12 @@
 // The station list: three lenses (the whole schedule, what the scans heard, the favorites),
-// search, filters with counts, a transmitter picked on the globe or a scan to go through, and
+// search, filters with counts (the listener's own stations are a source to filter by), a
+// transmitter picked on the globe or a scan to go through, and
 // pages. Signals and favorites the schedule has no row for come first; in Heard they share one
 // list with the logged stations, sorted as asked, each with its best reading and when it was
 // last heard (nothing about the schedule there). It fills its panel: the controls are fixed,
 // the rows scroll in their own box and load the next page when you reach the end.
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useNames } from '../catalog/names';
 import type { Filters } from '../hooks/useCore';
 import { fmtStamp, sLabel, useT } from '../i18n';
@@ -20,8 +21,10 @@ import type { OffSchedule } from '../types/generated/OffSchedule';
 import type { Region } from '../types/generated/Region';
 import type { Sort } from '../types/generated/Sort';
 import type { StationRow } from '../types/generated/StationRow';
+import { MineBadge } from './Dossier';
 import { Dropdown, type DropOpt } from './Dropdown';
 import { Flag } from './Flag';
+import { scheduleOf, userSources } from './sources';
 
 const REGIONS: Region[] = ['am', 'eu', 'af', 'me', 'as', 'oc', 'other'];
 const LENSES: Lens[] = ['all', 'heard', 'favorites'];
@@ -54,6 +57,8 @@ interface Props {
   scanDb: Record<number, number>;
   onPick: (r: StationRow) => void;
   onPickOff: (o: OffSchedule) => void;
+  /** Add a station of one's own where a row off the schedule is. */
+  onAddOff: (o: OffSchedule) => void;
   /** Shift+Enter on a kHz query: tune there exactly. */
   onTuneHz: (hz: number) => void;
   onMore: () => void;
@@ -78,8 +83,9 @@ function ranked(opts: DropOpt[]): DropOpt[] {
   return [...top, ...rest];
 }
 
-/** A catalog row; `log` = in the Heard list, with what the scans read. */
-function StationItem({ r, p, log }: { r: StationRow; p: Props; log?: Logged }) {
+/** A catalog row; `log` = in the Heard list, with what the scans read; `mine` = one of the
+ *  listener's own stations. */
+function StationItem({ r, p, log, mine }: { r: StationRow; p: Props; log?: Logged; mine: boolean }) {
   const t = useT();
   const names = useNames();
   const country = names.country(r.itu);
@@ -96,6 +102,7 @@ function StationItem({ r, p, log }: { r: StationRow; p: Props; log?: Logged }) {
         <span className="rn">
           <b>
             <Flag flag={r.flag} title={country} />{r.name}
+            {mine && <MineBadge />}
             {lg && <span className="logged" title={t.loggedBadge(lg.count)} aria-label={t.loggedBadge(lg.count)}>✓</span>}
             {fav && <span className="fav" title={t.favBadge} aria-label={t.favBadge}>★</span>}
             {db !== undefined && <span className="sv" title={t.scanHeardAt(sLabel(db))}>{sLabel(db)}</span>}
@@ -117,11 +124,11 @@ function StationItem({ r, p, log }: { r: StationRow; p: Props; log?: Logged }) {
   );
 }
 
-/** A row the schedule has none for: a signal, a favorite, or both. */
+/** A row the schedule has none for: a signal, a favorite, or both; "+" adds a station there. */
 function OffItem({ o, p }: { o: OffSchedule; p: Props }) {
   const t = useT();
   return (
-    <li>
+    <li className="off-li">
       <button className="row off-row" type="button" disabled={!p.on} onClick={() => p.onPickOff(o)}>
         <span className="rf">{o.freq_hz / 1000}</span>
         <span className="rn">
@@ -139,6 +146,7 @@ function OffItem({ o, p }: { o: OffSchedule; p: Props }) {
         </span>
         <span className="sval">{o.heard ? sLabel(o.heard.best_db) : ''}</span>
       </button>
+      <button className="d-act row-add" type="button" title={t.addStation} aria-label={t.addStation} onClick={() => p.onAddOff(o)}>+</button>
     </li>
   );
 }
@@ -159,16 +167,19 @@ export function StationList(p: Props) {
   const langs = ranked((p.meta?.langs ?? []).map((l) => ({ value: l.code, label: names.lang(l.code), n: count(p.facets?.langs, l.code) })));
   const regions: DropOpt[] = REGIONS.map((r) => ({ value: r, label: names.region(r), n: count(p.facets?.regions, r) }));
   const countries = ranked((p.meta?.countries ?? []).map((c) => ({ value: c.itu, label: names.country(c.itu), n: count(p.facets?.countries, c.itu) })));
+  const sources: DropOpt[] = (p.meta?.sources ?? []).map((s) => ({ value: s.id, label: s.kind === 'user' ? t.sourceMine : s.name, n: count(p.facets?.sources, s.id) }));
+  const mineSrc = useMemo(() => userSources(p.meta), [p.meta]);
   const [showFilters, setShowFilters] = useState(false);
-  const picked = f.bands.length + f.langs.length + f.regions.length + f.countries.length;
-  const filtered = f.bands.length + f.langs.length + f.regions.length + f.countries.length > 0 || f.site !== null || f.scan !== null || f.q !== '';
+  const picked = f.bands.length + f.langs.length + f.regions.length + f.countries.length + f.sources.length;
+  const filtered = picked > 0 || f.site !== null || f.scan !== null || f.q !== '';
   const heardList = f.lens === 'heard' && f.scan === null;
   const sortLabel = { freq: t.sortFreq, strongest: t.sortStrongest, recent: t.sortRecent };
   const sortId = useId();
   const lensLabel = { all: t.lensAll, heard: t.lensHeard, favorites: t.lensFav };
   const lensTitle = { all: t.lensAllTitle, heard: t.lensHeardTitle, favorites: t.lensFavTitle };
   const empty = filtered ? t.noResults : f.lens === 'heard' ? t.heardEmpty : f.lens === 'favorites' ? t.favEmpty : t.noResults;
-  const season = p.meta?.source.season ?? '';
+  const schedule = scheduleOf(p.meta);
+  const season = schedule?.season ?? '';
 
   const box = useRef<HTMLDivElement>(null), end = useRef<HTMLDivElement>(null);
   const more = useRef(p.onMore);
@@ -273,6 +284,7 @@ export function StationList(p: Props) {
         <Filter label={t.language} all={t.allLanguages} value={f.langs[0] ?? ''} opts={langs} onChange={(v) => set({ langs: v ? [v] : [] })} />
         <Filter label={t.region} all={t.allRegions} value={f.regions[0] ?? ''} opts={regions} onChange={(v) => set({ regions: v ? [v as Region] : [] })} />
         <Filter label={t.country} all={t.allCountries} value={f.countries[0] ?? ''} opts={countries} onChange={(v) => set({ countries: v ? [v] : [] })} />
+        <Filter label={t.source} all={t.allSources} value={f.sources[0] ?? ''} opts={sources} onChange={(v) => set({ sources: v ? [v] : [] })} />
       </div>
       {filtered && (
         <div className="active-filters">
@@ -286,14 +298,14 @@ export function StationList(p: Props) {
               {t.siteFilter(p.siteName ?? '')} <span aria-hidden="true">✕</span>
             </button>
           )}
-          <button className="link" type="button" onClick={() => p.onFilters({ ...f, q: '', bands: [], langs: [], regions: [], countries: [], site: null, scan: null })}>{t.clearFilters}</button>
+          <button className="link" type="button" onClick={() => p.onFilters({ ...f, q: '', bands: [], langs: [], regions: [], countries: [], sources: [], site: null, scan: null })}>{t.clearFilters}</button>
         </div>
       )}
       <div className="rows" ref={box} onKeyDown={onRowsKey}>
         {heardList ? (
           <ul className="list">
             {p.heard.map((h) => h.kind === 'station'
-              ? <StationItem key={`s${h.row.id}`} r={h.row} p={p} log={h.log} />
+              ? <StationItem key={`s${h.row.id}`} r={h.row} p={p} log={h.log} mine={mineSrc.has(h.row.source)} />
               : <OffItem key={`o${offKey(h.row)}`} o={h.row} p={p} />)}
           </ul>
         ) : (
@@ -308,7 +320,7 @@ export function StationList(p: Props) {
               </>
             )}
             <ul className="list">
-              {p.rows.map((r) => <StationItem key={r.id} r={r} p={p} />)}
+              {p.rows.map((r) => <StationItem key={r.id} r={r} p={p} mine={mineSrc.has(r.source)} />)}
             </ul>
           </>
         )}
@@ -321,7 +333,7 @@ export function StationList(p: Props) {
       {p.meta && (
         <p className="foot">
           {t.listFoot(season)}
-          {!p.meta.source.current && <><br /><span className="warn">{t.seasonStale(season)}</span></>}
+          {schedule && !schedule.current && <><br /><span className="warn">{t.seasonStale(season)}</span></>}
         </p>
       )}
     </>

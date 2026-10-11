@@ -27,7 +27,11 @@ countries: Array<string>,
 /**
  * Target regions.
  */
-regions: Array<Region>, site: number | null, lens: Lens, 
+regions: Array<Region>, 
+/**
+ * Source ids (`eibi`).
+ */
+sources: Array<string>, site: number | null, lens: Lens, 
 /**
  * Only the stations this saved scan heard or missed.
  */

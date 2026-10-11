@@ -37,7 +37,7 @@ card is found and listed first.
 </tr>
 </table>
 
-The station data is the [EiBi](http://www.eibispace.de/dx/) shortwave schedule (about 2,000
+The station data is the [EiBi](http://www.eibispace.de/) shortwave schedule (about 2,000
 frequency and station pairs from 170 transmitter sites), bundled with each release. Search it by
 station, country, language or kHz, filter by band, language, target area and country, or click a
 transmitter on the globe to list what it broadcasts.
@@ -215,7 +215,7 @@ conventional commit messages. Every release ships with checksums, SBOMs and buil
 - Coastlines, borders and shaded relief: [Natural Earth](https://www.naturalearthdata.com/) (public
   domain), via [world-atlas](https://github.com/topojson/world-atlas).
 - City lights: NASA Earth Observatory, Black Marble 2016 (public domain).
-- Station schedules: [EiBi](http://www.eibispace.de/dx/) by Eike Bierwirth, free to use and
+- Station schedules: [EiBi](http://www.eibispace.de/) by Eike Bierwirth, free to use and
   redistribute; mirrored weekly from [radiomap](https://github.com/juantoledo/radiomap).
 - Flags: [flag-icons](https://github.com/lipis/flag-icons) (MIT).
 

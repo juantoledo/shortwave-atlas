@@ -50,10 +50,10 @@ describe('profile', () => {
 });
 
 describe('scan summaries', () => {
-  const ref = (name: string) => ({ freq_hz: 6_070_000, name, itu: 'CHN', flag: 'cn', site_name: 'x', site_itu: 'CHN', lang: 'M', target: 'CHN' });
+  const ref = (name: string) => ({ source: 'eibi', key: name, freq_hz: 6_070_000, name, itu: 'CHN', flag: 'cn', site_name: 'x', site_itu: 'CHN', lang: 'M', target: 'CHN' });
   const summary = (id: string, band_id: string): ScanSummary => ({
     version: 1, id, band_id, band_label: '49', band_kind: 'broadcast', first_hz: 5_800_000, step_hz: 5000, points: 101, dwell_ms: 300,
-    mode: 'AM', started: 0, finished: 1, outcome: { kind: 'complete' }, qth: { name: 'q', lat: 0, lon: 0 }, rig: 'sim', eibi: 'sked-a26.csv',
+    mode: 'AM', started: 0, finished: 1, outcome: { kind: 'complete' }, qth: { name: 'q', lat: 0, lon: 0 }, rig: 'sim', sources: [{ id: 'eibi', version: 'sked-a26.csv' }],
     noise_db: -48, measured: 101,
     peaks: [
       { freq_hz: 6_070_000, db: -6, at: 0, verdict: 'sure', stations: [ref('CRI')] },

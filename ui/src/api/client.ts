@@ -5,10 +5,12 @@ import type { AudioDiagnostics } from '../types/generated/AudioDiagnostics';
 import type { AudioSettings } from '../types/generated/AudioSettings';
 import type { Candidate } from '../types/generated/Candidate';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
+import type { CodeTables } from '../types/generated/CodeTables';
 import type { Dial } from '../types/generated/Dial';
 import type { Favorite } from '../types/generated/Favorite';
 import type { FavoriteRequest } from '../types/generated/FavoriteRequest';
 import type { FavoriteView } from '../types/generated/FavoriteView';
+import type { ImportReport } from '../types/generated/ImportReport';
 import type { Info } from '../types/generated/Info';
 import type { Logged } from '../types/generated/Logged';
 import type { Overview } from '../types/generated/Overview';
@@ -29,6 +31,8 @@ import type { StationPage } from '../types/generated/StationPage';
 import type { StationQuery } from '../types/generated/StationQuery';
 import type { UpdatePrefs } from '../types/generated/UpdatePrefs';
 import type { UpdateStatus } from '../types/generated/UpdateStatus';
+import type { UserStationDraft } from '../types/generated/UserStationDraft';
+import type { UserStationView } from '../types/generated/UserStationView';
 import type { Transport } from './transport';
 
 export class Api {
@@ -75,4 +79,15 @@ export class Api {
   addFavorite = (args: FavoriteRequest) => this.transport.call({ cmd: 'add_favorite', args }) as Promise<Favorite>;
   renameFavorite = (id: string, label: string) => this.transport.call({ cmd: 'rename_favorite', args: { id, label } }) as Promise<null>;
   deleteFavorite = (id: string) => this.transport.call({ cmd: 'delete_favorite', args: { id } }) as Promise<null>;
+
+  userStations = () => this.transport.call({ cmd: 'user_stations' }) as Promise<UserStationView[]>;
+  addUserStation = (args: UserStationDraft) => this.transport.call({ cmd: 'add_user_station', args }) as Promise<UserStationView>;
+  updateUserStation = (id: string, station: UserStationDraft) =>
+    this.transport.call({ cmd: 'update_user_station', args: { id, station } }) as Promise<UserStationView>;
+  deleteUserStation = (id: string) => this.transport.call({ cmd: 'delete_user_station', args: { id } }) as Promise<null>;
+  codeTables = () => this.transport.call({ cmd: 'code_tables' }) as Promise<CodeTables>;
+  /** The listener's stations as JSON text, to save as a file. */
+  exportUserStations = () => this.transport.call({ cmd: 'export_user_stations' }) as Promise<string>;
+  importUserStations = (json: string, replace: boolean) =>
+    this.transport.call({ cmd: 'import_user_stations', args: { json, replace } }) as Promise<ImportReport>;
 }

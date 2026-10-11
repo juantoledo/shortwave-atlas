@@ -3,4 +3,4 @@
 /**
  * How many rows each filter value would give (with that filter itself left out).
  */
-export type Facets = { bands: { [key in string]: number }, langs: { [key in string]: number }, countries: { [key in string]: number }, regions: { [key in string]: number }, };
+export type Facets = { bands: { [key in string]: number }, langs: { [key in string]: number }, countries: { [key in string]: number }, regions: { [key in string]: number }, sources: { [key in string]: number }, };

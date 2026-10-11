@@ -6,6 +6,7 @@ import { useT } from '../i18n';
 import { HELP_TOPICS, type HelpTopic } from '../i18n/en';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
 import { Sheet } from './Sheet';
+import { scheduleOf } from './sources';
 
 interface Props {
   topic: HelpTopic | null;
@@ -41,12 +42,13 @@ function Extra({ topic, version, meta }: { topic: HelpTopic; version: string | n
           <li><i className="lg quiet" />{t.legendQuiet}</li>
           <li><i className="lg qth" />{t.legendQth}</li>
           <li><i className="lg logged" />{t.legendLogged}</li>
+          <li><i className="lg mine" />{t.legendMine}</li>
         </ul>
       </>
     );
   }
   if (topic === 'about') {
-    const season = meta?.source.season ?? '';
+    const season = scheduleOf(meta)?.season ?? '';
     return (
       <>
         <p className="help-app">{t.appName} {version && <span className="ver">{t.versionTag(version)}</span>}</p>

@@ -1,5 +1,6 @@
 // Band scans: the core's scan status, polled (fast while one runs), the saved scans and the
-// logbook, reloaded when a scan ends; and the saved scans the band dial draws.
+// logbook, reloaded when a scan ends and when the catalog's `generation` changes (the logbook's
+// station ids with it); and the saved scans the band dial draws.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Api } from '../api/client';
@@ -13,7 +14,7 @@ const BUSY_MS = 300;
 /** A scan started from another window shows up within this. */
 const IDLE_MS = 5000;
 
-export function useScan(api: Api | null, onError: (e: unknown) => void) {
+export function useScan(api: Api | null, onError: (e: unknown) => void, generation: number | null) {
   const [status, setStatus] = useState<ScanStatus>({ state: 'idle' });
   const [scans, setScans] = useState<ScanSummary[]>([]);
   const [logbook, setLogbook] = useState<Logged[]>([]);
@@ -24,7 +25,7 @@ export function useScan(api: Api | null, onError: (e: unknown) => void) {
     api.scans().then(setScans, () => {});
     api.logbook().then(setLogbook, () => {});
   }, [api]);
-  useEffect(reload, [reload]);
+  useEffect(reload, [reload, generation]);
 
   const running = status.state === 'running';
   // a scan seen running and then done, in the same render as the change (the globe's finale);

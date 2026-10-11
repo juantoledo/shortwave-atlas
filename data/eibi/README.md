@@ -1,6 +1,6 @@
 # EiBi shortwave schedule
 
-Shortwave Atlas's station data: the [EiBi](http://www.eibispace.de/dx/) schedule by Eike Bierwirth,
+Shortwave Atlas's station data: the [EiBi](http://www.eibispace.de/) schedule by Eike Bierwirth,
 bundled into every build by `crates/atlas-server/build.rs` and parsed at startup by
 `atlas_core::eibi` (about 15 ms).
 
