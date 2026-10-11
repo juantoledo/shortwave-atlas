@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.7.0...v0.8.0) (2026-10-11)
+
+
+### Features
+
+* the listener's own stations, as the Mine source ([4a53267](https://github.com/juantoledo/shortwave-atlas/commit/4a532671fe6fb37ece00dc96483394ec7a076fdc))
+* **ui:** add, edit and delete your own stations ([262d45a](https://github.com/juantoledo/shortwave-atlas/commit/262d45a79d200ebda0cce20eef54cacfac5f3cfe))
+* **ui:** Sources in Settings, with your stations to a file and back ([98dda47](https://github.com/juantoledo/shortwave-atlas/commit/98dda470f4cbfbb1038d580f41abfe5ff4a3b153))
+* **ui:** the listener's stations in the lists, the card and on the globe ([a1d72af](https://github.com/juantoledo/shortwave-atlas/commit/a1d72afab277d6f8611c51a721eb76176bf149cb))
+
+
+### Bug Fixes
+
+* EiBi's address is www.eibispace.de ([9d8fc7a](https://github.com/juantoledo/shortwave-atlas/commit/9d8fc7aab52d3b345e0d5ed15b2ff0ef4dfbb737))
+* **ui:** say where an export was saved ([20e5894](https://github.com/juantoledo/shortwave-atlas/commit/20e5894364a48a2aa49f353167275481de68f98b))
+
 ## [0.7.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.6.0...v0.7.0) (2026-10-11)
 
 
