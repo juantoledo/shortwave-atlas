@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.9.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.8.1...v0.9.0) (2026-10-12)
+
+
+### Features
+
+* own window controls, the top bar is the title bar ([b58ab30](https://github.com/juantoledo/shortwave-atlas/commit/b58ab3098e6591968df805e931a893f2c2258028))
+* **scan:** live scan results, band picker and a louder Scan button ([1a6795b](https://github.com/juantoledo/shortwave-atlas/commit/1a6795b5024c12e8471e44d05e8152d6f60f382f))
+* **scan:** live trace while scanning, steady Heard list, no list footer ([11ddbd3](https://github.com/juantoledo/shortwave-atlas/commit/11ddbd3a2633934d957cc3958e11cbd425cdd07c))
+* **scan:** scan speed picker (fast, normal, thorough) ([8320d35](https://github.com/juantoledo/shortwave-atlas/commit/8320d3536a33f0ed617f5d561896578a42c648d0))
+* Stats, a live history of what you listen to ([4762365](https://github.com/juantoledo/shortwave-atlas/commit/4762365760a0e5bfaa777a3690704dadd3865136))
+* welcome splash, data notice, and the rig in use in the header ([75b5306](https://github.com/juantoledo/shortwave-atlas/commit/75b53068e7828aa32b882a5349aefc8c223a2629))
+
+
+### Bug Fixes
+
+* **ui:** wider controls column in the receiver so the scan pickers show ([98fded4](https://github.com/juantoledo/shortwave-atlas/commit/98fded4235c5a1b6b3adbbb5f5e4b4ecc1ea0364))
+
 ## [0.8.1](https://github.com/juantoledo/shortwave-atlas/compare/v0.8.0...v0.8.1) (2026-10-11)
 
 
