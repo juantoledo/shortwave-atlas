@@ -366,7 +366,7 @@ export function App() {
   return (
     <I18nProvider value={t}>
       <NamesProvider value={names}>
-      <div className="app" data-view={view} data-page={page === 'stats' ? 'stats' : undefined} data-dock={dockOpen ? 'open' : undefined} data-globe={display.fullGlobe ? 'full' : 'framed'}>
+      <div className="app" data-view={view} data-page={page === 'stats' ? 'stats' : undefined} data-dock={dockOpen ? 'open' : undefined} data-globe={display.fullGlobe ? 'full' : 'framed'} data-map={display.map}>
         <TopBar
           info={info}
           chrome={api ? chromeFor(api.transport.kind, info?.os) : null}
@@ -411,9 +411,11 @@ export function App() {
               finale={finale}
               onSite={pickSite}
               siteLabel={siteLabel}
+              mode={display.map}
+              onMode={display.setMap}
             />
           )}
-          <Hud faded={touchedGlobe} />
+          <Hud faded={touchedGlobe} flat={display.map === 'flat'} />
         </main>
 
         <section className="panel browse" aria-label={t.stations}>

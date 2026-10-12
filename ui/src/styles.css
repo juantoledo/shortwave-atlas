@@ -304,6 +304,16 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 .globe-ctl { position: absolute; z-index: 2; right: 12px; bottom: 12px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .globe-ctl .zoom { display: flex; flex-direction: column; gap: 6px; }
 .globe-ctl .icon-btn { background: rgba(6, 12, 20, 0.7); font-size: 17px; }
+/* globe or flat map: a .seg shaped like .toggle, the choice lit like a pressed one (and first:
+   phones move the receiver's .seg, order 2) */
+.globe-ctl .seg { order: 0; min-height: var(--hit); background: rgba(6, 12, 20, 0.7); border-radius: 999px; }
+.globe-ctl .seg button { display: inline-flex; align-items: center; gap: 7px; padding: 0 11px; text-transform: uppercase; }
+.globe-ctl .seg button::before { content: ""; width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--dim); }
+.globe-ctl .seg button:hover:not(:disabled, [aria-checked="true"]) { color: var(--text); background: rgba(140, 185, 230, 0.08); }
+.globe-ctl .seg button[aria-checked="true"] { background: transparent; color: var(--text); }
+.globe-ctl .seg button[aria-checked="true"]::before { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 8px var(--amber); }
+.globe-ctl .seg button:disabled { opacity: 0.4; cursor: default; }
+.stage-note { top: 12px; left: 50%; transform: translateX(-50%); max-width: 56%; text-align: center; text-transform: none; letter-spacing: normal; }
 @media (max-width: 599px), (max-height: 520px) {
   .hud-bl, .legend .lg-term { display: none; }
   .legend { font-size: 10px; }
@@ -383,6 +393,12 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 .pin.off .pin-tag b { color: var(--text); }
 .pin-tag b .flag { height: 0.75em; width: 1em; vertical-align: 0; }
 @keyframes pin-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+/* the flat map (FlatMap.tsx): its canvas, the pins it moves, its tooltip */
+#globe.flat { overflow: hidden; cursor: grab; }
+#globe.flat canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.flat-pins { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.flat-pins > :is(.pin, .pulse) { position: absolute; left: 0; top: 0; }
+.flat-tip { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; }
 .site-tip { display: flex; flex-direction: column; gap: 2px; padding: 7px 10px; background: rgba(8, 14, 23, 0.94); border: 1px solid var(--line-strong); border-radius: 8px; font: 12px/1.35 var(--font-body); color: var(--text); }
 .site-tip b { font-weight: 600; }
 .site-tip span { color: var(--dim); font-size: 11.5px; }

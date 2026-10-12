@@ -5,7 +5,8 @@
 //           coastlines (Natural Earth 50m via world-atlas);
 //   lights: city lights (NASA Black Marble) tinted amber.
 // The night shading, the lights it reveals and the grey line are drawn by the globe's shader
-// from the sun's direction (night.ts), so the terminator moves continuously at no cost.
+// from the sun's direction (night.ts), so the terminator moves continuously at no cost; the flat
+// map paints them on a copy (flatTexture.ts). Both views share one build (`shared`).
 
 import { geoEquirectangular, geoGraticule10, geoPath, type GeoProjection } from 'd3-geo';
 import { feature, mesh } from 'topojson-client';
@@ -98,9 +99,22 @@ function buildLights(w: number, h: number, lights: HTMLImageElement): HTMLCanvas
   return c;
 }
 
+const built = new Map<number, Promise<GlobeTexture>>();
+
 /** The texture's static layers, as canvases for `CanvasTexture`s. */
 export class GlobeTexture {
   private constructor(readonly base: HTMLCanvasElement, readonly lights: HTMLCanvasElement) {}
+
+  /** `create`, once per width: switching between the globe and the flat map builds nothing again. */
+  static shared(width: number): Promise<GlobeTexture> {
+    let p = built.get(width);
+    if (!p) {
+      p = GlobeTexture.create(width);
+      p.catch(() => built.delete(width));
+      built.set(width, p);
+    }
+    return p;
+  }
 
   /** Load the map data and rasters (lazily, they are ~2 MB) and build the layers. */
   static async create(width: number): Promise<GlobeTexture> {

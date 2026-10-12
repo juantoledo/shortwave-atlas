@@ -1,10 +1,10 @@
-// Over the globe: what the dots mean (top left) and how to use it (bottom left, fading
-// once you have touched the globe).
+// Over the globe or the flat map: what the dots mean (top left) and how to use it (bottom left,
+// fading once you have touched it).
 
 import { COARSE, useMedia } from '../hooks/useMedia';
 import { useT } from '../i18n';
 
-export function Hud({ faded }: { faded: boolean }) {
+export function Hud({ faded, flat }: { faded: boolean; flat: boolean }) {
   const t = useT();
   const touch = useMedia(COARSE);
   return (
@@ -16,7 +16,7 @@ export function Hud({ faded }: { faded: boolean }) {
         <li className="lg-term">{t.liveTerminator}</li>
       </ul>
       <div className={'hud hud-bl' + (faded ? ' faded' : '')}>
-        {touch ? t.dragToRotateTouch : t.dragToRotate}<br />
+        {flat ? (touch ? t.dragToPanTouch : t.dragToPan) : touch ? t.dragToRotateTouch : t.dragToRotate}<br />
         {touch ? t.tapForQth : t.clickForQth}<br />
         {touch ? t.tapSite : t.clickSite}
       </div>
