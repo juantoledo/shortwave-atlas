@@ -693,7 +693,11 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .dock { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: var(--gap); min-width: 0; }
 .rx, .audio { min-width: 0; padding: 12px 16px; background: var(--panel-bg); border: 1px solid var(--line); border-radius: var(--radius); }
 .rx { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 20px; container-type: inline-size; }
-.rx-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.rx-main {
+  display: flex; flex-direction: column; gap: 10px; min-width: 0;
+  /* the controls' column (band, scan, signal), the same in each row; the strips take the rest */
+  --rx-side: clamp(280px, 32cqi, 310px);
+}
 .rx-top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
 .readout { display: flex; align-items: baseline; gap: 6px; }
 .freq {
@@ -759,8 +763,8 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .tune:disabled { cursor: default; }
 
 /* band dial (zoom) */
-.bdial, .dial-row { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: center; gap: 14px; }
-.dial-row .sm { flex-wrap: wrap; justify-content: center; gap: 4px 8px; }
+.bdial, .dial-row { display: grid; grid-template-columns: var(--rx-side) minmax(0, 1fr); align-items: center; gap: 14px; }
+.dial-row .sm { flex-wrap: wrap; gap: 4px 8px; }
 .bdial-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .bdial-head .icon-btn { width: 26px; height: 26px; font-size: 16px; }
 /* the band's name over its range, a list of every band */
@@ -790,8 +794,9 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .scan-prof path, .scan-big path { vector-effect: non-scaling-stroke; }
 .scan-prof .now, .scan-big .now { fill: rgba(79, 200, 164, 0.2); stroke: var(--band-ham); stroke-width: 1px; }
 .scan-prof .ghost { fill: none; stroke: var(--dim); stroke-width: 1px; stroke-dasharray: 3 3; opacity: 0.75; }
-.scan-bar { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: center; gap: 14px; }
-.scan-go { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.scan-bar { display: grid; grid-template-columns: var(--rx-side) minmax(0, 1fr); align-items: center; gap: 14px; }
+/* Scan and its pickers on one line; a picker never shrinks past its value, it wraps instead */
+.scan-go { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 /* Scan stands out: lit amber, with a sweep; while running, a pulse */
 .scan-btn {
   flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 4px 14px;
@@ -803,8 +808,8 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .scan-ico { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
 .scan-btn.on { border-color: var(--amber); animation: scan-pulse 1.6s ease-in-out infinite alternate; }
 @keyframes scan-pulse { from { box-shadow: 0 0 4px rgba(255, 179, 63, 0.2); } to { box-shadow: 0 0 18px rgba(255, 179, 63, 0.55); } }
-.scan-step { flex: 1; min-width: 0; }
-.scan-step .drop { min-height: 30px; padding: 3px 8px; font: 12px var(--font-mono); }
+.scan-step { flex: 1 0 auto; }
+.scan-step .drop { min-height: 30px; padding: 3px 7px; font: 12px var(--font-mono); }
 .scan-info { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-width: 0; }
 .scan-est { font: 400 11px var(--font-mono); color: var(--dim); white-space: nowrap; }
 .scan-progress { flex: 1 1 120px; max-width: 360px; height: 6px; accent-color: var(--amber); }
@@ -813,7 +818,7 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
    and a row of labels per lane (only those that fit: dial.ts fitLabels) */
 .dial { position: relative; height: 88px; }
 .dial .dial-scale { top: 28px; }
-.dial-side { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
+.dial-side { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
 .seg.spans button { padding: 3px 8px; font-size: 10.5px; }
 .seg.spans button.here:not([aria-checked="true"]) { color: var(--text); }
 .dial-gap { position: absolute; top: 0; height: 28px; background: var(--band-gap); pointer-events: none; }
