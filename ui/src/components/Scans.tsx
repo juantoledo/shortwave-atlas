@@ -14,8 +14,14 @@ import type { StationRef } from '../types/generated/StationRef';
 import { Confirm } from './Confirm';
 import { MARKS_W } from './dial';
 import { Flag } from './Flag';
-import { bandOf, profilePath, stepKhz, tally } from './scan';
+import { bandOf, profilePath, speedOf, stepKhz, tally } from './scan';
 import { Sheet } from './Sheet';
+
+/** A scan's speed by name, or its dwell when no speed has it. */
+function paceLabel(t: ReturnType<typeof useT>, s: ScanSummary): string {
+  const sp = speedOf(s);
+  return sp ? t.scanSpeeds[sp] : `${s.dwell_ms} ms`;
+}
 
 interface Props {
   scan: ScanApi;
@@ -57,7 +63,7 @@ function Detail({ s, full, onTune, onShow, onDelete }: DetailProps) {
     <div className="scan-detail">
       <h2>{names.dialBand(bandOf(s))} <small>{fmtStamp(t, s.started)}</small></h2>
       <p className="note">
-        {t.scanMeta(stepKhz(s.step_hz), s.dwell_ms, sLabel(s.noise_db))} · {t.scanOutcome[s.outcome.kind]}
+        {t.scanMeta(stepKhz(s.step_hz), paceLabel(t, s), sLabel(s.noise_db))} · {t.scanOutcome[s.outcome.kind]}
         {s.outcome.kind === 'failed' && <span className="warn">{` · ${s.outcome.message}`}</span>}
       </p>
       <div className="scan-big" aria-hidden="true">

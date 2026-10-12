@@ -10,11 +10,14 @@ use atlas_core::api::{
 };
 use atlas_core::audio::{default_tuning, diagnose_audio, validate_audio, AudioChoice};
 use atlas_core::bands::{Dial, ItuRegion};
+use atlas_core::hunt::{hunt, usual, ListeningNow};
 use atlas_core::lens::{self, Known};
+use atlas_core::listening::Ctx;
 use atlas_core::platform::Os;
 use atlas_core::scan::{plan, ScanRequest, ScanStatus};
 use atlas_core::setup::{validate_choice, BackendKind, RigChoice, RigModel};
-use atlas_core::stations::{CatalogCell, LOOKUP_TOLERANCE_HZ};
+use atlas_core::stations::{Catalog, CatalogCell, Lens, LOOKUP_TOLERANCE_HZ};
+use atlas_core::stats::{listened_ids, stats, trend_for, NowListening};
 use atlas_rig::{discover, Rig, RigConfig, ScanStop};
 use serde_json::Value;
 use tokio::sync::OnceCell;
@@ -22,6 +25,7 @@ use tokio::sync::OnceCell;
 use crate::audio::{backend, sound_cards, AudioHub};
 use crate::config::{save_audio, save_rig, save_update, AppConfig};
 use crate::favorites::FavoriteService;
+use crate::listening::ListeningService;
 use crate::scan::{Context, ScanService};
 use crate::update::{InstallRefused, UpdateService, Updater};
 use crate::user_stations::UserStationService;
@@ -49,6 +53,8 @@ pub struct Atlas {
     pub favorites: Arc<FavoriteService>,
     /// The listener's own stations; they rebuild `stations` when they change.
     pub user_stations: Arc<UserStationService>,
+    /// The listening history, recorded from the rig's states.
+    pub listening: Arc<ListeningService>,
     /// Ourselves, for the background install task.
     me: Weak<Atlas>,
 }
@@ -63,8 +69,8 @@ fn now_secs() -> i64 {
 
 impl Atlas {
     /// Load stations and, from `data_dir`, the listener's own (`user-stations.json`), the saved
-    /// QTH (`qth.json`), scans (`scans/`) and favorites (`favorites.json`); then start the rig and
-    /// the update checks. `None` keeps all of them in memory (tests). Needs a tokio runtime. `updater` is the desktop shell's, or a
+    /// QTH (`qth.json`), scans (`scans/`), favorites (`favorites.json`) and the listening history
+    /// (`listening.jsonl`); then start the rig, the update checks and the listening tracker. `None` keeps all of them in memory (tests). Needs a tokio runtime. `updater` is the desktop shell's, or a
     /// `ManifestUpdater`.
     pub fn start(
         config: AppConfig,
@@ -95,7 +101,8 @@ impl Atlas {
         update.spawn_checks();
         let scan = ScanService::new(data_dir.as_ref().map(|d| d.join("scans")), stations.clone());
         let favorites = FavoriteService::new(data_dir.as_ref().map(|d| d.join("favorites.json")), stations.clone());
-        Ok(Arc::new_cyclic(|me| Self {
+        let listening = ListeningService::new(data_dir.as_ref().map(|d| d.join("listening.jsonl")));
+        let atlas = Arc::new_cyclic(|me| Self {
             rig,
             audio,
             config,
@@ -109,13 +116,54 @@ impl Atlas {
             scan,
             favorites,
             user_stations,
+            listening,
             me: me.clone(),
-        }))
+        });
+        Self::spawn_tracker(Arc::downgrade(&atlas));
+        Ok(atlas)
+    }
+
+    /// Feed the listening tracker every rig state, and a tick every few seconds (for the dwell
+    /// and stations going off the air while nothing changes). Ends with the app.
+    fn spawn_tracker(me: Weak<Atlas>) {
+        tokio::spawn(async move {
+            let Some(mut rx) = me.upgrade().map(|a| a.rig.subscribe()) else { return };
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                tokio::select! {
+                    r = rx.changed() => if r.is_err() { return },
+                    _ = tick.tick() => {}
+                }
+                let Some(atlas) = me.upgrade() else { return };
+                atlas.track(now_secs());
+            }
+        });
+    }
+
+    /// Show the listening tracker the rig as it is at `now`.
+    pub fn track(&self, now: i64) {
+        let cat = self.stations.get();
+        let ctx = Ctx { cat: &cat, qth: self.qth().pos() };
+        self.listening.observe(&self.rig.state(), self.rig.scanning(), now, &ctx);
+    }
+
+    fn listening_now(&self, cat: &Catalog, now: i64) -> ListeningNow {
+        self.listening.with(now, |list, open| match open {
+            Some(s) => ListeningNow {
+                now: Some(NowListening {
+                    session: s.clone(),
+                    station_id: s.station.as_ref().and_then(|r| cat.by_key(&r.source, &r.key)).map(|st| st.id),
+                }),
+                usual: None,
+            },
+            None => ListeningNow { now: None, usual: usual(cat, &list.iter().collect::<Vec<_>>(), now) },
+        })
     }
 
     /// Stop the audio capture and the rigctld we started, and wait until they are gone, so the
     /// serial port, rigctld's TCP port and the sound card are free when the app is gone.
     pub async fn shutdown(&self) {
+        self.listening.close();
         self.audio.shutdown().await;
         self.rig.disconnect().await;
     }
@@ -224,7 +272,7 @@ impl Atlas {
             .iter()
             .find(|b| b.id == req.band_id)
             .ok_or_else(|| invalid("That band is not on this rig's dial"))?;
-        let plan = plan(band, req.step_hz, req.dwell_ms, &coverage).map_err(invalid)?;
+        let plan = plan(band, req.step_hz, req.dwell_ms, req.speed, &coverage).map_err(invalid)?;
         let link = self.rig.begin_scan()?;
         let state = self.rig.state();
         let cfg = self.rig_config();
@@ -240,11 +288,19 @@ impl Atlas {
         self.qth.read().expect("qth lock").clone()
     }
 
-    fn info(&self) -> Info {
+    async fn info(&self) -> Info {
         let audio = self.audio.choice();
+        let cfg = self.rig_config();
+        let rig_model = match cfg.backend {
+            BackendKind::Spawn => self.models().await.into_iter().find(|m| m.id == cfg.model),
+            _ => None,
+        };
+        let rig_host = (cfg.backend == BackendKind::External).then(|| format!("{}:{}", cfg.host, cfg.port));
         Info {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            backend: self.rig_config().backend.as_str().to_string(),
+            backend: cfg.backend.as_str().to_string(),
+            rig_model,
+            rig_host,
             qth: self.qth(),
             lang: self.config.lang.clone(),
             audio: audio.enabled,
@@ -278,7 +334,7 @@ impl Atlas {
         let now = now_secs();
         let json = |v: Result<Value, serde_json::Error>| v.map_err(|e| ApiError::internal(e.to_string()));
         match call {
-            Call::Info => json(serde_json::to_value(self.info())),
+            Call::Info => json(serde_json::to_value(self.info().await)),
             Call::State => json(serde_json::to_value(self.rig.state())),
             Call::Rig(cmd) => {
                 self.rig.execute(cmd).await?;
@@ -293,7 +349,19 @@ impl Atlas {
                 let (logbook, signals, favorites) =
                     (self.scan.logbook_for(&cat), self.scan.signals(), self.favorites.list());
                 let scan = q.scan.as_deref().and_then(|id| self.scan.summary(id));
-                let known = Known { logbook: &logbook, signals: &signals, favorites: &favorites, scan: scan.as_ref() };
+                // only the Listened lens needs the history
+                let listened = if q.lens == Lens::Listened {
+                    self.listening.with(now, |l, open| listened_ids(l.iter().chain(open), &cat))
+                } else {
+                    Default::default()
+                };
+                let known = Known {
+                    logbook: &logbook,
+                    signals: &signals,
+                    favorites: &favorites,
+                    listened: &listened,
+                    scan: scan.as_ref(),
+                };
                 json(serde_json::to_value(lens::search(&cat, &q, now, &known)))
             }
             Call::Overview => json(serde_json::to_value(self.stations.get().overview(now))),
@@ -380,6 +448,33 @@ impl Atlas {
             Call::ImportUserStations { json: text, replace } => {
                 json(serde_json::to_value(self.mine(move |s| s.import(&text, replace, now)).await?))
             }
+            Call::Stats(q) => {
+                let cat = self.stations.get();
+                json(serde_json::to_value(self.listening.with(now, |l, open| stats(l, open, &q, now, &cat))))
+            }
+            Call::Listening => json(serde_json::to_value(self.listening_now(&self.stations.get(), now))),
+            Call::Hunt => {
+                let cat = self.stations.get();
+                let (logbook, coverage, qth) =
+                    (self.scan.logbook_for(&cat), self.rig.coverage().await, self.qth().pos());
+                json(serde_json::to_value(self.listening.with(now, |l, open| {
+                    let all: Vec<_> = l.iter().chain(open).collect();
+                    hunt(&cat, &all, &logbook, now, qth, &coverage)
+                })))
+            }
+            Call::StationTrend(key) => {
+                let cat = self.stations.get();
+                json(serde_json::to_value(self.listening.with(now, |l, _| trend_for(l, &cat, &key, now))))
+            }
+            Call::HearingStation(key) => {
+                let cat = self.stations.get();
+                self.listening.hint(key, &Ctx { cat: &cat, qth: self.qth().pos() }, now);
+                Ok(Value::Null)
+            }
+            Call::ClearListening { before } => match self.listening.clear(before) {
+                Ok(n) => json(serde_json::to_value(n)),
+                Err(e) => Err(ApiError::internal(format!("Could not clear the listening history: {e}"))),
+            },
         }
     }
 
@@ -486,7 +581,7 @@ pub(crate) mod tests {
         }
         atlas.call(Call::Rig(RigCommand::SetFreq { hz: 5_025_000 })).await.unwrap();
         tuned(&atlas, 5_025_000).await;
-        let req = |band: &str, step_hz| ScanRequest { band_id: band.into(), step_hz, dwell_ms: Some(100) };
+        let req = |band: &str, step_hz| ScanRequest { band_id: band.into(), step_hz, dwell_ms: Some(100), speed: None };
 
         // checked against the dial
         let e = atlas.call(Call::StartScan(req("nope", None))).await.unwrap_err();
@@ -679,6 +774,76 @@ pub(crate) mod tests {
         assert_eq!(fresh.call(Call::UserStations).await.unwrap().as_array().unwrap().len(), 1);
         let e = fresh.call(Call::ImportUserStations { json: "[]".into(), replace: true }).await.unwrap_err();
         assert_eq!(e.kind, ErrorKind::Invalid);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn listening_through_calls() {
+        use atlas_core::stations::Lens;
+        use atlas_core::stats::{Period, StatsQuery};
+
+        let dir = std::env::temp_dir().join(format!("swatlas-listen-app-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let atlas = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
+        atlas.listening.set_dwell(0);
+        let mut rx = atlas.rig.subscribe();
+        while atlas.rig.state().power != Power::On {
+            rx.changed().await.unwrap();
+        }
+        // a station on the air now, to tune
+        let page = atlas.call(Call::Search(StationQuery { limit: 200, ..Default::default() })).await.unwrap();
+        let st = page["items"].as_array().unwrap().iter().find(|r| r["on"] == true).unwrap().clone();
+        let hz = st["freq_hz"].as_u64().unwrap() as u32;
+        atlas.call(Call::Rig(RigCommand::SetFreq { hz })).await.unwrap();
+        tuned(&atlas, hz).await;
+        // the tracker task runs too, on the real clock: so does the test
+        atlas.track(now_secs());
+        atlas.track(now_secs());
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        let key = serde_json::json!({ "source": st["source"], "key": st["key"] });
+        // on a busy machine the session may open a tick later
+        for _ in 0..50 {
+            if !atlas.call(Call::Listening).await.unwrap()["now"].is_null() {
+                break;
+            }
+            atlas.track(now_secs());
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        atlas.call(Call::HearingStation(serde_json::from_value(key.clone()).unwrap())).await.unwrap();
+        let l = atlas.call(Call::Listening).await.unwrap();
+        assert_eq!(l["now"]["session"]["freq_hz"].as_u64(), Some(u64::from(hz)), "{l}");
+        assert_eq!(l["now"]["station_id"], st["id"]);
+        assert_eq!(l["now"]["session"]["picked"], true);
+
+        let q = StatsQuery { period: Period::Day, tz_offset_min: 0 };
+        let s = atlas.call(Call::Stats(q.clone())).await.unwrap();
+        assert_eq!(s["now"]["session"]["freq_hz"].as_u64(), Some(u64::from(hz)));
+        assert_eq!(s["totals"]["sessions"], 1);
+        assert_eq!(s["heat"].as_array().unwrap().len(), 7);
+        // the Listened lens has it while it is under way
+        let lens = atlas.call(Call::Search(StationQuery { lens: Lens::Listened, ..Default::default() })).await.unwrap();
+        assert_eq!(lens["items"][0]["id"], st["id"]);
+        assert!(atlas.call(Call::Hunt).await.unwrap()["now"].is_array());
+        let trend = atlas.call(Call::StationTrend(serde_json::from_value(key).unwrap())).await.unwrap();
+        assert_eq!(trend.as_array().unwrap().len(), 26);
+        // on a fast machine all this takes less than a second, and a session that ends within
+        // the second it began overlaps no period: let it last one
+        let start = l["now"]["session"]["start"].as_i64().unwrap();
+        while now_secs() <= start {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        atlas.track(now_secs());
+
+        // shutting down saves it; a new instance reads it back, and clearing asks nothing more
+        atlas.shutdown().await;
+        assert!(dir.join("listening.jsonl").is_file());
+        let again = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
+        let s = again.call(Call::Stats(q)).await.unwrap();
+        assert_eq!((s["clear"]["all"].as_u64(), s["recent"].as_array().map(Vec::len)), (Some(1), Some(1)));
+        assert_eq!(again.call(Call::ClearListening { before: Some(0) }).await.unwrap(), 0);
+        assert_eq!(again.call(Call::ClearListening { before: None }).await.unwrap(), 1);
+        let l = again.call(Call::Listening).await.unwrap();
+        assert!(l["usual"].is_null());
         let _ = std::fs::remove_dir_all(dir);
     }
 

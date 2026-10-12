@@ -2,7 +2,7 @@
 // broadcast slot; for one of the listener's own stations, also its notes and link, and buttons
 // to edit or delete it. "+" adds another station on the frequency; with none there, the empty
 // card offers to add one. It fills its panel: the top part is fixed, the slots scroll in their
-// own box.
+// own box. A quiet line at the foot says where the station's data comes from, with a link to it.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNames } from '../catalog/names';
@@ -48,6 +48,22 @@ function DeleteMine({ name, onDelete }: { name: string; onDelete: () => void }) 
         />
       )}
     </span>
+  );
+}
+
+/** Where the station shown comes from: the source's name and season, linked to its site. */
+function SourceLine({ meta, source, mine }: { meta: CatalogMeta | null; source: string; mine: boolean }) {
+  const t = useT();
+  const info = meta?.sources.find((s) => s.id === source);
+  const label = mine ? t.sourceMine : info ? [info.name, info.season].filter(Boolean).join(' ') : source;
+  const url = !mine && info?.url && /^https?:\/\//i.test(info.url) ? info.url : null;
+  let host = '';
+  try { host = url ? new URL(url).host : ''; } catch { /* not a web address */ }
+  return (
+    <p className="d-source">
+      {t.dataSource} ·{' '}
+      {url ? <a href={url} target="_blank" rel="noreferrer" title={t.sourceLinkTitle(label, host)}>{label} ↗</a> : label}
+    </p>
   );
 }
 
@@ -237,6 +253,8 @@ export function Dossier({ on, freqHz, sel, others, meta, now, logged, mine, star
             </tbody>
           </table>
         </div>
+        {/* inside the slots: their box gives the room, the card never grows a scrollbar */}
+        <SourceLine meta={meta} source={st.source} mine={userSrc.has(st.source)} />
       </div>
     </div>
   );

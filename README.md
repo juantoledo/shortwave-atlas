@@ -42,6 +42,12 @@ frequency and station pairs from 170 transmitter sites), bundled with each relea
 station, country, language or kHz, filter by band, language, target area and country, or click a
 transmitter on the globe to list what it broadcasts.
 
+**Stats** keeps a history of what you listen to: stay on a station for 30 seconds and the session
+is recorded. See when and what you listened to against the period before, by station, country,
+language, band and distance, which band comes in best at each hour, and stations on the air now
+that are new to you. An optional collection layer adds a passport of countries, badges and a
+monthly bingo card. The history stays on your computer, and you can clear it.
+
 The rig is a frequency sensor: Shortwave Atlas only reads and sets frequency and mode, reads the
 S-meter and switches power. **It never transmits.**
 

@@ -2,6 +2,7 @@
 // left and the tuned station on its right, and the faceplate (dial and audio) along the bottom.
 // Smaller screens fold the side panels into tabs (styles.css); `view` says which one shows.
 // The globe may also be drawn behind the whole window (`data-globe`, Settings → Display).
+// Stats (`data-page="stats"`) takes the middle of the window; the top bar and faceplate stay.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AudioOff, AudioPanel, type AudioKeys } from './components/AudioPanel';
@@ -13,6 +14,7 @@ import { Help } from './components/Help';
 import { Hud } from './components/Hud';
 import { ScanBar } from './components/ScanBar';
 import { Scans } from './components/Scans';
+import { StatsView, type StatsTab } from './components/stats/StatsView';
 import { PanelHead, ViewTabs, type View } from './components/NavBar';
 import { Settings, type SettingsTab } from './components/settings/Settings';
 import { StationForm } from './components/StationForm';
@@ -24,6 +26,8 @@ import { DEFAULT_COVERAGE, HF_SPAN } from './components/dial';
 import { bandOf, noiseFloor } from './components/scan';
 import { keyOf, MINE } from './components/sources';
 import { UpdateBanner } from './components/UpdateBanner';
+import { chromeFor } from './api/window';
+import { Welcome } from './components/Welcome';
 import { makeNames, NamesProvider } from './catalog/names';
 import { NO_FILTERS, useCandidates, useCore, useDial, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
 import { PHONE, useMedia } from './hooks/useMedia';
@@ -32,6 +36,8 @@ import { useDisplay } from './hooks/useDisplay';
 import { useBandScans, useScan } from './hooks/useScan';
 import { useUpdate } from './hooks/useUpdate';
 import { useUserStations } from './hooks/useUserStations';
+import { useWelcome } from './hooks/useWelcome';
+import { useListening, useStats } from './hooks/useStats';
 import { fmtStamp, I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
 import { stepIndex, type Action } from './keys/keymap';
@@ -40,12 +46,16 @@ import type { Band } from './types/generated/Band';
 import type { Candidate } from './types/generated/Candidate';
 import type { Mode } from './types/generated/Mode';
 import type { OffSchedule } from './types/generated/OffSchedule';
+import type { Period } from './types/generated/Period';
 import type { Qth } from './types/generated/Qth';
+import type { ScanSpeed } from './types/generated/ScanSpeed';
 import type { SiteDot } from './types/generated/SiteDot';
 import type { StationRow } from './types/generated/StationRow';
 import type { UserStationDraft } from './types/generated/UserStationDraft';
 
 const MSG_MS = 6000;
+/** How long the rows a finished scan heard stay lit. */
+const FRESH_MS = 10000;
 const NO_HZ: number[] = [];
 const NO_BANDS: Band[] = [];
 const NO_SITES: SiteDot[] = [];
@@ -63,8 +73,15 @@ export function App() {
   const { api, info, reloadInfo, rig, status } = useCore();
   const update = useUpdate(api);
   const display = useDisplay();
+  const welcome = useWelcome();
   const [sheet, setSheet] = useState<SheetState>(null);
-  const [view, setView] = useState<View>('globe');
+  const [view, setViewRaw] = useState<View>('globe');
+  // Stats over the middle of the window, its tab and period
+  const [page, setPage] = useState<'main' | 'stats'>('main');
+  const [statsTab, setStatsTab] = useState<StatsTab>('overview');
+  const [statsPeriod, setStatsPeriod] = useState<Period>('week');
+  /** Another view (the phone's bottom tabs, a list action) leaves Stats. */
+  const setView = useCallback((v: View) => { setPage('main'); setViewRaw(v); }, []);
   const [dockOpen, setDockOpen] = useState(false);
   const [touchedGlobe, setTouchedGlobe] = useState(false);
   const phone = useMedia(PHONE);
@@ -105,9 +122,12 @@ export function App() {
   const favs = useFavorites(api, onError, generation);
   const mine = useUserStations(api, onError, generation, reloadOverview);
   const bandScans = useBandScans(scan, win.w.band?.id ?? null);
+  const { listening, reload: reloadListening } = useListening(api);
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
-  // the lenses change with the logbook and the favorites, and every list with the catalog
-  const lensKey = useMemo(() => ({}), [scan.logged, favs.views, generation]);
+  // the lenses change with the logbook, the favorites and the listening history (a session
+  // starting or ending), and every list with the catalog
+  const sessionKey = filters.lens === 'listened' ? listening?.now?.session.id ?? null : null;
+  const lensKey = useMemo(() => ({}), [scan.logged, favs.views, generation, sessionKey]);
   const search = useStationSearch(api, filters, lensKey);
   const cands = useCandidates(api, on ? freqHz : null, `${qth?.lat},${qth?.lon},${now.getTime()},${generation}`);
 
@@ -115,6 +135,16 @@ export function App() {
   // kept by source and key (`keyOf`), which hold when the catalog changes and the ids do not.
   const [sel, setSel] = useState<Candidate | null>(null);
   const [wanted, setWanted] = useState<string | null>(null);
+  // the globe's listened sites, while the list is on Listened
+  const lensListened = filters.lens === 'listened' && page === 'main';
+  const { stats: allTime } = useStats(api, 'all', lensListened);
+  const listenedSites = useMemo(() => {
+    const m = new Map<number, number>();
+    if (!lensListened || !allTime) return m;
+    const max = Math.max(1, ...allTime.sites.map((x) => x.seconds));
+    for (const x of allTime.sites) m.set(x.site, x.seconds / max);
+    return m;
+  }, [lensListened, allTime]);
   useEffect(() => {
     if (!on || !cands.length) setSel(null);
     else setSel((cur) => cands.find((c) => keyOf(c.station) === (wanted ?? (cur && keyOf(cur.station)))) ?? cands[0]);
@@ -142,9 +172,12 @@ export function App() {
   const setMode = (mode: Mode) => api?.rig({ cmd: 'set_mode', mode }).catch(onError);
   // a station's mode is set by the core once the rig is on its frequency (AM-N stays for AM)
   const tuneAs = (hz: number, mode: Mode | null) => tune(hz, mode);
+  // the station the listener chose is the one the listening history credits
+  const hearing = (st: { source: string; key: string }) => { api?.hearingStation({ source: st.source, key: st.key }).then(reloadListening, () => {}); };
   const pick = (r: StationRow) => {
     tuneAs(r.freq_hz, r.mode);
     setWanted(keyOf(r));
+    hearing(r);
   };
   const pickOff = (o: OffSchedule) => {
     tuneAs(o.freq_hz, o.mode);
@@ -153,7 +186,27 @@ export function App() {
   const choose = (c: Candidate) => {
     setWanted(keyOf(c.station));
     setSel(c);
+    hearing(c.station);
   };
+  // Stats: open and close; leave it for the list on a country, or for the globe's Listened sites
+  const toggleStats = () => setPage((p) => (p === 'stats' ? 'main' : 'stats'));
+  const statsCountry = (itu: string) => {
+    setFilters((f) => ({ ...f, countries: [itu], lens: 'all', scan: null, site: null }));
+    setView(phone ? 'browse' : view);
+  };
+  const statsGlobe = () => {
+    setFilters((f) => ({ ...f, lens: 'listened', scan: null }));
+    setView('globe');
+  };
+  useEffect(() => {
+    if (page !== 'stats' || sheet !== null || welcome.open) return;
+    const esc = (e: KeyboardEvent) => {
+      // a confirm popover takes its own Escape
+      if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.confirm-pop')) setPage('main');
+    };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [page, sheet, welcome.open]);
   // turning off asks first (components/Confirm.tsx); a rig that goes off by itself drops the question
   const [askOff, setAskOff] = useState(false);
   useEffect(() => { if (!on) setAskOff(false); }, [on]);
@@ -195,6 +248,21 @@ export function App() {
     setScansNew(false);
     setSheet({ kind: 'scans', id });
   };
+  // a scan started here turns the list to what the scans heard, newest first, and the rows it
+  // hears light up when it ends (the logbook is only written then)
+  const startScan = (bandId: string, stepHz: number, speed: ScanSpeed) => {
+    setFilters({ ...NO_FILTERS, lens: 'heard', sort: 'recent' });
+    if (phone) setView('browse');
+    void scan.start(bandId, stepHz, speed);
+  };
+  const runningSince = scan.status.state === 'running' ? scan.status.started : null;
+  const [freshSince, setFreshSince] = useState<number | null>(null);
+  useEffect(() => { if (runningSince !== null) setFreshSince(runningSince); }, [runningSince]);
+  useEffect(() => {
+    if (!scan.finished) return;
+    const id = setTimeout(() => setFreshSince(null), FRESH_MS);
+    return () => clearTimeout(id);
+  }, [scan.finished]);
   // the station list narrowed to a scan, or showing the favorites
   const showScan = (id: string) => {
     setSheet(null);
@@ -246,12 +314,15 @@ export function App() {
     // on phones the panel only shows after the view change renders
     if (phone) requestAnimationFrame(go);
   };
-  useKeys(sheet !== null || askOff, (a: Action) => {
+  useKeys(sheet !== null || askOff || welcome.open, (a: Action) => {
     switch (a.kind) {
       case 'search':
+        setPage('main');
         setFilters((f) => ({ ...f, q: a.text }));
         return focusSearch(false);
-      case 'focusSearch': return focusSearch(true);
+      case 'focusSearch':
+        setPage('main');
+        return focusSearch(true);
       case 'help': return openHelp();
       case 'audio': return audioKeys.current?.toggle();
       case 'mute': return audioKeys.current?.mute();
@@ -295,9 +366,10 @@ export function App() {
   return (
     <I18nProvider value={t}>
       <NamesProvider value={names}>
-      <div className="app" data-view={view} data-dock={dockOpen ? 'open' : undefined} data-globe={display.fullGlobe ? 'full' : 'framed'}>
+      <div className="app" data-view={view} data-page={page === 'stats' ? 'stats' : undefined} data-dock={dockOpen ? 'open' : undefined} data-globe={display.fullGlobe ? 'full' : 'framed'}>
         <TopBar
           info={info}
+          chrome={api ? chromeFor(api.transport.kind, info?.os) : null}
           status={statusLine}
           on={on}
           powerBusy={powerBusy}
@@ -309,6 +381,9 @@ export function App() {
           onSetup={() => openSettings('rig')}
           onScans={() => openScans()}
           scansNew={scansNew}
+          onStats={toggleStats}
+          statsOn={page === 'stats'}
+          listening={listening}
           onFavorites={toggleFavorites}
           favOn={filters.lens === 'favorites'}
           onHelp={() => openHelp()}
@@ -323,7 +398,7 @@ export function App() {
               qth={qth}
               frame={frame}
               onFrame={toggleFrame}
-              paused={phone && view !== 'globe'}
+              paused={page === 'stats' || (phone && view !== 'globe')}
               onInteract={onGlobeTouched}
               onQth={moveQth}
               failedMsg={t.globeFailed}
@@ -331,6 +406,7 @@ export function App() {
               strengthDb={on ? rig.strength_db : null}
               activeSite={filters.site}
               loggedSites={scan.loggedSites}
+              listenedSites={listenedSites}
               scan={globeScan}
               finale={finale}
               onSite={pickSite}
@@ -355,6 +431,7 @@ export function App() {
             scanName={scanName}
             selId={sel?.station.id ?? null}
             logged={scan.logged}
+            freshSince={freshSince}
             favs={favs.byStation}
             off={search.off}
             heard={search.heard}
@@ -412,7 +489,7 @@ export function App() {
                 on={on}
                 band={win.w.band}
                 status={scan.status}
-                onStart={scan.start}
+                onStart={startScan}
                 onStop={scan.stop}
               />
             }
@@ -437,6 +514,30 @@ export function App() {
             info && <AudioOff onSetUp={() => openSettings('audio')} />
           )}
         </footer>
+
+        {page === 'stats' && (
+          <StatsView
+            api={api}
+            collection={display.collection}
+            tab={statsTab}
+            onTab={setStatsTab}
+            period={statsPeriod}
+            onPeriod={setStatsPeriod}
+            clock={now}
+            onBack={() => setPage('main')}
+            usual={listening?.now ? null : listening?.usual ?? null}
+            onTune={(hz, mode, st) => {
+              tuneAs(hz, mode);
+              if (st) {
+                setWanted(keyOf(st));
+                hearing(st);
+              }
+            }}
+            onCountry={statsCountry}
+            onShowGlobe={statsGlobe}
+            onError={onError}
+          />
+        )}
 
         <ViewTabs className="nav" views={['globe', 'station', 'browse']} current={view} onView={setView} count={shortCount} />
 
@@ -488,6 +589,7 @@ export function App() {
             onClose={() => setSheet(null)}
           />
         )}
+        {welcome.open && <Welcome onClose={welcome.close} />}
       </div>
       </NamesProvider>
     </I18nProvider>

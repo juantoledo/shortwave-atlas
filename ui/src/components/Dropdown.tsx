@@ -17,6 +17,8 @@ export interface DropOpt {
   /** Rows it would give, shown in a pill. */
   n?: number;
   disabled?: boolean;
+  /** Extra class on the option (a band's kind). */
+  cls?: string;
 }
 
 const PAGE = 8;
@@ -84,7 +86,7 @@ function OptionList(p: ListProps) {
           key={o.value || '*'}
           id={`${p.id}-o${i}`}
           role="option"
-          className={'drop-o' + (i === p.active ? ' act' : '') + (o.value === '' ? ' all' : '')}
+          className={'drop-o' + (i === p.active ? ' act' : '') + (o.value === '' ? ' all' : '') + (o.cls ? ' ' + o.cls : '')}
           aria-selected={o.value === p.selected}
           aria-disabled={!p.usable(o) || undefined}
           onPointerMove={() => p.usable(o) && i !== p.active && p.onActive(i)}
@@ -114,9 +116,14 @@ interface DropdownProps {
   all?: string;
   /** Light the button up (a filter that is set). */
   lit?: boolean;
+  /** Extra class on the button. */
+  className?: string;
+  disabled?: boolean;
+  /** Shown when the value is none of the options. */
+  none?: string;
 }
 
-export function Dropdown({ labelledBy, value, opts, onChange, all, lit }: DropdownProps) {
+export function Dropdown({ labelledBy, value, opts, onChange, all, lit, className, disabled, none }: DropdownProps) {
   const id = useId();
   const box = useRef<HTMLDivElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
@@ -176,7 +183,8 @@ export function Dropdown({ labelledBy, value, opts, onChange, all, lit }: Dropdo
       <button
         ref={btn}
         type="button"
-        className={'drop' + (lit ? ' lit' : '')}
+        className={'drop' + (lit ? ' lit' : '') + (className ? ' ' + className : '')}
+        disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? `${id}-list` : undefined}
@@ -190,7 +198,7 @@ export function Dropdown({ labelledBy, value, opts, onChange, all, lit }: Dropdo
         }}
       >
         <span className="drop-v" id={`${id}-v`}>
-          <span>{cur?.label ?? value}</span>
+          <span>{cur?.label ?? none ?? value}</span>
           {cur?.hint && <small>{cur.hint}</small>}
         </span>
         <Chevron />

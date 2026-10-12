@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Band } from '../types/generated/Band';
 import type { ScanSummary } from '../types/generated/ScanSummary';
-import { dbY, gridPoints, lastTwo, noiseFloor, profilePath, scanSecs, stepChoices, tally } from './scan';
+import { dbY, gridPoints, lastTwo, noiseFloor, profilePath, scanSecs, speedOf, stepChoices, tally, trail } from './scan';
 
 const b49: Band = { id: '49m', label: '49', kind: 'broadcast', lo_khz: 5800, hi_khz: 6300, scan_step_hz: 5000 };
 const ham10: Band = { id: 'ham-10m', label: '10', kind: 'ham', lo_khz: 28000, hi_khz: 29700, scan_step_hz: 1000 };
@@ -25,8 +25,26 @@ describe('scan steps', () => {
   });
 
   it('estimates the time', () => {
+    // 49 m, 101 steps: ~50 s as it is, a third of that fast
     expect(scanSecs(101)).toBe(51);
-    expect(scanSecs(10, 1000)).toBe(12);
+    expect(scanSecs(101, 'fast')).toBe(16);
+    expect(scanSecs(101, 'thorough')).toBe(81);
+  });
+
+  it('traces the last steps of a running scan', () => {
+    const s = [-54, null, 40, 0, null];
+    expect(trail(s, 0)).toEqual([]);
+    // the last two visited: S9+40 is full height, unread stays null
+    expect(trail(s, 3, 2)).toEqual([{ i: 1, h: null }, { i: 2, h: 1 }]);
+    // S0 keeps a sliver
+    expect(trail(s, 1)[0].h).toBe(0.08);
+    expect(trail(s, 9).map((c) => c.i)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('tells the speed a scan ran at', () => {
+    expect(speedOf({ dwell_ms: 120, reads: 1 })).toBe('fast');
+    expect(speedOf({ dwell_ms: 300, reads: 3 })).toBe('normal');
+    expect(speedOf({ dwell_ms: 100, reads: 3 })).toBeNull();
   });
 });
 
@@ -52,7 +70,7 @@ describe('profile', () => {
 describe('scan summaries', () => {
   const ref = (name: string) => ({ source: 'eibi', key: name, freq_hz: 6_070_000, name, itu: 'CHN', flag: 'cn', site_name: 'x', site_itu: 'CHN', lang: 'M', target: 'CHN' });
   const summary = (id: string, band_id: string): ScanSummary => ({
-    version: 1, id, band_id, band_label: '49', band_kind: 'broadcast', first_hz: 5_800_000, step_hz: 5000, points: 101, dwell_ms: 300,
+    version: 1, id, band_id, band_label: '49', band_kind: 'broadcast', first_hz: 5_800_000, step_hz: 5000, points: 101, dwell_ms: 300, reads: 3,
     mode: 'AM', started: 0, finished: 1, outcome: { kind: 'complete' }, qth: { name: 'q', lat: 0, lon: 0 }, rig: 'sim', sources: [{ id: 'eibi', version: 'sked-a26.csv' }],
     noise_db: -48, measured: 101,
     peaks: [

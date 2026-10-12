@@ -20,6 +20,17 @@ export function DisplaySection({ display }: { display: DisplayApi }) {
         </div>
         <small>{t.globeFullHelp}</small>
       </div>
+      <div className="field">
+        <span>{t.collectionSetting}</span>
+        <div className="seg" role="radiogroup" aria-label={t.collectionSetting}>
+          {[true, false].map((on) => (
+            <button key={String(on)} type="button" role="radio" aria-checked={display.collection === on} onClick={() => display.setCollection(on)}>
+              {on ? t.collectionShow : t.collectionHide}
+            </button>
+          ))}
+        </div>
+        <small>{t.collectionHelp}</small>
+      </div>
     </section>
   );
 }

@@ -1,12 +1,12 @@
 // The receiver faceplate: readout and modes; the band dial (a zoom on the band you are in, kHz
-// by kHz); the S-meter and span switch beside the whole dial (one span of what the rig
+// by kHz, under its name: a list to jump to any band, between arrows to step); the S-meter and span switch beside the whole dial (one span of what the rig
 // receives: LW/MW, HF, VHF or UHF), which shows broadcast bands on one lane and ham, CB and
 // utility bands on another, with a lens over where the band dial looks; and the dual tuning
 // knob at the right; under the band dial, the scan controls, and over it the strength profile of
 // the band's last scan (or the one running) with the scan before it as a ghost. `rx-x` parts fold
 // away on small screens until expanded.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNames } from '../catalog/names';
 import { sLabel, useT } from '../i18n';
 import { altName, isMac } from '../keys/keymap';
@@ -18,6 +18,7 @@ import {
   adjacentBand, bandBars, bandEntryHz, bandWindow, dialPct, dialTicks, fitLabels, markPaths, MARKS_W, rangeLabel, spanAt,
   tickLabel, uncovered, windowOf, windowPct, windowTicks, type DialWindow,
 } from './dial';
+import { Dropdown, type DropOpt } from './Dropdown';
 import { Knob } from './Knob';
 import { profilePath, type Profile } from './scan';
 
@@ -63,7 +64,7 @@ function Marks({ off, on }: { off: string; on: string }) {
 
 /** The band dial's window, kept while you stay inside it (its margins lie outside the band).
  *  `jump` steps to the next band up or down and shows it, even where it overlaps the one you
- *  were in (40 m and 41 m); it returns where to tune. */
+ *  were in (40 m and 41 m), and `go` does the same for any band; both return where to tune. */
 export function useBandWindow(freqHz: number | null, bands: readonly Band[], onAirHz: readonly number[]) {
   const khz = freqHz === null ? IDLE_KHZ : freqHz / 1000;
   const last = useRef<DialWindow | null>(null);
@@ -79,13 +80,15 @@ export function useBandWindow(freqHz: number | null, bands: readonly Band[], onA
   }
   last.current = w;
   const step = useCallback((dir: 1 | -1) => adjacentBand(khz, bands, dir, w.band), [khz, bands, w.band]);
-  const jump = useCallback((dir: 1 | -1): number | null => {
-    const b = step(dir);
-    if (!b) return null;
+  const go = useCallback((b: Band): number => {
     pinned.current = windowOf(b);
     return bandEntryHz(b, onAirHz);
-  }, [step, onAirHz]);
-  return { w, khz, step, jump };
+  }, [onAirHz]);
+  const jump = useCallback((dir: 1 | -1): number | null => {
+    const b = step(dir);
+    return b ? go(b) : null;
+  }, [step, go]);
+  return { w, khz, step, jump, go };
 }
 
 /** An element's width, followed as it resizes. */
@@ -179,6 +182,19 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
     const hz = win.jump(dir);
     if (hz !== null) onTune(hz);
   };
+  // every band, low to high; those the rig does not receive can't be picked
+  const bandId = useId();
+  const bandOpts = useMemo<DropOpt[]>(() => [...bands].sort((a, b) => a.lo_khz - b.lo_khz || a.hi_khz - b.hi_khz).map((b) => ({
+    value: b.id,
+    label: names.dialBand(b),
+    hint: rangeLabel(b),
+    cls: 'k-' + b.kind,
+    disabled: !coverage.some((r) => r.lo_khz < b.hi_khz && r.hi_khz > b.lo_khz),
+  })), [bands, coverage, names]);
+  const pickBand = (id: string) => {
+    const b = bands.find((x) => x.id === id);
+    if (b) onTune(win.go(b));
+  };
   const lens = !away && w.hi > span.lo_khz && w.lo < span.hi_khz;
   const pct = (k: number) => dialPct(k, span);
 
@@ -226,10 +242,16 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
         <div className="bdial">
           <div className="bdial-head">
             <button className="icon-btn" type="button" disabled={!on || !prev} aria-label={t.prevBand} title={t.keyHint(t.prevBand, t.keyPgDn)} onClick={() => jump(-1)}>‹</button>
-            <span className={'bdial-name' + (w.band ? ' in k-' + w.band.kind : '')} title={w.band ? t.bandKinds[w.band.kind] : undefined}>
-              <b>{w.band ? names.dialBand(w.band) : t.bandOob}</b>
-              {w.band && <span className="bdial-range">{rangeLabel(w.band)}</span>}
-            </span>
+            <span className="sr" id={bandId}>{t.bandPick}</span>
+            <Dropdown
+              labelledBy={bandId}
+              className={'bdial-pick' + (w.band ? ' in k-' + w.band.kind : '')}
+              value={w.band?.id ?? ''}
+              none={t.bandOob}
+              disabled={!on}
+              opts={bandOpts}
+              onChange={pickBand}
+            />
             <button className="icon-btn" type="button" disabled={!on || !next} aria-label={t.nextBand} title={t.keyHint(t.nextBand, t.keyPgUp)} onClick={() => jump(1)}>›</button>
           </div>
           <div className={'bdial-scale' + (hasProf ? ' has-prof' : '')}>

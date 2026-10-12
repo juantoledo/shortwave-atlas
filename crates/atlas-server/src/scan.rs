@@ -7,8 +7,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use atlas_core::api::Qth;
 use atlas_core::scan::{
-    analyse, logbook, logged_sites, on_air_sites, scan_id, unidentified, valid_id, Logged, Scan, ScanOutcome, ScanPing,
-    ScanPlan, ScanStatus, ScanSummary, Signal, FORMAT_VERSION, PINGS_KEPT, READS, READ_GAP_MS,
+    analyse, analyse_so_far, keep_heard, logbook, logged_sites, on_air_sites, scan_id, unidentified, valid_id, Logged,
+    Peak, Scan, ScanOutcome, ScanPing, ScanPlan, ScanStatus, ScanSummary, Signal, FORMAT_VERSION, PINGS_KEPT,
+    READ_GAP_MS,
 };
 use atlas_core::stations::{Catalog, CatalogCell};
 use atlas_rig::{ScanLink, ScanStop};
@@ -44,13 +45,16 @@ struct Inner {
     logbook: Arc<Vec<Logged>>,
     generation: u32,
     signals: Arc<Vec<Signal>>,
+    /// The running scan, with what it heard so far (in the logbook until it ends).
+    live: Option<ScanSummary>,
 }
 
 impl Inner {
     fn relog(&mut self, catalog: &Catalog) {
-        self.logbook = Arc::new(logbook(self.scans.iter().map(|s| &s.summary), catalog));
+        let all = || self.scans.iter().map(|s| &s.summary).chain(self.live.as_ref());
+        self.logbook = Arc::new(logbook(all(), catalog));
         self.generation = catalog.generation();
-        self.signals = Arc::new(unidentified(self.scans.iter().map(|s| &s.summary)));
+        self.signals = Arc::new(unidentified(all()));
     }
 }
 
@@ -89,6 +93,7 @@ impl ScanService {
             logbook: Default::default(),
             generation: 0,
             signals: Default::default(),
+            live: None,
         };
         inner.relog(&catalog.get());
         Arc::new(Self { dir, catalog, inner: Mutex::new(inner) })
@@ -201,6 +206,7 @@ impl ScanService {
             total: plan.len() as u32,
             samples: vec![None; plan.len()],
             pings: vec![],
+            heard_rev: 0,
         };
         inner.status = status.clone();
         drop(inner);
@@ -213,23 +219,55 @@ impl ScanService {
         let (dwell, gap) = (Duration::from_millis(plan.dwell_ms.into()), Duration::from_millis(READ_GAP_MS.into()));
         let mut times = vec![0i64; plan.len()];
         let mut failure = None;
+        // its record, filled in when it ends; meanwhile in the logbook with what it heard so far
+        let draft = ScanSummary {
+            version: FORMAT_VERSION,
+            id: id.clone(),
+            band_id: plan.band.id.clone(),
+            band_label: plan.band.label.clone(),
+            band_kind: plan.band.kind,
+            first_hz: plan.first_hz,
+            step_hz: plan.step_hz,
+            points: plan.len() as u32,
+            dwell_ms: plan.dwell_ms,
+            reads: plan.reads,
+            mode: ctx.mode,
+            started,
+            finished: started,
+            outcome: ScanOutcome::Complete,
+            qth: ctx.qth,
+            rig: ctx.rig,
+            sources: vec![],
+            noise_db: None,
+            measured: 0,
+            peaks: vec![],
+            missed: vec![],
+        };
+        self.lock().live = Some(draft.clone());
         for i in 0..plan.len() {
             if link.stopped().is_some() {
                 break;
             }
             if plan.covered[i] {
-                match link.measure(plan.freq(i), dwell, READS, gap).await {
+                match link.measure(plan.freq(i), dwell, plan.reads, gap).await {
                     Ok(db) => {
                         times[i] = now_secs();
                         let db = db.map(|d| d.clamp(i16::MIN.into(), i16::MAX.into()) as i16);
-                        let sites = on_air_sites(&self.catalog.get(), plan.freq(i), plan.step_hz, times[i]);
-                        if let ScanStatus::Running { samples, pings, .. } = &mut self.lock().status {
-                            samples[i] = db;
-                            if pings.len() == PINGS_KEPT {
-                                pings.remove(0);
+                        let cat = self.catalog.get();
+                        let sites = on_air_sites(&cat, plan.freq(i), plan.step_hz, times[i]);
+                        let so_far = match &mut self.lock().status {
+                            ScanStatus::Running { samples, pings, .. } => {
+                                samples[i] = db;
+                                if pings.len() == PINGS_KEPT {
+                                    pings.remove(0);
+                                }
+                                pings.push(ScanPing { index: i as u32, db, sites });
+                                samples.clone()
                             }
-                            pings.push(ScanPing { index: i as u32, db, sites });
-                        }
+                            _ => continue,
+                        };
+                        let peaks = analyse_so_far(&cat, plan.first_hz, plan.step_hz, &so_far, &times, i + 1);
+                        self.hear(&cat, peaks);
                     }
                     Err(e) => {
                         failure = Some(e.to_string());
@@ -258,7 +296,10 @@ impl ScanService {
         };
         let measured = samples.iter().filter(|s| s.is_some()).count() as u32;
         if measured == 0 {
-            self.lock().status = failure.map_or(ScanStatus::Idle, |message| ScanStatus::Failed { message });
+            let mut inner = self.lock();
+            inner.live = None;
+            inner.relog(&self.catalog.get());
+            inner.status = failure.map_or(ScanStatus::Idle, |message| ScanStatus::Failed { message });
             return;
         }
         let outcome = match (failure, why) {
@@ -271,26 +312,14 @@ impl ScanService {
         let found = analyse(&cat, plan.first_hz, plan.step_hz, &samples, &times);
         let scan = Scan {
             summary: ScanSummary {
-                version: FORMAT_VERSION,
-                id: id.clone(),
-                band_id: plan.band.id.clone(),
-                band_label: plan.band.label.clone(),
-                band_kind: plan.band.kind,
-                first_hz: plan.first_hz,
-                step_hz: plan.step_hz,
-                points: plan.len() as u32,
-                dwell_ms: plan.dwell_ms,
-                mode: ctx.mode,
-                started,
                 finished: now_secs(),
                 outcome,
-                qth: ctx.qth,
-                rig: ctx.rig,
                 sources: cat.stamps(),
                 noise_db: found.noise_db,
                 measured,
                 peaks: found.peaks,
                 missed: found.missed,
+                ..draft
             },
             samples,
         };
@@ -299,9 +328,26 @@ impl ScanService {
         }
         let sites = logged_sites(&cat, &scan.summary.peaks);
         let mut inner = self.lock();
+        inner.live = None;
         inner.scans.insert(0, scan);
         inner.relog(&cat);
         inner.status = ScanStatus::Done { id, sites };
+    }
+
+    /// What the running scan heard so far (and before: `keep_heard`): into the logbook, and told
+    /// by the status, when it changed.
+    fn hear(&self, cat: &Catalog, peaks: Vec<Peak>) {
+        let mut inner = self.lock();
+        let Some(live) = inner.live.as_mut() else { return };
+        let peaks = keep_heard(&live.peaks, peaks);
+        if live.peaks == peaks {
+            return;
+        }
+        live.peaks = peaks;
+        inner.relog(cat);
+        if let ScanStatus::Running { heard_rev, .. } = &mut inner.status {
+            *heard_rev += 1;
+        }
     }
 }
 
@@ -322,6 +368,7 @@ mod tests {
                 step_hz: 5_000,
                 points: 2,
                 dwell_ms: 300,
+                reads: 3,
                 mode: None,
                 started,
                 finished: started + 1,
@@ -338,15 +385,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_logbook_follows_the_running_catalog() {
-        use atlas_core::rig::Mode;
-        use atlas_core::scan::{Peak, StationRef, Verdict};
-        use atlas_core::source::{Record, SiteSpec, SourceData, SourceDesc, SourceKind};
-
-        let cell = crate::sources::bundled_cell();
-        let svc = ScanService::new(None, cell.clone());
-        let cat = cell.get();
+    /// A peak on the catalog's first station, heard at `at`.
+    fn first_station_peak(cat: &Catalog, at: i64) -> Peak {
+        use atlas_core::scan::{StationRef, Verdict};
         let st = cat.station(0).unwrap();
         let site = cat.site(st.site).unwrap();
         let r = StationRef {
@@ -361,9 +402,19 @@ mod tests {
             lang: String::new(),
             target: String::new(),
         };
+        Peak { freq_hz: st.freq_hz, db: -20, at, verdict: Verdict::Sure, stations: vec![r] }
+    }
+
+    #[test]
+    fn the_logbook_follows_the_running_catalog() {
+        use atlas_core::rig::Mode;
+        use atlas_core::source::{Record, SiteSpec, SourceData, SourceDesc, SourceKind};
+
+        let cell = crate::sources::bundled_cell();
+        let svc = ScanService::new(None, cell.clone());
+        let cat = cell.get();
         let mut s = scan("a", 10);
-        s.summary.peaks =
-            vec![Peak { freq_hz: st.freq_hz, db: -20, at: 10, verdict: Verdict::Sure, stations: vec![r] }];
+        s.summary.peaks = vec![first_station_peak(&cat, 10)];
         {
             let mut inner = svc.lock();
             inner.scans.push(s);
@@ -399,6 +450,49 @@ mod tests {
         assert_eq!(svc.logbook().iter().map(|l| l.station_id).collect::<Vec<_>>(), [1]);
         // a snapshot of the old catalog still gets its own ids
         assert_eq!(svc.logbook_for(&cat).iter().map(|l| l.station_id).collect::<Vec<_>>(), [0]);
+    }
+
+    #[test]
+    fn a_running_scan_is_in_the_logbook_as_it_hears() {
+        let cell = crate::sources::bundled_cell();
+        let svc = ScanService::new(None, cell.clone());
+        let cat = cell.get();
+        let rev = |svc: &ScanService| match svc.status() {
+            ScanStatus::Running { heard_rev, .. } => heard_rev,
+            s => panic!("{s:?}"),
+        };
+        {
+            let mut inner = svc.lock();
+            inner.live = Some(scan("live", 10).summary);
+            inner.status = ScanStatus::Running {
+                id: "live".into(),
+                band_id: "49m".into(),
+                first_hz: 5_800_000,
+                step_hz: 5_000,
+                started: 10,
+                done: 0,
+                total: 2,
+                samples: vec![None; 2],
+                pings: vec![],
+                heard_rev: 0,
+            };
+        }
+        // nothing new: no bump
+        svc.hear(&cat, vec![]);
+        assert_eq!(rev(&svc), 0);
+        assert!(svc.logbook().is_empty());
+        // a station: in the logbook, and the status says so (once)
+        svc.hear(&cat, vec![first_station_peak(&cat, 12)]);
+        svc.hear(&cat, vec![first_station_peak(&cat, 12)]);
+        assert_eq!(rev(&svc), 1);
+        assert_eq!(svc.logbook().iter().map(|l| (l.station_id, l.first)).collect::<Vec<_>>(), [(0, 12)]);
+        // gone again when the scan ends without it
+        {
+            let mut inner = svc.lock();
+            inner.live = None;
+            inner.relog(&cat);
+        }
+        assert!(svc.logbook().is_empty());
     }
 
     #[test]

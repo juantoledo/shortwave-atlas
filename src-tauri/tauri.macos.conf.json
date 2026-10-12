@@ -1,5 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "title": "Shortwave Atlas", "width": 1400, "height": 900, "minWidth": 900, "minHeight": 600, "backgroundColor": "#070d15",
+        "titleBarStyle": "Overlay", "hiddenTitle": true
+      }
+    ]
+  },
   "bundle": {
     "targets": ["app", "dmg"],
     "externalBin": ["binaries/rigctld"],

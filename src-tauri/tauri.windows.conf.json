@@ -4,6 +4,7 @@
     "windows": [
       {
         "title": "Shortwave Atlas", "width": 1400, "height": 900, "minWidth": 900, "minHeight": 600, "backgroundColor": "#070d15",
+        "decorations": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --no-proxy-server"
       }
     ]

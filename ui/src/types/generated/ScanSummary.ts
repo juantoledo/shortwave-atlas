@@ -23,6 +23,10 @@ id: string, band_id: string, band_label: string, band_kind: BandKind,
  */
 first_hz: number, step_hz: number, points: number, dwell_ms: number, 
 /**
+ * Meter reads per step (scans saved before speeds took `READS`).
+ */
+reads: number, 
+/**
  * The rig's mode during the scan.
  */
 mode: string | null, 

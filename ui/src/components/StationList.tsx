@@ -1,5 +1,5 @@
-// The station list: three lenses (the whole schedule, what the scans heard, the favorites),
-// search, filters with counts (the listener's own stations are a source to filter by), a
+// The station list: four lenses (the whole schedule, what the scans heard, the favorites, what
+// the listening history has), search, filters with counts (the listener's own stations are a source to filter by), a
 // transmitter picked on the globe or a scan to go through, and
 // pages. Signals and favorites the schedule has no row for come first; in Heard they share one
 // list with the logged stations, sorted as asked, each with its best reading and when it was
@@ -24,10 +24,10 @@ import type { StationRow } from '../types/generated/StationRow';
 import { MineBadge } from './Dossier';
 import { Dropdown, type DropOpt } from './Dropdown';
 import { Flag } from './Flag';
-import { scheduleOf, userSources } from './sources';
+import { userSources } from './sources';
 
 const REGIONS: Region[] = ['am', 'eu', 'af', 'me', 'as', 'oc', 'other'];
-const LENSES: Lens[] = ['all', 'heard', 'favorites'];
+const LENSES: Lens[] = ['all', 'heard', 'favorites', 'listened'];
 const SORTS: Sort[] = ['freq', 'strongest', 'recent'];
 /** Languages and countries offered in the filters: the most common first, then by name. */
 const TOP = 12;
@@ -47,6 +47,8 @@ interface Props {
   selId: number | null;
   /** Stations a band scan logged, by id. */
   logged: ReadonlyMap<number, Logged>;
+  /** Heard rows last heard since then (unix s) light up: the scan just run. */
+  freshSince?: number | null;
   /** Favorites by station id. */
   favs: ReadonlyMap<number, Favorite>;
   /** Rows the schedule has none for. */
@@ -95,9 +97,12 @@ function StationItem({ r, p, log, mine }: { r: StationRow; p: Props; log?: Logge
   const scan = p.filters.scan;
   const db = scan === null ? undefined : p.scanDb[r.id];
   const missed = scan !== null && db === undefined;
+  // heard by the scan just run; `first` too: never logged before it
+  const fresh = log && p.freshSince != null && log.last >= p.freshSince;
+  const first = fresh && log.first >= p.freshSince!;
   return (
     <li>
-      <button className={'row' + (log ? ' heard-row' : '') + (missed ? ' missed' : '')} type="button" aria-current={p.on && p.selId === r.id} disabled={!p.on} title={missed ? t.scanMissedRow : undefined} onClick={() => p.onPick(r)}>
+      <button className={'row' + (log ? ' heard-row' : '') + (fresh ? ' fresh' : '') + (first ? ' first' : '') + (missed ? ' missed' : '')} type="button" aria-current={p.on && p.selId === r.id} disabled={!p.on} title={missed ? t.scanMissedRow : undefined} onClick={() => p.onPick(r)}>
         <span className="rf">{r.freq_hz / 1000}</span>
         <span className="rn">
           <b>
@@ -106,6 +111,12 @@ function StationItem({ r, p, log, mine }: { r: StationRow; p: Props; log?: Logge
             {lg && <span className="logged" title={t.loggedBadge(lg.count)} aria-label={t.loggedBadge(lg.count)}>✓</span>}
             {fav && <span className="fav" title={t.favBadge} aria-label={t.favBadge}>★</span>}
             {db !== undefined && <span className="sv" title={t.scanHeardAt(sLabel(db))}>{sLabel(db)}</span>}
+            {first && (
+              <svg className="new-ring" viewBox="0 0 12 12" role="img" aria-label={t.heardNew}>
+                <title>{t.heardNewTitle}</title>
+                <circle cx="6" cy="6" r="4.5" />
+              </svg>
+            )}
             {log && !log.sure && <span className="maybe" title={t.heardPossibleTitle}>{t.heardPossible}</span>}
           </b>
           <em>
@@ -175,11 +186,13 @@ export function StationList(p: Props) {
   const heardList = f.lens === 'heard' && f.scan === null;
   const sortLabel = { freq: t.sortFreq, strongest: t.sortStrongest, recent: t.sortRecent };
   const sortId = useId();
-  const lensLabel = { all: t.lensAll, heard: t.lensHeard, favorites: t.lensFav };
-  const lensTitle = { all: t.lensAllTitle, heard: t.lensHeardTitle, favorites: t.lensFavTitle };
-  const empty = filtered ? t.noResults : f.lens === 'heard' ? t.heardEmpty : f.lens === 'favorites' ? t.favEmpty : t.noResults;
-  const schedule = scheduleOf(p.meta);
-  const season = schedule?.season ?? '';
+  const lensLabel = { all: t.lensAll, heard: t.lensHeard, favorites: t.lensFav, listened: t.lensListened };
+  const lensTitle = { all: t.lensAllTitle, heard: t.lensHeardTitle, favorites: t.lensFavTitle, listened: t.lensListenedTitle };
+  const empty = filtered ? t.noResults
+    : f.lens === 'heard' ? t.heardEmpty
+    : f.lens === 'favorites' ? t.favEmpty
+    : f.lens === 'listened' ? t.listenedEmpty
+    : t.noResults;
 
   const box = useRef<HTMLDivElement>(null), end = useRef<HTMLDivElement>(null);
   const more = useRef(p.onMore);
@@ -201,6 +214,10 @@ export function StationList(p: Props) {
     io.observe(e);
     return () => io.disconnect();
   }, [loaded, hasMore]);
+  // a scan running, and its rows just arrived: kept at the top, where Most recent puts them
+  useEffect(() => {
+    if (heardList && p.freshSince != null && box.current) box.current.scrollTop = 0;
+  }, [heardList, p.freshSince, p.heard]);
   // new filters: back to the top
   const key = JSON.stringify(f);
   useEffect(() => { if (box.current) box.current.scrollTop = 0; }, [key]);
@@ -330,12 +347,6 @@ export function StationList(p: Props) {
           <button className="btn more" type="button" onClick={p.onMore}>{t.showMore(Math.min(100, p.total - loaded))}</button>
         )}
       </div>
-      {p.meta && (
-        <p className="foot">
-          {t.listFoot(season)}
-          {schedule && !schedule.current && <><br /><span className="warn">{t.seasonStale(season)}</span></>}
-        </p>
-      )}
     </>
   );
 }

@@ -68,6 +68,8 @@ pub struct Known<'a> {
     /// Unidentified signals across every scan.
     pub signals: &'a [Signal],
     pub favorites: &'a [Favorite],
+    /// Station ids the listening history has (`stats::listened_ids`).
+    pub listened: &'a HashSet<u32>,
     /// The scan `StationQuery::scan` names, if it is still saved.
     pub scan: Option<&'a ScanSummary>,
 }
@@ -86,6 +88,7 @@ pub fn search(cat: &Catalog, q: &StationQuery, unix: i64, k: &Known) -> StationP
         Lens::All => None,
         Lens::Heard => Some(logged),
         Lens::Favorites => Some(favs.by_station.keys().copied().collect()),
+        Lens::Listened => Some(k.listened.clone()),
     };
     let only = match (lens, &marks) {
         (lens, None) => lens,
@@ -148,7 +151,7 @@ pub fn search(cat: &Catalog, q: &StationQuery, unix: i64, k: &Known) -> StationP
             .collect(),
         (None, Lens::Favorites) => favs.off.iter().map(|f| from_fav(f)).collect(),
         // Heard returned above
-        (None, Lens::All | Lens::Heard) => vec![],
+        (None, Lens::All | Lens::Heard | Lens::Listened) => vec![],
     };
     page.off_schedule = filter_off(rows, q);
     page
@@ -206,6 +209,7 @@ mod tests {
             step_hz: 5_000,
             points: 101,
             dwell_ms: 300,
+            reads: 3,
             mode: None,
             started: 0,
             finished: 1,
@@ -229,6 +233,7 @@ mod tests {
         logbook: Vec<Logged>,
         favorites: Vec<Favorite>,
         scans: Vec<ScanSummary>,
+        listened: HashSet<u32>,
     }
 
     impl World {
@@ -253,7 +258,8 @@ mod tests {
             add(&mut favorites, &req(6_200_000, None, Some("Mystery carrier")), &cat, 1).unwrap();
             add(&mut favorites, &req(14_230_000, None, Some("SSTV")), &cat, 1).unwrap();
             let logbook = crate::scan::logbook(&scans, &cat);
-            Self { cat, logbook, favorites, scans }
+            let listened = HashSet::from([b.id, c.id]);
+            Self { cat, logbook, favorites, scans, listened }
         }
 
         fn search(&self, q: &StationQuery) -> StationPage {
@@ -263,7 +269,13 @@ mod tests {
                 &self.cat,
                 q,
                 0,
-                &Known { logbook: &self.logbook, signals: &signals, favorites: &self.favorites, scan },
+                &Known {
+                    logbook: &self.logbook,
+                    signals: &signals,
+                    favorites: &self.favorites,
+                    listened: &self.listened,
+                    scan,
+                },
             )
         }
     }
@@ -279,6 +291,17 @@ mod tests {
             .iter()
             .map(|r| (r.freq_hz / 1000, r.label.as_str(), r.favorite.is_some(), r.heard.is_some()))
             .collect()
+    }
+
+    #[test]
+    fn the_listened_lens_keeps_the_history() {
+        let w = World::new();
+        let (b, c) = (w.cat.station(3).unwrap().id, w.cat.station(5).unwrap().id);
+        let p = w.search(&StationQuery { lens: Lens::Listened, ..Default::default() });
+        assert_eq!((ids(&p), p.off_schedule.len()), (vec![b, c], 0));
+        // narrowed to a scan, only what it covered
+        let p = w.search(&StationQuery { lens: Lens::Listened, scan: Some("s2".into()), ..Default::default() });
+        assert!(p.items.is_empty());
     }
 
     #[test]

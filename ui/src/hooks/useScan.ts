@@ -1,12 +1,14 @@
 // Band scans: the core's scan status, polled (fast while one runs), the saved scans and the
-// logbook, reloaded when a scan ends and when the catalog's `generation` changes (the logbook's
-// station ids with it); and the saved scans the band dial draws.
+// logbook, reloaded when a scan ends, as a running one hears something (`heard_rev`), and when
+// the catalog's `generation` changes (the logbook's station ids with it); and the saved scans
+// the band dial draws.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Api } from '../api/client';
 import { lastTwo } from '../components/scan';
 import type { Logged } from '../types/generated/Logged';
 import type { Scan } from '../types/generated/Scan';
+import type { ScanSpeed } from '../types/generated/ScanSpeed';
 import type { ScanStatus } from '../types/generated/ScanStatus';
 import type { ScanSummary } from '../types/generated/ScanSummary';
 
@@ -55,10 +57,16 @@ export function useScan(api: Api | null, onError: (e: unknown) => void, generati
     wasRunning.current = running;
   }, [ended, running]); // on a change of state only, not of `reload` or `onError`
 
-  const start = useCallback(async (bandId: string, stepHz: number) => {
+  // a running scan heard something new: it is in the logbook already (provisionally)
+  const heardRev = status.state === 'running' ? status.heard_rev : 0;
+  useEffect(() => {
+    if (api && heardRev > 0) api.logbook().then(setLogbook, () => {});
+  }, [api, heardRev]);
+
+  const start = useCallback(async (bandId: string, stepHz: number, speed: ScanSpeed) => {
     if (!api) return;
     try {
-      setStatus(await api.startScan({ band_id: bandId, step_hz: stepHz, dwell_ms: null }));
+      setStatus(await api.startScan({ band_id: bandId, step_hz: stepHz, dwell_ms: null, speed }));
     } catch (e) {
       onError(e);
     }

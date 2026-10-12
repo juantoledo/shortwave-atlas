@@ -26,7 +26,8 @@ pub const MAX_STEP_HZ: u32 = 1_000_000;
 pub const DEFAULT_DWELL_MS: u32 = 300;
 pub const MIN_DWELL_MS: u32 = 100;
 pub const MAX_DWELL_MS: u32 = 2_000;
-/// Meter reads per step, this far apart; the strongest counts (signals fade).
+/// Meter reads per step (unless the speed says otherwise), this far apart; the strongest counts
+/// (signals fade).
 pub const READS: u32 = 3;
 pub const READ_GAP_MS: u32 = 60;
 /// A signal stands at least this far over the noise floor (one S-unit).
@@ -77,6 +78,8 @@ pub struct ScanPlan {
     pub first_hz: u32,
     pub step_hz: u32,
     pub dwell_ms: u32,
+    /// Meter reads per step.
+    pub reads: u32,
     /// Per grid point: the rig receives it (otherwise it is skipped and stays unmeasured).
     pub covered: Vec<bool>,
 }
@@ -95,14 +98,45 @@ impl ScanPlan {
     }
 }
 
+/// How long a scan lingers on each step: a shorter dwell and a single read are quicker, but can
+/// miss a signal in a fade.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum ScanSpeed {
+    Fast,
+    #[default]
+    Normal,
+    Thorough,
+}
+
+impl ScanSpeed {
+    pub fn dwell_ms(self) -> u32 {
+        match self {
+            Self::Fast => 120,
+            Self::Normal => DEFAULT_DWELL_MS,
+            Self::Thorough => 600,
+        }
+    }
+
+    pub fn reads(self) -> u32 {
+        match self {
+            Self::Fast => 1,
+            Self::Normal | Self::Thorough => READS,
+        }
+    }
+}
+
 /// The grid for scanning `band` at `step_hz` (default: the band's), checked against the limits
-/// and the rig's `coverage`.
+/// and the rig's `coverage`. `dwell_ms`, when given, overrides the speed's.
 pub fn plan(
     band: &Band,
     step_hz: Option<u32>,
     dwell_ms: Option<u32>,
+    speed: Option<ScanSpeed>,
     coverage: &[RxRange],
 ) -> Result<ScanPlan, String> {
+    let speed = speed.unwrap_or_default();
     let step = step_hz.unwrap_or(band.scan_step_hz);
     if !(MIN_STEP_HZ..=MAX_STEP_HZ).contains(&step) {
         return Err(format!(
@@ -111,7 +145,7 @@ pub fn plan(
             MAX_STEP_HZ / 1000
         ));
     }
-    let dwell_ms = dwell_ms.unwrap_or(DEFAULT_DWELL_MS);
+    let dwell_ms = dwell_ms.unwrap_or(speed.dwell_ms());
     if !(MIN_DWELL_MS..=MAX_DWELL_MS).contains(&dwell_ms) {
         return Err(format!("The dwell must be between {MIN_DWELL_MS} and {MAX_DWELL_MS} ms"));
     }
@@ -130,7 +164,7 @@ pub fn plan(
     if !covered.contains(&true) {
         return Err("The rig does not receive this band".into());
     }
-    Ok(ScanPlan { band: band.clone(), first_hz: first as u32, step_hz: step, dwell_ms, covered })
+    Ok(ScanPlan { band: band.clone(), first_hz: first as u32, step_hz: step, dwell_ms, reads: speed.reads(), covered })
 }
 
 /// Argument of `Call::StartScan`.
@@ -141,8 +175,11 @@ pub struct ScanRequest {
     pub band_id: String,
     /// `None` = the band's `scan_step_hz`.
     pub step_hz: Option<u32>,
-    /// `None` = `DEFAULT_DWELL_MS`.
+    /// `None` = the speed's.
     pub dwell_ms: Option<u32>,
+    /// `None` = `ScanSpeed::Normal`.
+    #[serde(default)]
+    pub speed: Option<ScanSpeed>,
 }
 
 /// A station as a scan saw it. A copy rather than a `Station::id`, which only holds for one
@@ -208,6 +245,12 @@ impl StationRef {
     pub(crate) fn same(&self, other: &StationRef) -> bool {
         self.id() == other.id()
     }
+
+    /// `id` as one string, for maps keyed by station.
+    pub(crate) fn ident(&self) -> String {
+        let (source, key) = self.id();
+        format!("{source}\u{1f}{key}")
+    }
 }
 
 /// Who a signal is.
@@ -266,6 +309,9 @@ pub struct ScanSummary {
     pub step_hz: u32,
     pub points: u32,
     pub dwell_ms: u32,
+    /// Meter reads per step (scans saved before speeds took `READS`).
+    #[serde(default = "default_reads")]
+    pub reads: u32,
     /// The rig's mode during the scan.
     pub mode: Option<String>,
     /// Unix seconds.
@@ -288,6 +334,10 @@ pub struct ScanSummary {
     pub peaks: Vec<Peak>,
     /// Stations on the air in the band that gave no signal where they were measured.
     pub missed: Vec<StationRef>,
+}
+
+fn default_reads() -> u32 {
+    READS
 }
 
 impl ScanSummary {
@@ -326,6 +376,9 @@ pub enum ScanStatus {
         samples: Vec<Option<i16>>,
         /// The last `PINGS_KEPT` steps measured, oldest first (for the globe).
         pings: Vec<ScanPing>,
+        /// Bumped each time what the scan heard so far changes; that is in the logbook and the
+        /// unidentified signals already, provisionally, until the scan ends.
+        heard_rev: u32,
     },
     /// The last scan finished and was saved as `id`; `sites` are those of the stations it logged.
     Done {
@@ -468,6 +521,38 @@ pub fn analyse(cat: &Catalog, first_hz: u32, step_hz: u32, samples: &[Option<i16
         })
         .collect();
     Found { noise_db: Some(floor), peaks, missed }
+}
+
+/// The peaks of a scan still running, measured up to grid point `upto` (excluded): as `analyse`
+/// against the floor so far, less a peak on the last point, whose right neighbour is unread yet.
+pub fn analyse_so_far(
+    cat: &Catalog,
+    first_hz: u32,
+    step_hz: u32,
+    samples: &[Option<i16>],
+    times: &[i64],
+    upto: usize,
+) -> Vec<Peak> {
+    let mut peaks = analyse(cat, first_hz, step_hz, samples, times).peaks;
+    if upto < samples.len() {
+        if let Some(edge) = upto.checked_sub(1) {
+            let edge_hz = first_hz + edge as u32 * step_hz;
+            peaks.retain(|p| p.freq_hz != edge_hz);
+        }
+    }
+    peaks
+}
+
+/// What a running scan has heard: the peaks `now` finds, and those it found before where `now`
+/// has none. The floor so far rises as the sweep reaches a busy stretch, and would drop the
+/// weaker signals heard earlier only to bring them back later; they stay until the scan ends,
+/// when `analyse` of the whole sweep decides.
+pub fn keep_heard(before: &[Peak], now: Vec<Peak>) -> Vec<Peak> {
+    let mut peaks = now;
+    let have: HashSet<u32> = peaks.iter().map(|p| p.freq_hz).collect();
+    peaks.extend(before.iter().filter(|p| !have.contains(&p.freq_hz)).cloned());
+    peaks.sort_by_key(|p| p.freq_hz);
+    peaks
 }
 
 /// The sites of the stations `peaks` logged that `cat` still has, by id.
@@ -657,7 +742,7 @@ mod tests {
         // every band's default fits
         for r in [R1, R2, R3] {
             for b in dial_bands(r) {
-                let p = plan(&b, None, None, &[RxRange { lo_khz: 0, hi_khz: 2_000_000 }]).unwrap();
+                let p = plan(&b, None, None, None, &[RxRange { lo_khz: 0, hi_khz: 2_000_000 }]).unwrap();
                 assert!(p.len() <= MAX_STEPS && p.len() > 1, "{} {r:?}: {}", b.id, p.len());
             }
         }
@@ -666,21 +751,21 @@ mod tests {
     #[test]
     fn grids_sit_on_the_channels() {
         let all = default_coverage();
-        let p = plan(&band(ItuRegion::R1, "49m"), None, None, &all).unwrap();
+        let p = plan(&band(ItuRegion::R1, "49m"), None, None, None, &all).unwrap();
         assert_eq!((p.first_hz, p.len(), p.freq(p.len() - 1)), (5_800_000, 101, 6_300_000));
         // MW: 531 kHz and up in R1, 530 in R2
-        let p = plan(&band(ItuRegion::R1, "mw"), None, None, &all).unwrap();
+        let p = plan(&band(ItuRegion::R1, "mw"), None, None, None, &all).unwrap();
         assert_eq!((p.first_hz, p.freq(p.len() - 1)), (531_000, 1_602_000));
-        let p = plan(&band(ItuRegion::R2, "mw"), None, None, &all).unwrap();
+        let p = plan(&band(ItuRegion::R2, "mw"), None, None, None, &all).unwrap();
         assert_eq!((p.first_hz, p.freq(p.len() - 1)), (530_000, 1_700_000));
         // CB channel 1, and channel 40 at 27 405 kHz
-        let p = plan(&band(ItuRegion::R2, "cb"), None, None, &all).unwrap();
+        let p = plan(&band(ItuRegion::R2, "cb"), None, None, None, &all).unwrap();
         assert_eq!((p.first_hz, p.freq(p.len() - 1)), (26_965_000, 27_405_000));
         // an override keeps the anchor when it divides it
-        let p = plan(&band(ItuRegion::R2, "cb"), Some(5_000), None, &all).unwrap();
+        let p = plan(&band(ItuRegion::R2, "cb"), Some(5_000), None, None, &all).unwrap();
         assert_eq!(p.first_hz, 26_965_000);
         let wide = [RxRange { lo_khz: 0, hi_khz: 1_000_000 }];
-        let p = plan(&band(ItuRegion::R1, "pmr446"), None, None, &wide).unwrap();
+        let p = plan(&band(ItuRegion::R1, "pmr446"), None, None, None, &wide).unwrap();
         assert_eq!((p.first_hz, p.len()), (446_006_250, 16));
     }
 
@@ -688,17 +773,35 @@ mod tests {
     fn plans_are_checked() {
         let b49 = band(ItuRegion::R1, "49m");
         let all = default_coverage();
-        assert!(plan(&b49, Some(100), None, &all).is_err());
-        assert!(plan(&b49, Some(1_000), Some(50), &all).is_err());
-        assert!(plan(&band(ItuRegion::R2, "ham-20m"), Some(500), None, &all).is_ok());
-        let too_many = plan(&band(ItuRegion::R2, "ham-10m"), Some(500), None, &all).unwrap_err();
+        assert!(plan(&b49, Some(100), None, None, &all).is_err());
+        assert!(plan(&b49, Some(1_000), Some(50), None, &all).is_err());
+        assert!(plan(&band(ItuRegion::R2, "ham-20m"), Some(500), None, None, &all).is_ok());
+        let too_many = plan(&band(ItuRegion::R2, "ham-10m"), Some(500), None, None, &all).unwrap_err();
         assert!(too_many.contains("3401 steps"), "{too_many}");
-        assert!(plan(&band(ItuRegion::R1, "ham-2m"), None, None, &all).is_err(), "past the coverage");
+        assert!(plan(&band(ItuRegion::R1, "ham-2m"), None, None, None, &all).is_err(), "past the coverage");
         // a band the rig receives in part: the rest is skipped
         let part = [RxRange { lo_khz: 5_900, hi_khz: 7_000 }];
-        let p = plan(&b49, None, None, &part).unwrap();
+        let p = plan(&b49, None, None, None, &part).unwrap();
         assert_eq!(p.covered.iter().filter(|c| **c).count(), 81);
         assert!(!p.covered[0] && p.covered[20]);
+    }
+
+    #[test]
+    fn speeds_set_the_dwell_and_the_reads() {
+        let b49 = band(ItuRegion::R1, "49m");
+        let all = default_coverage();
+        let got = |dwell, speed| {
+            let p = plan(&b49, None, dwell, speed, &all).unwrap();
+            (p.dwell_ms, p.reads)
+        };
+        assert_eq!(got(None, None), (DEFAULT_DWELL_MS, READS));
+        assert_eq!(got(None, Some(ScanSpeed::Fast)), (120, 1));
+        assert_eq!(got(None, Some(ScanSpeed::Thorough)), (600, 3));
+        // a dwell asked for wins over the speed's
+        assert_eq!(got(Some(200), Some(ScanSpeed::Fast)), (200, 1));
+        for s in [ScanSpeed::Fast, ScanSpeed::Normal, ScanSpeed::Thorough] {
+            assert!((MIN_DWELL_MS..=MAX_DWELL_MS).contains(&s.dwell_ms()));
+        }
     }
 
     /// Readings on the 5 kHz grid from `first`, at `noise` dB except where given.
@@ -766,6 +869,49 @@ mod tests {
     }
 
     #[test]
+    fn a_running_scan_holds_back_the_peak_at_its_edge() {
+        // 16:30, CRI on 6070: read up to 6070, its right neighbour unread
+        let c = catalog();
+        let (first, n) = (5_800_000, 101);
+        let full = profile(first, n, -48, &[(6_070_000, -6), (6_200_000, -12)]);
+        let times = vec![at(16, 30); n];
+        let upto = |k: usize| -> Vec<Option<i16>> { (0..n).map(|i| if i < k { full[i] } else { None }).collect() };
+        let k6070 = 55; // (6070 - 5800) / 5 + 1
+        assert!(analyse_so_far(&c, first, 5_000, &upto(k6070), &times, k6070).is_empty());
+        let one = analyse_so_far(&c, first, 5_000, &upto(k6070 + 1), &times, k6070 + 1);
+        assert_eq!(one.iter().map(|p| (p.freq_hz / 1000, p.verdict)).collect::<Vec<_>>(), [(6070, Verdict::Sure)]);
+        // the whole sweep: as `analyse`
+        assert_eq!(analyse_so_far(&c, first, 5_000, &full, &times, n), analyse(&c, first, 5_000, &full, &times).peaks);
+    }
+
+    #[test]
+    fn a_running_scan_keeps_what_it_heard() {
+        // 16:30: CRI on 6070 at -30 over a quiet stretch from 6000 (below it unmeasured), then a
+        // longer busy one lifts the floor
+        let c = catalog();
+        let (first, n) = (5_800_000, 101);
+        let times = vec![at(16, 30); n];
+        let k = 56; // through 6075
+        let mut s: Vec<Option<i16>> = vec![None; n];
+        for (i, v) in s.iter_mut().enumerate().take(k).skip(40) {
+            *v = Some(if first + i as u32 * 5_000 == 6_070_000 { -30 } else { -48 });
+        }
+        let early = analyse_so_far(&c, first, 5_000, &s, &times, k);
+        assert_eq!(early.iter().map(|p| p.freq_hz / 1000).collect::<Vec<_>>(), [6070]);
+        for v in s.iter_mut().skip(k).take(40) {
+            *v = Some(-28);
+        }
+        let later = analyse_so_far(&c, first, 5_000, &s, &times, k + 40);
+        assert!(later.iter().all(|p| p.freq_hz != 6_070_000), "the floor so far drops it");
+        let kept = keep_heard(&early, later.clone());
+        assert!(kept.iter().any(|p| p.freq_hz == 6_070_000));
+        assert!(kept.windows(2).all(|w| w[0].freq_hz < w[1].freq_hz));
+        // a peak found again is the new one
+        let again = keep_heard(&later, later.clone());
+        assert_eq!(again, later);
+    }
+
+    #[test]
     fn unmeasured_channels_are_not_missed() {
         let c = catalog();
         let n = 101;
@@ -789,6 +935,7 @@ mod tests {
             step_hz: 5_000,
             points: 101,
             dwell_ms: DEFAULT_DWELL_MS,
+            reads: READS,
             mode: Some("AM".into()),
             started: at(10, 0),
             finished: at(10, 1),
@@ -935,9 +1082,11 @@ mod tests {
         let mut j = serde_json::to_value(summary(vec![])).unwrap();
         let o = j.as_object_mut().unwrap();
         o.remove("sources");
+        o.remove("reads");
         o.insert("eibi".into(), "sked-a26.csv".into());
         let back: ScanSummary = serde_json::from_value(j).unwrap();
         assert!(back.sources.is_empty());
+        assert_eq!(back.reads, READS);
     }
 
     #[test]

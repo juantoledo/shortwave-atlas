@@ -5,6 +5,7 @@ import { COARSE, useMedia } from '../hooks/useMedia';
 import { useT } from '../i18n';
 import { HELP_TOPICS, type HelpTopic } from '../i18n/en';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
+import { DataNotice } from './DataNotice';
 import { Sheet } from './Sheet';
 import { scheduleOf } from './sources';
 
@@ -56,6 +57,7 @@ function Extra({ topic, version, meta }: { topic: HelpTopic; version: string | n
         <p>{t.aboutBlurb}</p>
         <p>{t.receiveOnly}</p>
         {meta && <p>{t.listFoot(season)}</p>}
+        <DataNotice />
         <p><a className="link" href="https://github.com/juantoledo/shortwave-atlas" target="_blank" rel="noreferrer">{t.sourceCode}</a></p>
         <p className="note">{t.thirdParty}</p>
       </>

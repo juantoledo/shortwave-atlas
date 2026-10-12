@@ -10,8 +10,10 @@ import type { Dial } from '../types/generated/Dial';
 import type { Favorite } from '../types/generated/Favorite';
 import type { FavoriteRequest } from '../types/generated/FavoriteRequest';
 import type { FavoriteView } from '../types/generated/FavoriteView';
+import type { Hunt } from '../types/generated/Hunt';
 import type { ImportReport } from '../types/generated/ImportReport';
 import type { Info } from '../types/generated/Info';
+import type { ListeningNow } from '../types/generated/ListeningNow';
 import type { Logged } from '../types/generated/Logged';
 import type { Overview } from '../types/generated/Overview';
 import type { Qth } from '../types/generated/Qth';
@@ -27,8 +29,12 @@ import type { ScanStatus } from '../types/generated/ScanStatus';
 import type { ScanSummary } from '../types/generated/ScanSummary';
 import type { SerialPortInfo } from '../types/generated/SerialPortInfo';
 import type { SoundCard } from '../types/generated/SoundCard';
+import type { StationKey } from '../types/generated/StationKey';
 import type { StationPage } from '../types/generated/StationPage';
 import type { StationQuery } from '../types/generated/StationQuery';
+import type { Stats } from '../types/generated/Stats';
+import type { StatsQuery } from '../types/generated/StatsQuery';
+import type { TrendPoint } from '../types/generated/TrendPoint';
 import type { UpdatePrefs } from '../types/generated/UpdatePrefs';
 import type { UpdateStatus } from '../types/generated/UpdateStatus';
 import type { UserStationDraft } from '../types/generated/UserStationDraft';
@@ -90,4 +96,12 @@ export class Api {
   exportUserStations = () => this.transport.call({ cmd: 'export_user_stations' }) as Promise<string>;
   importUserStations = (json: string, replace: boolean) =>
     this.transport.call({ cmd: 'import_user_stations', args: { json, replace } }) as Promise<ImportReport>;
+
+  stats = (args: StatsQuery) => this.transport.call({ cmd: 'stats', args }) as Promise<Stats>;
+  listening = () => this.transport.call({ cmd: 'listening' }) as Promise<ListeningNow>;
+  hunt = () => this.transport.call({ cmd: 'hunt' }) as Promise<Hunt>;
+  stationTrend = (args: StationKey) => this.transport.call({ cmd: 'station_trend', args }) as Promise<TrendPoint[]>;
+  hearingStation = (args: StationKey) => this.transport.call({ cmd: 'hearing_station', args }) as Promise<null>;
+  /** Unix seconds, or `null` for everything; resolves to how many sessions went. */
+  clearListening = (before: number | null) => this.transport.call({ cmd: 'clear_listening', args: { before } }) as Promise<number>;
 }

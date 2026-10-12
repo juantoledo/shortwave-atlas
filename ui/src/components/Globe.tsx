@@ -116,14 +116,17 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 /** Transmitter sites: short towers where something is on the air (taller with more), flat
  *  dim dots elsewhere, so they stand out from the city lights; the active site is white, sites
+ *  listened to (the Listened lens) glow amber, larger with more time (`listened` 0..1), sites
  *  of stations a scan logged are green (a little larger), and sites of the listener's own
  *  stations violet. */
-const siteColor = (s: SiteDot, active: boolean, logged: boolean) =>
+const siteColor = (s: SiteDot, active: boolean, logged: boolean, listened?: number) =>
   active ? '#ffffff'
+  : listened !== undefined ? `rgba(255,179,63,${(0.55 + 0.45 * listened).toFixed(2)})`
   : logged ? `rgba(79,200,164,${s.on ? 1 : 0.7})`
   : s.mine > 0 ? `rgba(190,160,255,${s.on ? 1 : 0.75})`
   : s.on ? `rgba(255,226,160,${s.precise ? 1 : 0.75})` : `rgba(150,185,220,${s.precise ? 0.6 : 0.35})`;
-const siteRadius = (s: SiteDot, active: boolean, logged: boolean) => (active ? 0.6 : s.on ? 0.45 : 0.32) + (logged && !active ? 0.1 : 0);
+const siteRadius = (s: SiteDot, active: boolean, logged: boolean, listened?: number) =>
+  (active ? 0.6 : s.on ? 0.45 : 0.32) + (active ? 0 : listened !== undefined ? 0.15 + 0.5 * listened : logged ? 0.1 : 0);
 const siteAltitude = (s: SiteDot, active: boolean) => (active ? 0.05 : s.on ? 0.012 + Math.min(0.03, s.on * 0.002) : 0.003);
 
 function route(site: LatLon, qth: LatLon): Pick<Fx, 'arcs' | 'path'> {
@@ -181,6 +184,8 @@ interface Props {
   activeSite: number | null;
   /** Sites of stations a band scan logged. */
   loggedSites: ReadonlySet<number>;
+  /** Sites the listener listened to, by time (0..1); empty unless the list is on Listened. */
+  listenedSites: ReadonlyMap<number, number>;
   /** While a band scan runs: its last steps measured, and the noise floor so far. */
   scan: { pings: readonly ScanPing[]; floorDb: number | null } | null;
   /** A scan that just ended (`key`: its id) and the sites of the stations it logged. */
@@ -190,7 +195,7 @@ interface Props {
   siteLabel: (s: SiteDot) => { country: string; onAir: string };
 }
 
-function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQth, sites, strengthDb, activeSite, loggedSites, scan, finale, onSite, siteLabel }: Props) {
+function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQth, sites, strengthDb, activeSite, loggedSites, listenedSites, scan, finale, onSite, siteLabel }: Props) {
   const t = useT();
   const stage = useRef<HTMLDivElement>(null);
   const globe = useRef<GlobeMethods>(undefined);
@@ -650,8 +655,14 @@ function GlobeView({ sel, qth, frame: framing, onFrame, paused, onInteract, onQt
   const pins = useMemo(() => [qthPin, ...(fx.station ? [fx.station] : []), ...scanFx.marks], [qthPin, fx.station, scanFx.marks]);
   const stars = useMemo(() => makeStars(), []);
   const pointAltitude = useCallback((d: object) => siteAltitude(d as SiteDot, (d as SiteDot).id === activeSite), [activeSite]);
-  const pointRadius = useCallback((d: object) => siteRadius(d as SiteDot, (d as SiteDot).id === activeSite, loggedSites.has((d as SiteDot).id)), [activeSite, loggedSites]);
-  const pointColor = useCallback((d: object) => siteColor(d as SiteDot, (d as SiteDot).id === activeSite, loggedSites.has((d as SiteDot).id)), [activeSite, loggedSites]);
+  const pointRadius = useCallback((d: object) => {
+    const id = (d as SiteDot).id;
+    return siteRadius(d as SiteDot, id === activeSite, loggedSites.has(id), listenedSites.get(id));
+  }, [activeSite, loggedSites, listenedSites]);
+  const pointColor = useCallback((d: object) => {
+    const id = (d as SiteDot).id;
+    return siteColor(d as SiteDot, id === activeSite, loggedSites.has(id), listenedSites.get(id));
+  }, [activeSite, loggedSites, listenedSites]);
   const siteTip = useCallback((d: object) => {
     const s = d as SiteDot;
     const l = handlers.current.siteLabel(s);
