@@ -26,6 +26,7 @@ import { DEFAULT_COVERAGE, HF_SPAN } from './components/dial';
 import { bandOf, noiseFloor } from './components/scan';
 import { keyOf, MINE } from './components/sources';
 import { UpdateBanner } from './components/UpdateBanner';
+import { chromeFor } from './api/window';
 import { Welcome } from './components/Welcome';
 import { makeNames, NamesProvider } from './catalog/names';
 import { NO_FILTERS, useCandidates, useCore, useDial, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
@@ -350,6 +351,7 @@ export function App() {
       <div className="app" data-view={view} data-page={page === 'stats' ? 'stats' : undefined} data-dock={dockOpen ? 'open' : undefined} data-globe={display.fullGlobe ? 'full' : 'framed'}>
         <TopBar
           info={info}
+          chrome={api ? chromeFor(api.transport.kind, info?.os) : null}
           status={statusLine}
           on={on}
           powerBusy={powerBusy}

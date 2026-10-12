@@ -1,7 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window: core APIs (events), the app's own `call` command, and opening web links in the system browser.",
+  "description": "The main window: core APIs (events), the app's own `call` command, opening web links in the system browser, and the window controls drawn in the top bar (no OS title bar).",
   "windows": ["main"],
-  "permissions": ["core:default", "opener:allow-open-url", "opener:allow-default-urls"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "opener:allow-open-url",
+    "opener:allow-default-urls"
+  ]
 }

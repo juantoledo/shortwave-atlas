@@ -184,6 +184,22 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 }
 @media (max-height: 520px) { .wordmark { font-size: 20px; } }
 
+/* the desktop app: the top bar is the title bar (data-chrome; see api/window.ts). It reaches the
+   window's top edge, and on Windows and Linux its right one, where the window controls sit. */
+.topbar[data-chrome] { margin-top: calc(-1 * var(--gap)); min-height: calc(var(--hit) + 2 * var(--gap)); user-select: none; -webkit-user-select: none; }
+.topbar[data-chrome="mac"] { padding-left: 72px; }
+.topbar[data-chrome="own"] { margin-right: calc(-1 * var(--gap)); }
+.topbar[data-chrome="own"] .top-actions { align-self: stretch; }
+.win-ctl { display: flex; align-self: stretch; margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--line); }
+.win-ctl button {
+  display: grid; place-items: center; width: 46px; padding: 0;
+  background: transparent; border: 0; border-radius: 0; color: var(--dim);
+}
+.win-ctl svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1; }
+.win-ctl button:hover { color: var(--text); background: rgba(140, 185, 230, 0.08); }
+.win-ctl .win-close:hover { color: #fff; background: #c42b1c; }
+.win-ctl button:focus-visible { outline-offset: -2px; }
+
 /* update pill and its popover */
 .update { position: relative; }
 .toggle {

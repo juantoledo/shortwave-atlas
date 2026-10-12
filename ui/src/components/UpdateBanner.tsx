@@ -40,7 +40,7 @@ export function UpdateBanner({ update, transport, onError }: Props) {
   const working = v.phase === 'downloading' || v.phase === 'installing';
 
   return (
-    <div className="update" ref={box}>
+    <div className="update" ref={box} data-tauri-drag-region="false">
       <button className={'toggle update-pill' + (v.phase === 'failed' ? ' warn' : '')} type="button" aria-expanded={open} aria-label={pill} title={pill} onClick={() => setOpen((o) => !o)}>
         <span className="lamp" />
         <span className="pill-long">{pill}</span>
