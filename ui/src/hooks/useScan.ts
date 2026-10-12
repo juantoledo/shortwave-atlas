@@ -1,6 +1,7 @@
 // Band scans: the core's scan status, polled (fast while one runs), the saved scans and the
-// logbook, reloaded when a scan ends and when the catalog's `generation` changes (the logbook's
-// station ids with it); and the saved scans the band dial draws.
+// logbook, reloaded when a scan ends, as a running one hears something (`heard_rev`), and when
+// the catalog's `generation` changes (the logbook's station ids with it); and the saved scans
+// the band dial draws.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Api } from '../api/client';
@@ -54,6 +55,12 @@ export function useScan(api: Api | null, onError: (e: unknown) => void, generati
     if (wasRunning.current && status.state === 'failed') onError(status.message);
     wasRunning.current = running;
   }, [ended, running]); // on a change of state only, not of `reload` or `onError`
+
+  // a running scan heard something new: it is in the logbook already (provisionally)
+  const heardRev = status.state === 'running' ? status.heard_rev : 0;
+  useEffect(() => {
+    if (api && heardRev > 0) api.logbook().then(setLogbook, () => {});
+  }, [api, heardRev]);
 
   const start = useCallback(async (bandId: string, stepHz: number) => {
     if (!api) return;

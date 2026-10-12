@@ -53,6 +53,8 @@ import type { StationRow } from './types/generated/StationRow';
 import type { UserStationDraft } from './types/generated/UserStationDraft';
 
 const MSG_MS = 6000;
+/** How long the rows a finished scan heard stay lit. */
+const FRESH_MS = 10000;
 const NO_HZ: number[] = [];
 const NO_BANDS: Band[] = [];
 const NO_SITES: SiteDot[] = [];
@@ -245,6 +247,21 @@ export function App() {
     setScansNew(false);
     setSheet({ kind: 'scans', id });
   };
+  // a scan started here turns the list to what the scans heard, newest first, and the rows it
+  // hears light up when it ends (the logbook is only written then)
+  const startScan = (bandId: string, stepHz: number) => {
+    setFilters({ ...NO_FILTERS, lens: 'heard', sort: 'recent' });
+    if (phone) setView('browse');
+    void scan.start(bandId, stepHz);
+  };
+  const runningSince = scan.status.state === 'running' ? scan.status.started : null;
+  const [freshSince, setFreshSince] = useState<number | null>(null);
+  useEffect(() => { if (runningSince !== null) setFreshSince(runningSince); }, [runningSince]);
+  useEffect(() => {
+    if (!scan.finished) return;
+    const id = setTimeout(() => setFreshSince(null), FRESH_MS);
+    return () => clearTimeout(id);
+  }, [scan.finished]);
   // the station list narrowed to a scan, or showing the favorites
   const showScan = (id: string) => {
     setSheet(null);
@@ -413,6 +430,7 @@ export function App() {
             scanName={scanName}
             selId={sel?.station.id ?? null}
             logged={scan.logged}
+            freshSince={freshSince}
             favs={favs.byStation}
             off={search.off}
             heard={search.heard}
@@ -470,7 +488,7 @@ export function App() {
                 on={on}
                 band={win.w.band}
                 status={scan.status}
-                onStart={scan.start}
+                onStart={startScan}
                 onStop={scan.stop}
               />
             }

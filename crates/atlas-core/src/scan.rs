@@ -332,6 +332,9 @@ pub enum ScanStatus {
         samples: Vec<Option<i16>>,
         /// The last `PINGS_KEPT` steps measured, oldest first (for the globe).
         pings: Vec<ScanPing>,
+        /// Bumped each time what the scan heard so far changes; that is in the logbook and the
+        /// unidentified signals already, provisionally, until the scan ends.
+        heard_rev: u32,
     },
     /// The last scan finished and was saved as `id`; `sites` are those of the stations it logged.
     Done {
@@ -474,6 +477,26 @@ pub fn analyse(cat: &Catalog, first_hz: u32, step_hz: u32, samples: &[Option<i16
         })
         .collect();
     Found { noise_db: Some(floor), peaks, missed }
+}
+
+/// The peaks of a scan still running, measured up to grid point `upto` (excluded): as `analyse`
+/// against the floor so far, less a peak on the last point, whose right neighbour is unread yet.
+pub fn analyse_so_far(
+    cat: &Catalog,
+    first_hz: u32,
+    step_hz: u32,
+    samples: &[Option<i16>],
+    times: &[i64],
+    upto: usize,
+) -> Vec<Peak> {
+    let mut peaks = analyse(cat, first_hz, step_hz, samples, times).peaks;
+    if upto < samples.len() {
+        if let Some(edge) = upto.checked_sub(1) {
+            let edge_hz = first_hz + edge as u32 * step_hz;
+            peaks.retain(|p| p.freq_hz != edge_hz);
+        }
+    }
+    peaks
 }
 
 /// The sites of the stations `peaks` logged that `cat` still has, by id.
@@ -769,6 +792,22 @@ mod tests {
         let f = analyse(&c, 6_067_000, 1_000, &samples, &[at(10, 0); 5]);
         assert_eq!(f.peaks.len(), 1);
         assert_eq!((f.peaks[0].freq_hz, f.peaks[0].verdict), (6_069_000, Verdict::Sure));
+    }
+
+    #[test]
+    fn a_running_scan_holds_back_the_peak_at_its_edge() {
+        // 16:30, CRI on 6070: read up to 6070, its right neighbour unread
+        let c = catalog();
+        let (first, n) = (5_800_000, 101);
+        let full = profile(first, n, -48, &[(6_070_000, -6), (6_200_000, -12)]);
+        let times = vec![at(16, 30); n];
+        let upto = |k: usize| -> Vec<Option<i16>> { (0..n).map(|i| if i < k { full[i] } else { None }).collect() };
+        let k6070 = 55; // (6070 - 5800) / 5 + 1
+        assert!(analyse_so_far(&c, first, 5_000, &upto(k6070), &times, k6070).is_empty());
+        let one = analyse_so_far(&c, first, 5_000, &upto(k6070 + 1), &times, k6070 + 1);
+        assert_eq!(one.iter().map(|p| (p.freq_hz / 1000, p.verdict)).collect::<Vec<_>>(), [(6070, Verdict::Sure)]);
+        // the whole sweep: as `analyse`
+        assert_eq!(analyse_so_far(&c, first, 5_000, &full, &times, n), analyse(&c, first, 5_000, &full, &times).peaks);
     }
 
     #[test]

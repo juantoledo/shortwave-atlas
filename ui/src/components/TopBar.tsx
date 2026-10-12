@@ -92,17 +92,17 @@ export function TopBar({ info, chrome, status, on, powerBusy, powerDisabled, onP
         </a>
         <Clock />
         {update}
-        <button className="top-btn" type="button" aria-label={scansNew ? t.scansNew : t.scans} title={scansNew ? t.scansNew : t.scans} onClick={onScans}>
+        <button className="top-btn scans" type="button" aria-label={scansNew ? t.scansNew : t.scans} title={scansNew ? t.scansNew : t.scans} onClick={onScans}>
           <svg className="top-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 14h2v-4H1zM5 14h2V5H5zM9 14h2V8H9zM13 14h2V2h-2z" /></svg>
           <span className="top-txt">{t.scans}</span>
           {scansNew && <span className="new-dot" />}
         </button>
-        <button className="top-btn" type="button" aria-pressed={statsOn} aria-label={statsTitle} title={statsTitle} onClick={onStats}>
+        <button className="top-btn stats" type="button" aria-pressed={statsOn} aria-label={statsTitle} title={statsTitle} onClick={onStats}>
           <svg className="top-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 14h14v1H1zM1 11.6l4.2-5.1 3 3L14 2.8l1 .9-6.7 7.6-3-3L2.1 12.5z" /></svg>
           <span className="top-txt">{t.statsBtn}</span>
           {rec && <span className="rec-lamp" />}
         </button>
-        <button className="top-btn" type="button" aria-pressed={favOn} aria-label={t.favoritesBtn} title={t.favoritesBtn} onClick={onFavorites}>
+        <button className="top-btn fav" type="button" aria-pressed={favOn} aria-label={t.favoritesBtn} title={t.favoritesBtn} onClick={onFavorites}>
           <span className="top-ico" aria-hidden="true">★</span>
           <span className="top-txt">{t.favoritesBtn}</span>
         </button>

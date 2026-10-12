@@ -41,6 +41,7 @@ export function ScanBar({ on, band, status, onStart, onStop }: Props) {
             title={band ? t.scanTitle(names.dialBand(band)) : t.scanNoBand}
             onClick={() => band && onStart(band.id, step)}
           >
+            <svg className="scan-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 8l4.6-4.6M14.5 8A6.5 6.5 0 1 1 8 1.5M11.5 8A3.5 3.5 0 1 1 8 4.5" /></svg>
             {t.scan}
           </button>
         )}

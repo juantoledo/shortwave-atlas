@@ -20,4 +20,9 @@ samples: Array<number | null>,
 /**
  * The last `PINGS_KEPT` steps measured, oldest first (for the globe).
  */
-pings: Array<ScanPing>, } | { "state": "done", id: string, sites: Array<number>, } | { "state": "failed", message: string, };
+pings: Array<ScanPing>, 
+/**
+ * Bumped each time what the scan heard so far changes; that is in the logbook and the
+ * unidentified signals already, provisionally, until the scan ends.
+ */
+heard_rev: number, } | { "state": "done", id: string, sites: Array<number>, } | { "state": "failed", message: string, };
