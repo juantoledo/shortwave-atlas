@@ -208,6 +208,12 @@ impl StationRef {
     pub(crate) fn same(&self, other: &StationRef) -> bool {
         self.id() == other.id()
     }
+
+    /// `id` as one string, for maps keyed by station.
+    pub(crate) fn ident(&self) -> String {
+        let (source, key) = self.id();
+        format!("{source}\u{1f}{key}")
+    }
 }
 
 /// Who a signal is.

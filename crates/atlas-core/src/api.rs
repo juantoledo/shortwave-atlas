@@ -11,7 +11,9 @@ use crate::platform::Os;
 use crate::rig::{CommandError, RigCommand, RigState};
 use crate::scan::ScanRequest;
 use crate::setup::{BackendKind, Hint, RigChoice, RigctldStatus};
+use crate::source::StationKey;
 use crate::stations::StationQuery;
+use crate::stats::StatsQuery;
 use crate::update::Channel;
 use crate::user_stations::UserStationDraft;
 
@@ -144,6 +146,23 @@ pub enum Call {
     ImportUserStations {
         json: String,
         replace: bool,
+    },
+    /// What the listening history says for a period (result: `Stats`).
+    Stats(StatsQuery),
+    /// The session being recorded, or the usual station at this hour (result: `ListeningNow`).
+    Listening,
+    /// Stations worth a try now, and those scanned but never listened to (result: `Hunt`).
+    Hunt,
+    /// A station's signal week by week (result: `TrendPoint[]`).
+    StationTrend(StationKey),
+    /// The listener chose this station as the one they hear: the session there is credited to
+    /// it.
+    HearingStation(StationKey),
+    /// Forget the sessions that ended before `before` (Unix seconds), or all of them (result: the
+    /// number forgotten).
+    ClearListening {
+        #[ts(type = "number | null")]
+        before: Option<i64>,
     },
 }
 
@@ -329,6 +348,23 @@ mod tests {
         for (json, call) in [
             (r#"{"cmd":"user_stations"}"#, Call::UserStations),
             (r#"{"cmd":"code_tables"}"#, Call::CodeTables),
+            (r#"{"cmd":"listening"}"#, Call::Listening),
+            (r#"{"cmd":"hunt"}"#, Call::Hunt),
+            (
+                r#"{"cmd":"stats","args":{"period":"month","tz_offset_min":-180}}"#,
+                Call::Stats(StatsQuery { period: crate::stats::Period::Month, tz_offset_min: -180 }),
+            ),
+            (r#"{"cmd":"stats","args":{"period":"all"}}"#, Call::Stats(StatsQuery { period: crate::stats::Period::All, tz_offset_min: 0 })),
+            (
+                r#"{"cmd":"hearing_station","args":{"source":"eibi","key":"k"}}"#,
+                Call::HearingStation(StationKey { source: "eibi".into(), key: "k".into() }),
+            ),
+            (
+                r#"{"cmd":"station_trend","args":{"source":"mine","key":"1"}}"#,
+                Call::StationTrend(StationKey { source: "mine".into(), key: "1".into() }),
+            ),
+            (r#"{"cmd":"clear_listening","args":{"before":null}}"#, Call::ClearListening { before: None }),
+            (r#"{"cmd":"clear_listening","args":{"before":5}}"#, Call::ClearListening { before: Some(5) }),
             (r#"{"cmd":"export_user_stations"}"#, Call::ExportUserStations),
             (r#"{"cmd":"delete_user_station","args":{"id":"x"}}"#, Call::DeleteUserStation { id: "x".into() }),
             (

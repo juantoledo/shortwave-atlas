@@ -127,8 +127,8 @@ pub struct StationRow {
     pub key: String,
 }
 
-/// Which stations the list shows: the whole schedule, those a band scan logged, or the
-/// favorites.
+/// Which stations the list shows: the whole schedule, those a band scan logged, the
+/// favorites, or those in the listening history.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export)]
@@ -137,6 +137,7 @@ pub enum Lens {
     All,
     Heard,
     Favorites,
+    Listened,
 }
 
 /// The order of the Heard lens (the others are by frequency).

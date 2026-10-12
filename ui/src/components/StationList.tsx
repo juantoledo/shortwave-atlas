@@ -1,5 +1,5 @@
-// The station list: three lenses (the whole schedule, what the scans heard, the favorites),
-// search, filters with counts (the listener's own stations are a source to filter by), a
+// The station list: four lenses (the whole schedule, what the scans heard, the favorites, what
+// the listening history has), search, filters with counts (the listener's own stations are a source to filter by), a
 // transmitter picked on the globe or a scan to go through, and
 // pages. Signals and favorites the schedule has no row for come first; in Heard they share one
 // list with the logged stations, sorted as asked, each with its best reading and when it was
@@ -27,7 +27,7 @@ import { Flag } from './Flag';
 import { scheduleOf, userSources } from './sources';
 
 const REGIONS: Region[] = ['am', 'eu', 'af', 'me', 'as', 'oc', 'other'];
-const LENSES: Lens[] = ['all', 'heard', 'favorites'];
+const LENSES: Lens[] = ['all', 'heard', 'favorites', 'listened'];
 const SORTS: Sort[] = ['freq', 'strongest', 'recent'];
 /** Languages and countries offered in the filters: the most common first, then by name. */
 const TOP = 12;
@@ -175,9 +175,13 @@ export function StationList(p: Props) {
   const heardList = f.lens === 'heard' && f.scan === null;
   const sortLabel = { freq: t.sortFreq, strongest: t.sortStrongest, recent: t.sortRecent };
   const sortId = useId();
-  const lensLabel = { all: t.lensAll, heard: t.lensHeard, favorites: t.lensFav };
-  const lensTitle = { all: t.lensAllTitle, heard: t.lensHeardTitle, favorites: t.lensFavTitle };
-  const empty = filtered ? t.noResults : f.lens === 'heard' ? t.heardEmpty : f.lens === 'favorites' ? t.favEmpty : t.noResults;
+  const lensLabel = { all: t.lensAll, heard: t.lensHeard, favorites: t.lensFav, listened: t.lensListened };
+  const lensTitle = { all: t.lensAllTitle, heard: t.lensHeardTitle, favorites: t.lensFavTitle, listened: t.lensListenedTitle };
+  const empty = filtered ? t.noResults
+    : f.lens === 'heard' ? t.heardEmpty
+    : f.lens === 'favorites' ? t.favEmpty
+    : f.lens === 'listened' ? t.listenedEmpty
+    : t.noResults;
   const schedule = scheduleOf(p.meta);
   const season = schedule?.season ?? '';
 

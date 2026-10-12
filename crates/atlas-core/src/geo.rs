@@ -87,6 +87,28 @@ pub fn sun_at(pos: LatLon, unix: i64) -> SunAt {
     SunAt { elevation, phase, solar_min }
 }
 
+/// The point a fraction `f` (0..=1) of the way from `a` to `b` along the great circle. Antipodes
+/// have no single great circle: `a` is returned for them, as for one point.
+pub fn along(a: LatLon, b: LatLon, f: f64) -> LatLon {
+    let d = dist_bearing(a, b).deg.to_radians();
+    if d < 1e-9 || std::f64::consts::PI - d < 1e-9 {
+        return a;
+    }
+    let (la1, lo1, la2, lo2) = (a.lat.to_radians(), a.lon.to_radians(), b.lat.to_radians(), b.lon.to_radians());
+    let (ka, kb) = (((1.0 - f) * d).sin() / d.sin(), (f * d).sin() / d.sin());
+    let x = ka * la1.cos() * lo1.cos() + kb * la2.cos() * lo2.cos();
+    let y = ka * la1.cos() * lo1.sin() + kb * la2.cos() * lo2.sin();
+    let z = ka * la1.sin() + kb * la2.sin();
+    LatLon { lat: z.atan2(x.hypot(y)).to_degrees(), lon: y.atan2(x).to_degrees() }
+}
+
+/// The share of the path from `a` to `b` (9 points, ends included) where the Sun is down.
+pub fn dark_share(a: LatLon, b: LatLon, unix: i64) -> f32 {
+    const N: usize = 9;
+    let down = (0..N).filter(|&i| sun_at(along(a, b, i as f64 / (N - 1) as f64), unix).phase != SunPhase::Day).count();
+    down as f32 / N as f32
+}
+
 /// Wavelength in metres for a frequency in Hz.
 pub fn wavelength_m(freq_hz: u32) -> f64 {
     SPEED_OF_LIGHT_KM_S * 1000.0 / f64::from(freq_hz)
@@ -155,6 +177,33 @@ mod tests {
         // Santiago at 10:30 UTC in June: just before sunrise
         let t = sun_at(SANTIAGO, at(2026, 6, 21, 11));
         assert_eq!(t.phase, SunPhase::Twilight, "{t:?}");
+    }
+
+    #[test]
+    fn along_the_great_circle() {
+        let (a, b) = (LatLon { lat: 0.0, lon: 0.0 }, LatLon { lat: 0.0, lon: 90.0 });
+        let m = along(a, b, 0.5);
+        assert!(m.lat.abs() < 1e-9 && (m.lon - 45.0).abs() < 1e-9, "{m:?}");
+        // the ends, and the midpoint is as far from both
+        let (s, e) = (along(SANTIAGO, GREENVILLE, 0.0), along(SANTIAGO, GREENVILLE, 1.0));
+        assert!(dist_bearing(s, SANTIAGO).km < 1e-6 && dist_bearing(e, GREENVILLE).km < 1e-6);
+        let mid = along(SANTIAGO, GREENVILLE, 0.5);
+        let (x, y) = (dist_bearing(SANTIAGO, mid).km, dist_bearing(mid, GREENVILLE).km);
+        assert!((x - y).abs() < 1e-6 && (x + y - dist_bearing(SANTIAGO, GREENVILLE).km).abs() < 1e-6);
+        // over the pole
+        let p = along(LatLon { lat: 45.0, lon: 0.0 }, LatLon { lat: 45.0, lon: 180.0 }, 0.5);
+        assert!((p.lat - 90.0).abs() < 1e-9, "{p:?}");
+        assert_eq!(along(a, LatLon { lat: 0.0, lon: 180.0 }, 0.5), a);
+    }
+
+    #[test]
+    fn dark_share_of_a_path() {
+        // June, 12 UTC: Greenwich is in daylight, the date line in the dark
+        let t = at(2026, 6, 21, 12);
+        assert_eq!(dark_share(LatLon { lat: 50.0, lon: 0.0 }, LatLon { lat: 40.0, lon: 10.0 }, t), 0.0);
+        assert_eq!(dark_share(LatLon { lat: -10.0, lon: 170.0 }, LatLon { lat: 0.0, lon: -170.0 }, t), 1.0);
+        let half = dark_share(LatLon { lat: 0.0, lon: 0.0 }, LatLon { lat: 0.0, lon: 179.0 }, t);
+        assert!(half > 0.2 && half < 0.8, "{half}");
     }
 
     #[test]

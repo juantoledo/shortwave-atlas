@@ -6,6 +6,7 @@ pub mod audio;
 pub mod config;
 pub mod favorites;
 pub mod files;
+pub mod listening;
 pub mod scan;
 pub mod server;
 pub mod sources;
