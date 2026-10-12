@@ -826,6 +826,13 @@ pub(crate) mod tests {
         assert!(atlas.call(Call::Hunt).await.unwrap()["now"].is_array());
         let trend = atlas.call(Call::StationTrend(serde_json::from_value(key).unwrap())).await.unwrap();
         assert_eq!(trend.as_array().unwrap().len(), 26);
+        // on a fast machine all this takes less than a second, and a session that ends within
+        // the second it began overlaps no period: let it last one
+        let start = l["now"]["session"]["start"].as_i64().unwrap();
+        while now_secs() <= start {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        atlas.track(now_secs());
 
         // shutting down saves it; a new instance reads it back, and clearing asks nothing more
         atlas.shutdown().await;
