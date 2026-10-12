@@ -4,7 +4,7 @@
 
 import { useRef, type ReactNode } from 'react';
 import { useNow } from '../hooks/useCore';
-import { fmtSecs, useT } from '../i18n';
+import { fmtSecs, useT, type Messages } from '../i18n';
 import { Confirm } from './Confirm';
 import type { Info } from '../types/generated/Info';
 import type { ListeningNow } from '../types/generated/ListeningNow';
@@ -18,6 +18,13 @@ function Clock() {
       UTC <b>{two(d.getUTCHours())}:{two(d.getUTCMinutes())}<span className="sec">:{two(d.getUTCSeconds())}</span></b>
     </span>
   );
+}
+
+/** The rig in use: simulated, the Hamlib model we drive, or a remote `rigctld`. */
+function rigLabel(info: Info, t: Messages): string {
+  if (info.backend === 'sim') return t.subtitleSim;
+  if (info.backend === 'external') return t.subtitleRemote(info.rig_host ?? '');
+  return info.rig_model ? `${info.rig_model.mfg} ${info.rig_model.model}` : t.subtitleHamlib;
 }
 
 interface Props {
@@ -68,7 +75,7 @@ export function TopBar({ info, status, on, powerBusy, powerDisabled, onPower, as
           {setup ? (
             <button className="link sub" type="button" onClick={onSetup}>{t.subtitleSetup}</button>
           ) : (
-            <span className="sub">{info ? (info.backend === 'sim' ? t.subtitleSim : t.subtitleRig) : ''}</span>
+            <span className="sub">{info ? rigLabel(info, t) : ''}</span>
           )}
           <span className="status" role="status">{status}</span>
         </div>

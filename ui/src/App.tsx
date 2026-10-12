@@ -26,6 +26,7 @@ import { DEFAULT_COVERAGE, HF_SPAN } from './components/dial';
 import { bandOf, noiseFloor } from './components/scan';
 import { keyOf, MINE } from './components/sources';
 import { UpdateBanner } from './components/UpdateBanner';
+import { Welcome } from './components/Welcome';
 import { makeNames, NamesProvider } from './catalog/names';
 import { NO_FILTERS, useCandidates, useCore, useDial, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
 import { PHONE, useMedia } from './hooks/useMedia';
@@ -34,6 +35,7 @@ import { useDisplay } from './hooks/useDisplay';
 import { useBandScans, useScan } from './hooks/useScan';
 import { useUpdate } from './hooks/useUpdate';
 import { useUserStations } from './hooks/useUserStations';
+import { useWelcome } from './hooks/useWelcome';
 import { useListening, useStats } from './hooks/useStats';
 import { fmtStamp, I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
@@ -67,6 +69,7 @@ export function App() {
   const { api, info, reloadInfo, rig, status } = useCore();
   const update = useUpdate(api);
   const display = useDisplay();
+  const welcome = useWelcome();
   const [sheet, setSheet] = useState<SheetState>(null);
   const [view, setViewRaw] = useState<View>('globe');
   // Stats over the middle of the window, its tab and period
@@ -192,14 +195,14 @@ export function App() {
     setView('globe');
   };
   useEffect(() => {
-    if (page !== 'stats' || sheet !== null) return;
+    if (page !== 'stats' || sheet !== null || welcome.open) return;
     const esc = (e: KeyboardEvent) => {
       // a confirm popover takes its own Escape
       if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.confirm-pop')) setPage('main');
     };
     document.addEventListener('keydown', esc);
     return () => document.removeEventListener('keydown', esc);
-  }, [page, sheet]);
+  }, [page, sheet, welcome.open]);
   // turning off asks first (components/Confirm.tsx); a rig that goes off by itself drops the question
   const [askOff, setAskOff] = useState(false);
   useEffect(() => { if (!on) setAskOff(false); }, [on]);
@@ -292,7 +295,7 @@ export function App() {
     // on phones the panel only shows after the view change renders
     if (phone) requestAnimationFrame(go);
   };
-  useKeys(sheet !== null || askOff, (a: Action) => {
+  useKeys(sheet !== null || askOff || welcome.open, (a: Action) => {
     switch (a.kind) {
       case 'search':
         setPage('main');
@@ -565,6 +568,7 @@ export function App() {
             onClose={() => setSheet(null)}
           />
         )}
+        {welcome.open && <Welcome onClose={welcome.close} />}
       </div>
       </NamesProvider>
     </I18nProvider>

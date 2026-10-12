@@ -10,7 +10,7 @@ use crate::geo::LatLon;
 use crate::platform::Os;
 use crate::rig::{CommandError, RigCommand, RigState};
 use crate::scan::ScanRequest;
-use crate::setup::{BackendKind, Hint, RigChoice, RigctldStatus};
+use crate::setup::{BackendKind, Hint, RigChoice, RigModel, RigctldStatus};
 use crate::source::StationKey;
 use crate::stations::StationQuery;
 use crate::stats::StatsQuery;
@@ -227,6 +227,10 @@ pub struct Info {
     pub version: String,
     /// `sim`, `external` or `spawn`.
     pub backend: String,
+    /// The Hamlib model of the spawn backend; `None` for the others, or if `rigctl -l` fails.
+    pub rig_model: Option<RigModel>,
+    /// `host:port` of the external backend's `rigctld`; `None` for the others.
+    pub rig_host: Option<String>,
     pub qth: Qth,
     /// UI language override (`en`, `es`); `None` = follow the browser/OS.
     pub lang: Option<String>,

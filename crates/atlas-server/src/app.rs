@@ -288,11 +288,19 @@ impl Atlas {
         self.qth.read().expect("qth lock").clone()
     }
 
-    fn info(&self) -> Info {
+    async fn info(&self) -> Info {
         let audio = self.audio.choice();
+        let cfg = self.rig_config();
+        let rig_model = match cfg.backend {
+            BackendKind::Spawn => self.models().await.into_iter().find(|m| m.id == cfg.model),
+            _ => None,
+        };
+        let rig_host = (cfg.backend == BackendKind::External).then(|| format!("{}:{}", cfg.host, cfg.port));
         Info {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            backend: self.rig_config().backend.as_str().to_string(),
+            backend: cfg.backend.as_str().to_string(),
+            rig_model,
+            rig_host,
             qth: self.qth(),
             lang: self.config.lang.clone(),
             audio: audio.enabled,
@@ -326,7 +334,7 @@ impl Atlas {
         let now = now_secs();
         let json = |v: Result<Value, serde_json::Error>| v.map_err(|e| ApiError::internal(e.to_string()));
         match call {
-            Call::Info => json(serde_json::to_value(self.info())),
+            Call::Info => json(serde_json::to_value(self.info().await)),
             Call::State => json(serde_json::to_value(self.rig.state())),
             Call::Rig(cmd) => {
                 self.rig.execute(cmd).await?;
