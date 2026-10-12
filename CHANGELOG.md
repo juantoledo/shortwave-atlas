@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.9.0...v0.10.0) (2026-10-12)
+
+
+### Features
+
+* **ui:** flat map view, switchable with the globe ([7c2e4d8](https://github.com/juantoledo/shortwave-atlas/commit/7c2e4d8df567b093f3c21ef77bb38e45fdd9e29a))
+* **ui:** flat map view, switchable with the globe ([8df7aa9](https://github.com/juantoledo/shortwave-atlas/commit/8df7aa9525554a3173e5b99a0f75e96b614bd51b))
+
 ## [0.9.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.8.1...v0.9.0) (2026-10-12)
 
 
