@@ -14,7 +14,8 @@
 **See what you're hearing.** Shortwave Atlas connects to your radio and turns every frequency you
 tune into a place on the map. Spin the dial and the globe flies to the transmitter, traces the path
 from your station across the live day/night line, and tells you who's on the air, how far away
-they are, which way to point your antenna and when they broadcast next.
+they are, which way to point your antenna and when they broadcast next. Prefer a map? One switch
+turns the globe into a flat map of the whole world that does all the same.
 
 ![Shortwave Atlas in Spanish, tuned to NHK Radio Japan on 11860 kHz: the station list searched for "nh" with the All, Heard and Favorites lenses, the globe over East Asia with the Yamata transmitter marked, the station card showing it logged by three scans, the 25 m band dial with a scan profile, and the audio waterfall](docs/images/screenshot.png)
 
