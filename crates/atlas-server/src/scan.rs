@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use atlas_core::api::Qth;
 use atlas_core::scan::{
-    analyse, analyse_so_far, logbook, logged_sites, on_air_sites, scan_id, unidentified, valid_id, Logged, Peak, Scan,
+    analyse, analyse_so_far, keep_heard, logbook, logged_sites, on_air_sites, scan_id, unidentified, valid_id, Logged, Peak, Scan,
     ScanOutcome, ScanPing, ScanPlan, ScanStatus, ScanSummary, Signal, FORMAT_VERSION, PINGS_KEPT, READ_GAP_MS,
 };
 use atlas_core::stations::{Catalog, CatalogCell};
@@ -333,11 +333,12 @@ impl ScanService {
         inner.status = ScanStatus::Done { id, sites };
     }
 
-    /// What the running scan heard so far: into the logbook, and told by the status, when it
-    /// changed.
+    /// What the running scan heard so far (and before: `keep_heard`): into the logbook, and told
+    /// by the status, when it changed.
     fn hear(&self, cat: &Catalog, peaks: Vec<Peak>) {
         let mut inner = self.lock();
         let Some(live) = inner.live.as_mut() else { return };
+        let peaks = keep_heard(&live.peaks, peaks);
         if live.peaks == peaks {
             return;
         }

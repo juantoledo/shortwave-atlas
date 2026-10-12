@@ -24,7 +24,7 @@ import type { StationRow } from '../types/generated/StationRow';
 import { MineBadge } from './Dossier';
 import { Dropdown, type DropOpt } from './Dropdown';
 import { Flag } from './Flag';
-import { scheduleOf, userSources } from './sources';
+import { userSources } from './sources';
 
 const REGIONS: Region[] = ['am', 'eu', 'af', 'me', 'as', 'oc', 'other'];
 const LENSES: Lens[] = ['all', 'heard', 'favorites', 'listened'];
@@ -193,8 +193,6 @@ export function StationList(p: Props) {
     : f.lens === 'favorites' ? t.favEmpty
     : f.lens === 'listened' ? t.listenedEmpty
     : t.noResults;
-  const schedule = scheduleOf(p.meta);
-  const season = schedule?.season ?? '';
 
   const box = useRef<HTMLDivElement>(null), end = useRef<HTMLDivElement>(null);
   const more = useRef(p.onMore);
@@ -349,12 +347,6 @@ export function StationList(p: Props) {
           <button className="btn more" type="button" onClick={p.onMore}>{t.showMore(Math.min(100, p.total - loaded))}</button>
         )}
       </div>
-      {p.meta && (
-        <p className="foot">
-          {t.listFoot(season)}
-          {schedule && !schedule.current && <><br /><span className="warn">{t.seasonStale(season)}</span></>}
-        </p>
-      )}
     </>
   );
 }

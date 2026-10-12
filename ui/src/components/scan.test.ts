@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Band } from '../types/generated/Band';
 import type { ScanSummary } from '../types/generated/ScanSummary';
-import { dbY, gridPoints, lastTwo, noiseFloor, profilePath, scanSecs, speedOf, stepChoices, tally } from './scan';
+import { dbY, gridPoints, lastTwo, noiseFloor, profilePath, scanSecs, speedOf, stepChoices, tally, trail } from './scan';
 
 const b49: Band = { id: '49m', label: '49', kind: 'broadcast', lo_khz: 5800, hi_khz: 6300, scan_step_hz: 5000 };
 const ham10: Band = { id: 'ham-10m', label: '10', kind: 'ham', lo_khz: 28000, hi_khz: 29700, scan_step_hz: 1000 };
@@ -29,6 +29,16 @@ describe('scan steps', () => {
     expect(scanSecs(101)).toBe(51);
     expect(scanSecs(101, 'fast')).toBe(16);
     expect(scanSecs(101, 'thorough')).toBe(81);
+  });
+
+  it('traces the last steps of a running scan', () => {
+    const s = [-54, null, 40, 0, null];
+    expect(trail(s, 0)).toEqual([]);
+    // the last two visited: S9+40 is full height, unread stays null
+    expect(trail(s, 3, 2)).toEqual([{ i: 1, h: null }, { i: 2, h: 1 }]);
+    // S0 keeps a sliver
+    expect(trail(s, 1)[0].h).toBe(0.08);
+    expect(trail(s, 9).map((c) => c.i)).toEqual([0, 1, 2, 3, 4]);
   });
 
   it('tells the speed a scan ran at', () => {

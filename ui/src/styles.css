@@ -684,8 +684,6 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 .dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #5b6c7f; }
 .dot.on { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 8px rgba(255, 179, 63, 0.7); }
 .btn.more { width: 100%; margin: 10px 0 4px; }
-.foot { flex: none; margin: 8px 0 0; font: 400 10px/1.45 var(--font-mono); letter-spacing: 0.03em; color: var(--dim); }
-.foot .warn { color: var(--amber); }
 .flag { display: inline-block; width: 1.25em; height: 0.94em; margin-right: 0.4em; vertical-align: -0.1em; border-radius: 2px; object-fit: cover; box-shadow: 0 0 0 1px rgba(140, 185, 230, 0.25); }
 svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: none; }
 
@@ -810,6 +808,24 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 @keyframes scan-pulse { from { box-shadow: 0 0 4px rgba(255, 179, 63, 0.2); } to { box-shadow: 0 0 18px rgba(255, 179, 63, 0.55); } }
 .scan-step { flex: 1 0 auto; }
 .scan-step .drop { min-height: 30px; padding: 3px 7px; font: 12px var(--font-mono); }
+/* while a scan runs: its latest readings scrolling in, the newest lit, under a sweeping beam */
+.scan-trail {
+  position: relative; flex: 1 1 120px; min-width: 90px; height: 30px; display: flex; align-items: flex-end; justify-content: flex-end; gap: 2px;
+  padding: 3px 4px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: #050a11;
+}
+.scan-trail i {
+  flex: 0 0 3px; border-radius: 1px 1px 0 0; background: var(--band-ham);
+  transform-origin: bottom; animation: trail-rise 0.28s ease-out both;
+}
+.scan-trail i.gap { background: var(--dim); }
+.scan-trail i.new { background: var(--amber); box-shadow: 0 0 6px 1px rgba(255, 179, 63, 0.7); }
+@keyframes trail-rise { from { transform: scaleY(0.15); } to { transform: none; } }
+.scan-beam {
+  position: absolute; top: 0; bottom: 0; left: 0; width: 40%; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255, 179, 63, 0.16) 70%, rgba(255, 179, 63, 0.35) 92%, transparent);
+  animation: beam-sweep 1.8s linear infinite;
+}
+@keyframes beam-sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 .scan-info { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-width: 0; }
 .scan-est { font: 400 11px var(--font-mono); color: var(--dim); white-space: nowrap; }
 .scan-progress { flex: 1 1 120px; max-width: 360px; height: 6px; accent-color: var(--amber); }

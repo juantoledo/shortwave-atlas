@@ -1,5 +1,6 @@
 // The scan controls under the band dial: Scan (or Stop with the progress) for the band you are
-// in, its step, and how long it will take. The saved scans open from the top bar.
+// in, its step and speed, and how long it will take; while it runs, a trace of the latest
+// readings in place of the pickers. The saved scans open from the top bar.
 
 import { useId, useState } from 'react';
 import { useNames } from '../catalog/names';
@@ -8,7 +9,7 @@ import type { Band } from '../types/generated/Band';
 import type { ScanSpeed } from '../types/generated/ScanSpeed';
 import type { ScanStatus } from '../types/generated/ScanStatus';
 import { Dropdown } from './Dropdown';
-import { gridPoints, scanSecs, SPEED_CHOICES, stepChoices, stepKhz } from './scan';
+import { gridPoints, scanSecs, SPEED_CHOICES, stepChoices, stepKhz, trail } from './scan';
 
 interface Props {
   on: boolean;
@@ -71,6 +72,7 @@ export function ScanBar({ on, band, status, onStart, onStop }: Props) {
             />
           </div>
         )}
+        {running && <ScanTrail samples={running.samples} done={running.done} />}
       </div>
       <div className="scan-info">
         {running ? (
@@ -79,6 +81,24 @@ export function ScanBar({ on, band, status, onStart, onStop }: Props) {
           band && <span className="scan-est">{t.scanEstimate(gridPoints(band, step), fmtSecs(t, scanSecs(gridPoints(band, step), speed)))}</span>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The latest readings as bars scrolling in from the right, the newest lit, under a sweeping
+ *  beam. Each bar is keyed by its grid point, so only the new one rises. */
+function ScanTrail({ samples, done }: { samples: readonly (number | null)[]; done: number }) {
+  const cells = trail(samples, done);
+  return (
+    <div className="scan-trail" aria-hidden="true">
+      {cells.map((c, k) => (
+        <i
+          key={c.i}
+          className={(c.h === null ? 'gap' : '') + (k === cells.length - 1 ? ' new' : '')}
+          style={{ height: `${Math.round((c.h ?? 0.08) * 100)}%`, opacity: 0.25 + (0.75 * (k + 1)) / cells.length }}
+        />
+      ))}
+      <span className="scan-beam" />
     </div>
   );
 }

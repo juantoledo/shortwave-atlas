@@ -73,6 +73,20 @@ export function profilePath(p: Profile, lo: number, hi: number, area = false): s
     .join('');
 }
 
+/** Grid points the running scan's trace shows: the latest ones. */
+export const TRAIL = 28;
+
+/** The running scan's trace: its last `n` visited points (of `done`), oldest first, each as its
+ *  grid index and a height from 0 to 1 (`null` where nothing was read). */
+export function trail(samples: readonly (number | null)[], done: number, n = TRAIL): { i: number; h: number | null }[] {
+  const out: { i: number; h: number | null }[] = [];
+  for (let i = Math.max(0, done - n); i < Math.min(done, samples.length); i++) {
+    const db = samples[i];
+    out.push({ i, h: db === null ? null : Math.max(0.08, 1 - dbY(db)) });
+  }
+  return out;
+}
+
 /** The lower median of the readings so far, as the core takes the noise floor; `null` before any. */
 export function noiseFloor(samples: readonly (number | null)[]): number | null {
   const v = samples.filter((x): x is number => x !== null).sort((a, b) => a - b);

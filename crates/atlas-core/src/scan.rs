@@ -543,6 +543,18 @@ pub fn analyse_so_far(
     peaks
 }
 
+/// What a running scan has heard: the peaks `now` finds, and those it found before where `now`
+/// has none. The floor so far rises as the sweep reaches a busy stretch, and would drop the
+/// weaker signals heard earlier only to bring them back later; they stay until the scan ends,
+/// when `analyse` of the whole sweep decides.
+pub fn keep_heard(before: &[Peak], now: Vec<Peak>) -> Vec<Peak> {
+    let mut peaks = now;
+    let have: HashSet<u32> = peaks.iter().map(|p| p.freq_hz).collect();
+    peaks.extend(before.iter().filter(|p| !have.contains(&p.freq_hz)).cloned());
+    peaks.sort_by_key(|p| p.freq_hz);
+    peaks
+}
+
 /// The sites of the stations `peaks` logged that `cat` still has, by id.
 pub fn logged_sites(cat: &Catalog, peaks: &[Peak]) -> Vec<u32> {
     let sites: BTreeSet<u32> = peaks
@@ -870,6 +882,33 @@ mod tests {
         assert_eq!(one.iter().map(|p| (p.freq_hz / 1000, p.verdict)).collect::<Vec<_>>(), [(6070, Verdict::Sure)]);
         // the whole sweep: as `analyse`
         assert_eq!(analyse_so_far(&c, first, 5_000, &full, &times, n), analyse(&c, first, 5_000, &full, &times).peaks);
+    }
+
+    #[test]
+    fn a_running_scan_keeps_what_it_heard() {
+        // 16:30: CRI on 6070 at -30 over a quiet stretch from 6000 (below it unmeasured), then a
+        // longer busy one lifts the floor
+        let c = catalog();
+        let (first, n) = (5_800_000, 101);
+        let times = vec![at(16, 30); n];
+        let k = 56; // through 6075
+        let mut s: Vec<Option<i16>> = vec![None; n];
+        for (i, v) in s.iter_mut().enumerate().take(k).skip(40) {
+            *v = Some(if first + i as u32 * 5_000 == 6_070_000 { -30 } else { -48 });
+        }
+        let early = analyse_so_far(&c, first, 5_000, &s, &times, k);
+        assert_eq!(early.iter().map(|p| p.freq_hz / 1000).collect::<Vec<_>>(), [6070]);
+        for v in s.iter_mut().skip(k).take(40) {
+            *v = Some(-28);
+        }
+        let later = analyse_so_far(&c, first, 5_000, &s, &times, k + 40);
+        assert!(later.iter().all(|p| p.freq_hz != 6_070_000), "the floor so far drops it");
+        let kept = keep_heard(&early, later.clone());
+        assert!(kept.iter().any(|p| p.freq_hz == 6_070_000));
+        assert!(kept.windows(2).all(|w| w[0].freq_hz < w[1].freq_hz));
+        // a peak found again is the new one
+        let again = keep_heard(&later, later.clone());
+        assert_eq!(again, later);
     }
 
     #[test]
