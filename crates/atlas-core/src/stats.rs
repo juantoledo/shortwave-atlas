@@ -332,7 +332,14 @@ fn shares(now: Tally, before: &Tally, cat: &Catalog, stations: bool) -> Vec<Shar
         });
     }
     if other.0 > 0 {
-        out.push(Share { key: "*".into(), seconds: sat(other.0), sessions: other.1, delta_s: 0, station: None, station_id: None });
+        out.push(Share {
+            key: "*".into(),
+            seconds: sat(other.0),
+            sessions: other.1,
+            delta_s: 0,
+            station: None,
+            station_id: None,
+        });
     }
     out
 }
@@ -361,7 +368,7 @@ fn totals(list: &[&Session], a: i64, b: i64) -> Totals {
     t.stations = st.len() as u32;
     t.countries = co.len() as u32;
     t.languages = la.len() as u32;
-    t.average = if t.sessions > 0 { t.seconds / t.sessions } else { 0 };
+    t.average = t.seconds.checked_div(t.sessions).unwrap_or(0);
     t
 }
 
@@ -434,7 +441,11 @@ fn propagation(list: &[&Session], a: i64, b: i64) -> Propagation {
             cells
                 .iter()
                 .filter(|((hh, _), (_, n))| *hh == h && *n >= BEST_MIN_SESSIONS)
-                .map(|((_, band), (sum, n))| BandDb { band: band.to_string(), db: (*sum as f64 / f64::from(*n)).round() as i16, sessions: *n })
+                .map(|((_, band), (sum, n))| BandDb {
+                    band: band.to_string(),
+                    db: (*sum as f64 / f64::from(*n)).round() as i16,
+                    sessions: *n,
+                })
                 .max_by(|x, y| x.db.cmp(&y.db).then_with(|| y.band.cmp(&x.band)))
         })
         .collect();
@@ -446,8 +457,7 @@ fn propagation(list: &[&Session], a: i64, b: i64) -> Propagation {
         let tot = |s: &BandSplit| u64::from(s.day_s) + u64::from(s.twilight_s) + u64::from(s.night_s);
         tot(y).cmp(&tot(x)).then_with(|| x.band.cmp(&y.band))
     });
-    let mut faint: Vec<&Session> =
-        id.iter().copied().filter(|s| s.secs() >= 120 && s.avg_db.is_some()).collect();
+    let mut faint: Vec<&Session> = id.iter().copied().filter(|s| s.secs() >= 120 && s.avg_db.is_some()).collect();
     faint.sort_by_key(|s| (s.avg_db, s.start));
     faint.truncate(5);
     Propagation {
@@ -544,7 +554,8 @@ pub fn stats(closed: &[Session], open: Option<&Session>, q: &StatsQuery, now: i6
         .max_by(|a, b| a.km.unwrap_or(0.0).total_cmp(&b.km.unwrap_or(0.0)))
         .map(|s| (*s).clone());
     let open_id = open.map(|o| o.id.as_str());
-    let recent = in_window.iter().rev().filter(|s| Some(s.id.as_str()) != open_id).take(RECENT).map(|s| (*s).clone()).collect();
+    let recent =
+        in_window.iter().rev().filter(|s| Some(s.id.as_str()) != open_id).take(RECENT).map(|s| (*s).clone()).collect();
 
     let mut site_secs: HashMap<u32, i64> = HashMap::new();
     for s in &in_window {
@@ -662,10 +673,10 @@ mod tests {
         let cri = || Some(sref("CRI", "CHN", "M"));
         let rnz = || Some(sref("RNZ", "NZL", "E,M"));
         let closed = vec![
-            sess(T0 - 8 * DAY_S, 60, cri()),       // the week before
-            sess(T0 - 2 * DAY_S, 30, rnz()),       // this week
-            sess(T0 - 3600, 120, cri()),           // across midnight: 60 min yesterday, 60 today
-            sess(T0 + 2 * 3600, 10, None),         // today, unidentified
+            sess(T0 - 8 * DAY_S, 60, cri()), // the week before
+            sess(T0 - 2 * DAY_S, 30, rnz()), // this week
+            sess(T0 - 3600, 120, cri()),     // across midnight: 60 min yesterday, 60 today
+            sess(T0 + 2 * 3600, 10, None),   // today, unidentified
         ];
         let now = T0 + 3 * 3600;
         let open = sess(T0 + 2 * 3600 + 1800, 30, cri()); // under way, 30 min so far
@@ -742,12 +753,17 @@ mod tests {
         assert_eq!(s.streak, Streak { current_days: 3, best_days: 3 }, "nothing yet today: still current");
         let s = stats(&closed, None, &q(Period::Week, 0), T0 + DAY_S + 600, &cat);
         assert_eq!(s.streak.current_days, 0);
-        let firsts: Vec<_> = s.milestones.iter().filter_map(|m| match &m.what {
-            MilestoneKind::FirstCountry { itu } => Some(itu.as_str()),
-            _ => None,
-        }).collect();
+        let firsts: Vec<_> = s
+            .milestones
+            .iter()
+            .filter_map(|m| match &m.what {
+                MilestoneKind::FirstCountry { itu } => Some(itu.as_str()),
+                _ => None,
+            })
+            .collect();
         assert_eq!(firsts, ["USA", "G", "CHN"], "newest first");
-        let many: Vec<Session> = (0..10).map(|i| sess(T0 + i * 60, 1, Some(sref(&format!("C{i}"), &format!("C{i}"), "E")))).collect();
+        let many: Vec<Session> =
+            (0..10).map(|i| sess(T0 + i * 60, 1, Some(sref(&format!("C{i}"), &format!("C{i}"), "E")))).collect();
         let m = stats(&many, None, &q(Period::All, 0), T0 + 3600, &cat).milestones;
         assert!(m.iter().any(|m| m.what == MilestoneKind::Countries { n: 10 }));
         assert!(m.iter().any(|m| m.what == MilestoneKind::Stations { n: 10 }));
@@ -765,8 +781,16 @@ mod tests {
         };
         let mut closed = vec![];
         for d in 0..3 {
-            closed.push(Session { start: T0 + d * 60 + 21 * 3600, end: T0 + d * 60 + 21 * 3600 + 180, ..at(21, "49m", -10, SunPhase::Night) });
-            closed.push(Session { start: T0 + d * 60 + 21 * 3600 + 30, end: T0 + d * 60 + 21 * 3600 + 210, ..at(21, "31m", -30, SunPhase::Twilight) });
+            closed.push(Session {
+                start: T0 + d * 60 + 21 * 3600,
+                end: T0 + d * 60 + 21 * 3600 + 180,
+                ..at(21, "49m", -10, SunPhase::Night)
+            });
+            closed.push(Session {
+                start: T0 + d * 60 + 21 * 3600 + 30,
+                end: T0 + d * 60 + 21 * 3600 + 210,
+                ..at(21, "31m", -30, SunPhase::Twilight)
+            });
         }
         // two strong 25 m sessions are too few to count
         closed.push(at(21, "25m", 20, SunPhase::Day));

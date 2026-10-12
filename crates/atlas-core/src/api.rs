@@ -361,7 +361,10 @@ mod tests {
                 r#"{"cmd":"stats","args":{"period":"month","tz_offset_min":-180}}"#,
                 Call::Stats(StatsQuery { period: crate::stats::Period::Month, tz_offset_min: -180 }),
             ),
-            (r#"{"cmd":"stats","args":{"period":"all"}}"#, Call::Stats(StatsQuery { period: crate::stats::Period::All, tz_offset_min: 0 })),
+            (
+                r#"{"cmd":"stats","args":{"period":"all"}}"#,
+                Call::Stats(StatsQuery { period: crate::stats::Period::All, tz_offset_min: 0 }),
+            ),
             (
                 r#"{"cmd":"hearing_station","args":{"source":"eibi","key":"k"}}"#,
                 Call::HearingStation(StationKey { source: "eibi".into(), key: "k".into() }),

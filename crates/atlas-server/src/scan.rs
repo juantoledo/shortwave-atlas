@@ -7,8 +7,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use atlas_core::api::Qth;
 use atlas_core::scan::{
-    analyse, analyse_so_far, keep_heard, logbook, logged_sites, on_air_sites, scan_id, unidentified, valid_id, Logged, Peak, Scan,
-    ScanOutcome, ScanPing, ScanPlan, ScanStatus, ScanSummary, Signal, FORMAT_VERSION, PINGS_KEPT, READ_GAP_MS,
+    analyse, analyse_so_far, keep_heard, logbook, logged_sites, on_air_sites, scan_id, unidentified, valid_id, Logged,
+    Peak, Scan, ScanOutcome, ScanPing, ScanPlan, ScanStatus, ScanSummary, Signal, FORMAT_VERSION, PINGS_KEPT,
+    READ_GAP_MS,
 };
 use atlas_core::stations::{Catalog, CatalogCell};
 use atlas_rig::{ScanLink, ScanStop};

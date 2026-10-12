@@ -455,7 +455,8 @@ impl Atlas {
             Call::Listening => json(serde_json::to_value(self.listening_now(&self.stations.get(), now))),
             Call::Hunt => {
                 let cat = self.stations.get();
-                let (logbook, coverage, qth) = (self.scan.logbook_for(&cat), self.rig.coverage().await, self.qth().pos());
+                let (logbook, coverage, qth) =
+                    (self.scan.logbook_for(&cat), self.rig.coverage().await, self.qth().pos());
                 json(serde_json::to_value(self.listening.with(now, |l, open| {
                     let all: Vec<_> = l.iter().chain(open).collect();
                     hunt(&cat, &all, &logbook, now, qth, &coverage)

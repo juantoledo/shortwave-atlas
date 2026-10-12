@@ -269,7 +269,13 @@ mod tests {
                 &self.cat,
                 q,
                 0,
-                &Known { logbook: &self.logbook, signals: &signals, favorites: &self.favorites, listened: &self.listened, scan },
+                &Known {
+                    logbook: &self.logbook,
+                    signals: &signals,
+                    favorites: &self.favorites,
+                    listened: &self.listened,
+                    scan,
+                },
             )
         }
     }

@@ -186,7 +186,11 @@ fn on_air(s: &Session, ctx: &Ctx, now: i64) -> bool {
 enum State {
     Idle,
     /// On `freq_hz` since `since`, not long enough yet.
-    Pending { freq_hz: u32, since: i64, seen: i64 },
+    Pending {
+        freq_hz: u32,
+        since: i64,
+        seen: i64,
+    },
     Open(Box<Open>),
 }
 
@@ -281,7 +285,10 @@ impl Tracker {
             sky: None,
             rarity: None,
         };
-        let hint = self.hint.as_ref().filter(|h| ctx.cat.by_key(&h.source, &h.key).is_some_and(|st| near(st.freq_hz, freq_hz)));
+        let hint = self
+            .hint
+            .as_ref()
+            .filter(|h| ctx.cat.by_key(&h.source, &h.key).is_some_and(|st| near(st.freq_hz, freq_hz)));
         attribute(ctx, freq_hz, now, hint).apply(&mut s);
         s
     }
@@ -361,7 +368,8 @@ impl Tracker {
     /// The rig moved to `f`: a pick for a station there stays (the pick and the tune are sent
     /// together, and the rig gets there after), any other goes.
     fn keep_hint_for(&mut self, ctx: &Ctx, f: u32) {
-        let there = self.hint.as_ref().and_then(|h| ctx.cat.by_key(&h.source, &h.key)).is_some_and(|st| near(st.freq_hz, f));
+        let there =
+            self.hint.as_ref().and_then(|h| ctx.cat.by_key(&h.source, &h.key)).is_some_and(|st| near(st.freq_hz, f));
         if !there {
             self.hint = None;
         }
@@ -511,7 +519,8 @@ pub(crate) mod tests {
         let s = t.open(at + 10).unwrap();
         let guess = s.station.as_ref().unwrap().freq_hz;
         assert!(!s.picked);
-        let other = cat.stations().find(|s| (s.freq_hz == 9_410_000 || s.freq_hz == 9_411_000) && s.freq_hz != guess).unwrap();
+        let other =
+            cat.stations().find(|s| (s.freq_hz == 9_410_000 || s.freq_hz == 9_411_000) && s.freq_hz != guess).unwrap();
         t.hint(other.station_key(), &ctx, at + 12);
         let s = t.open(at + 12).unwrap();
         assert_eq!((s.station.as_ref().map(|s| s.freq_hz), s.picked), (Some(other.freq_hz), true));
@@ -571,7 +580,11 @@ pub(crate) mod tests {
         let mut t = Tracker::new(0, 20);
         feed(&mut t, &ctx, &on(6_070_000, Some(3)), T0, T0 + 5);
         let s = t.close().unwrap();
-        let text = format!("{}not json\n\n{}", to_line(&s), to_line(&Session { id: "x".into(), end: T0 + 99_999, ..s.clone() }));
+        let text = format!(
+            "{}not json\n\n{}",
+            to_line(&s),
+            to_line(&Session { id: "x".into(), end: T0 + 99_999, ..s.clone() })
+        );
         let (list, bad) = parse_lines(&text);
         assert_eq!((list.len(), bad, &list[0]), (2, 1, &s));
         // an older line without the optional fields still reads

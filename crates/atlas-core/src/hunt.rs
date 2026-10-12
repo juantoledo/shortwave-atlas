@@ -34,8 +34,12 @@ pub enum HuntReason {
     LitPath,
     NewCountry,
     NewStation,
-    Rare { stars: u8 },
-    Far { km: u32 },
+    Rare {
+        stars: u8,
+    },
+    Far {
+        km: u32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -231,7 +235,7 @@ mod tests {
         assert_eq!(unique.len(), countries.len(), "one per country");
         // CHN heard: China drops out; out of coverage: nothing
         let (_, cri) = on_air_ref(&cat, 6_070_000, at);
-        let heard = vec![sess(T0 - 3600, 10, Some(cri))];
+        let heard = [sess(T0 - 3600, 10, Some(cri))];
         let rows2 = hunt_now(&cat, &heard.iter().collect::<Vec<_>>(), at, QTH, &default_coverage());
         assert!(rows2.iter().all(|r| r.station.itu != "CHN" || r.reasons.contains(&HuntReason::NewStation)));
         assert!(rows2.iter().all(|r| r.station.freq_hz != 6_070_000));
@@ -245,8 +249,9 @@ mod tests {
         let at = T0 + 1800;
         let (cri_id, cri) = on_air_ref(&cat, 6_070_000, at);
         let (kbs_id, _) = on_air_ref(&cat, 11_000_000, at);
-        let log = |id, last| Logged { station_id: id, site_id: 0, first: last, last, best_db: -10, count: 1, sure: true };
-        let heard = vec![sess(T0 - 86_400 + 600, 40, Some(cri.clone()))];
+        let log =
+            |id, last| Logged { station_id: id, site_id: 0, first: last, last, best_db: -10, count: 1, sure: true };
+        let heard = [sess(T0 - 86_400 + 600, 40, Some(cri.clone()))];
         let heard: Vec<&Session> = heard.iter().collect();
         let rows = scanned_not_listened(&cat, &heard, &[log(cri_id, 5), log(kbs_id, 9)], at);
         assert_eq!(rows.iter().map(|r| r.station_id).collect::<Vec<_>>(), [kbs_id]);
@@ -255,7 +260,7 @@ mod tests {
         assert_eq!((u.station_id, u.seconds), (cri_id, 2400));
         assert!(usual(&cat, &heard, T0 + 6 * 3600).is_none());
         // too long ago
-        let old = vec![sess(T0 - 40 * 86_400, 40, Some(cri))];
+        let old = [sess(T0 - 40 * 86_400, 40, Some(cri))];
         assert!(usual(&cat, &[&old[0]], at).is_none());
     }
 }

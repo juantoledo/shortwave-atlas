@@ -25,7 +25,13 @@ pub fn weekly_minutes(slots: &[Slot]) -> f64 {
         .iter()
         .map(|s| {
             let (a, b) = (u32::from(s.start), u32::from(s.end));
-            let mins = if a < b { b - a } else if a > b { DAY_MIN - a + b } else { 0 };
+            let mins = if a < b {
+                b - a
+            } else if a > b {
+                DAY_MIN - a + b
+            } else {
+                0
+            };
             let days = match s.days {
                 Days::Daily => 7.0,
                 Days::Weekly { mask } => f64::from((mask & 0x7f).count_ones()),
@@ -155,21 +161,39 @@ pub struct Badge {
 #[ts(export)]
 pub enum Challenge {
     /// A station from this region.
-    Region { region: Region },
+    Region {
+        region: Region,
+    },
     /// A broadcast in this EiBi language.
-    Lang { lang: String },
-    Band { band: String },
-    BelowKhz { khz: u32 },
-    AboveKhz { khz: u32 },
-    OverKm { km: u32 },
-    UnderKm { km: u32 },
+    Lang {
+        lang: String,
+    },
+    Band {
+        band: String,
+    },
+    BelowKhz {
+        khz: u32,
+    },
+    AboveKhz {
+        khz: u32,
+    },
+    OverKm {
+        km: u32,
+    },
+    UnderKm {
+        km: u32,
+    },
     /// A station this rare or rarer.
-    Rarity { stars: u8 },
+    Rarity {
+        stars: u8,
+    },
     GreyLine,
     /// The whole path in the dark.
     DarkPath,
     /// One session this long.
-    Minutes { minutes: u32 },
+    Minutes {
+        minutes: u32,
+    },
     /// A country never heard before this month.
     NewCountry,
 }
@@ -298,7 +322,13 @@ pub fn collection(all: &[&Session], now: i64, tz_min: i32) -> Collection {
     let mut stamps: HashMap<&str, Stamp> = HashMap::new();
     for s in all {
         if let Some(c) = s.country().and_then(country) {
-            let st = stamps.entry(c.itu).or_insert(Stamp { itu: c.itu.into(), flag: c.flag.map(String::from), region: c.region, first: s.start, seconds: 0 });
+            let st = stamps.entry(c.itu).or_insert(Stamp {
+                itu: c.itu.into(),
+                flag: c.flag.map(String::from),
+                region: c.region,
+                first: s.start,
+                seconds: 0,
+            });
             st.seconds = st.seconds.saturating_add(s.secs() as u32);
         }
     }
@@ -331,11 +361,13 @@ pub fn collection(all: &[&Session], now: i64, tz_min: i32) -> Collection {
     let cells: Vec<Cell> = card(year, month)
         .into_iter()
         .map(|challenge| {
-            let done = all.iter().filter(|s| s.start >= month_start && meets(&challenge, s, &before)).map(|s| s.end).min();
+            let done =
+                all.iter().filter(|s| s.start >= month_start && meets(&challenge, s, &before)).map(|s| s.end).min();
             Cell { challenge, done }
         })
         .collect();
-    const LINES: [[usize; 3]; 8] = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
+    const LINES: [[usize; 3]; 8] =
+        [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
     let lines = if cells.len() == 9 {
         LINES.iter().filter(|l| l.iter().all(|&i| cells[i].done.is_some())).count() as u32
     } else {
@@ -508,7 +540,9 @@ pub(crate) mod tests {
         assert_eq!(a, card(2026, 6), "the same card on every client");
         assert_ne!(a, card(2026, 7));
         // one region, one language and one band at most
-        for c in a.iter().filter(|c| matches!(c, Challenge::Region { .. } | Challenge::Lang { .. } | Challenge::Band { .. })) {
+        for c in
+            a.iter().filter(|c| matches!(c, Challenge::Region { .. } | Challenge::Lang { .. } | Challenge::Band { .. }))
+        {
             let same = a.iter().filter(|o| std::mem::discriminant(*o) == std::mem::discriminant(c)).count();
             assert_eq!(same, 1, "{a:?}");
         }
