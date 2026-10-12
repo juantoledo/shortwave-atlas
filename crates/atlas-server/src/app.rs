@@ -272,7 +272,7 @@ impl Atlas {
             .iter()
             .find(|b| b.id == req.band_id)
             .ok_or_else(|| invalid("That band is not on this rig's dial"))?;
-        let plan = plan(band, req.step_hz, req.dwell_ms, &coverage).map_err(invalid)?;
+        let plan = plan(band, req.step_hz, req.dwell_ms, req.speed, &coverage).map_err(invalid)?;
         let link = self.rig.begin_scan()?;
         let state = self.rig.state();
         let cfg = self.rig_config();
@@ -580,7 +580,7 @@ pub(crate) mod tests {
         }
         atlas.call(Call::Rig(RigCommand::SetFreq { hz: 5_025_000 })).await.unwrap();
         tuned(&atlas, 5_025_000).await;
-        let req = |band: &str, step_hz| ScanRequest { band_id: band.into(), step_hz, dwell_ms: Some(100) };
+        let req = |band: &str, step_hz| ScanRequest { band_id: band.into(), step_hz, dwell_ms: Some(100), speed: None };
 
         // checked against the dial
         let e = atlas.call(Call::StartScan(req("nope", None))).await.unwrap_err();

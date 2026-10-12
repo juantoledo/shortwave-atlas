@@ -8,6 +8,7 @@ import type { Api } from '../api/client';
 import { lastTwo } from '../components/scan';
 import type { Logged } from '../types/generated/Logged';
 import type { Scan } from '../types/generated/Scan';
+import type { ScanSpeed } from '../types/generated/ScanSpeed';
 import type { ScanStatus } from '../types/generated/ScanStatus';
 import type { ScanSummary } from '../types/generated/ScanSummary';
 
@@ -62,10 +63,10 @@ export function useScan(api: Api | null, onError: (e: unknown) => void, generati
     if (api && heardRev > 0) api.logbook().then(setLogbook, () => {});
   }, [api, heardRev]);
 
-  const start = useCallback(async (bandId: string, stepHz: number) => {
+  const start = useCallback(async (bandId: string, stepHz: number, speed: ScanSpeed) => {
     if (!api) return;
     try {
-      setStatus(await api.startScan({ band_id: bandId, step_hz: stepHz, dwell_ms: null }));
+      setStatus(await api.startScan({ band_id: bandId, step_hz: stepHz, dwell_ms: null, speed }));
     } catch (e) {
       onError(e);
     }

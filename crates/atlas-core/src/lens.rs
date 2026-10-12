@@ -209,6 +209,7 @@ mod tests {
             step_hz: 5_000,
             points: 101,
             dwell_ms: 300,
+            reads: 3,
             mode: None,
             started: 0,
             finished: 1,

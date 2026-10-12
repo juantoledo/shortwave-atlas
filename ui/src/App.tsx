@@ -48,6 +48,7 @@ import type { Mode } from './types/generated/Mode';
 import type { OffSchedule } from './types/generated/OffSchedule';
 import type { Period } from './types/generated/Period';
 import type { Qth } from './types/generated/Qth';
+import type { ScanSpeed } from './types/generated/ScanSpeed';
 import type { SiteDot } from './types/generated/SiteDot';
 import type { StationRow } from './types/generated/StationRow';
 import type { UserStationDraft } from './types/generated/UserStationDraft';
@@ -249,10 +250,10 @@ export function App() {
   };
   // a scan started here turns the list to what the scans heard, newest first, and the rows it
   // hears light up when it ends (the logbook is only written then)
-  const startScan = (bandId: string, stepHz: number) => {
+  const startScan = (bandId: string, stepHz: number, speed: ScanSpeed) => {
     setFilters({ ...NO_FILTERS, lens: 'heard', sort: 'recent' });
     if (phone) setView('browse');
-    void scan.start(bandId, stepHz);
+    void scan.start(bandId, stepHz, speed);
   };
   const runningSince = scan.status.state === 'running' ? scan.status.started : null;
   const [freshSince, setFreshSince] = useState<number | null>(null);

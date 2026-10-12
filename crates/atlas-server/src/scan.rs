@@ -7,8 +7,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use atlas_core::api::Qth;
 use atlas_core::scan::{
-    analyse, analyse_so_far, logbook, logged_sites, on_air_sites, scan_id, unidentified, valid_id, Logged, Peak, Scan, ScanOutcome, ScanPing,
-    ScanPlan, ScanStatus, ScanSummary, Signal, FORMAT_VERSION, PINGS_KEPT, READS, READ_GAP_MS,
+    analyse, analyse_so_far, logbook, logged_sites, on_air_sites, scan_id, unidentified, valid_id, Logged, Peak, Scan,
+    ScanOutcome, ScanPing, ScanPlan, ScanStatus, ScanSummary, Signal, FORMAT_VERSION, PINGS_KEPT, READ_GAP_MS,
 };
 use atlas_core::stations::{Catalog, CatalogCell};
 use atlas_rig::{ScanLink, ScanStop};
@@ -229,6 +229,7 @@ impl ScanService {
             step_hz: plan.step_hz,
             points: plan.len() as u32,
             dwell_ms: plan.dwell_ms,
+            reads: plan.reads,
             mode: ctx.mode,
             started,
             finished: started,
@@ -247,7 +248,7 @@ impl ScanService {
                 break;
             }
             if plan.covered[i] {
-                match link.measure(plan.freq(i), dwell, READS, gap).await {
+                match link.measure(plan.freq(i), dwell, plan.reads, gap).await {
                     Ok(db) => {
                         times[i] = now_secs();
                         let db = db.map(|d| d.clamp(i16::MIN.into(), i16::MAX.into()) as i16);
@@ -365,6 +366,7 @@ mod tests {
                 step_hz: 5_000,
                 points: 2,
                 dwell_ms: 300,
+                reads: 3,
                 mode: None,
                 started,
                 finished: started + 1,

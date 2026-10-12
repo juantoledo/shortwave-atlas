@@ -2,16 +2,23 @@
 // steps the picker offers, how long a scan takes, and what a band's last scan says (its chip).
 
 import type { Band } from '../types/generated/Band';
+import type { ScanSpeed } from '../types/generated/ScanSpeed';
 import type { ScanSummary } from '../types/generated/ScanSummary';
 import { MARKS_W } from './dial';
 
 /** Steps the picker offers, in Hz (the core accepts 0.5 kHz to 1 MHz). */
 export const STEP_CHOICES_HZ = [1000, 2500, 5000, 9000, 10000, 12500, 25000, 100000];
-/** The core's limits (`scan::MAX_STEPS`, `DEFAULT_DWELL_MS`). */
+/** The core's limit (`scan::MAX_STEPS`). */
 export const MAX_STEPS = 2000;
-export const DEFAULT_DWELL_MS = 300;
-/** Per step on top of the dwell: three meter reads 60 ms apart and the CAT round trips. */
-const STEP_OVERHEAD_MS = 200;
+/** The speeds the picker offers: their dwell and meter reads per step, as the core's `ScanSpeed`. */
+export const SCAN_SPEEDS: Record<ScanSpeed, { dwellMs: number; reads: number }> = {
+  fast: { dwellMs: 120, reads: 1 },
+  normal: { dwellMs: 300, reads: 3 },
+  thorough: { dwellMs: 600, reads: 3 },
+};
+export const SPEED_CHOICES: ScanSpeed[] = ['fast', 'normal', 'thorough'];
+/** Per step on top of the dwell: tuning, each meter read's CAT round trip, and the reads' 60 ms gaps. */
+const TUNE_MS = 20, READ_MS = 20, READ_GAP_MS = 60;
 /** The profile's scale: S0 at the bottom, S9+40 dB at the top. */
 const FLOOR_DB = -54, TOP_DB = 40;
 
@@ -24,8 +31,15 @@ export function stepChoices(b: Band): number[] {
   return ok.includes(b.scan_step_hz) ? ok : [...ok, b.scan_step_hz].sort((x, y) => x - y);
 }
 
-/** Seconds a scan of `points` takes. */
-export const scanSecs = (points: number, dwellMs = DEFAULT_DWELL_MS) => Math.round((points * (dwellMs + STEP_OVERHEAD_MS)) / 1000);
+/** Seconds a scan of `points` takes at `speed`. */
+export function scanSecs(points: number, speed: ScanSpeed = 'normal'): number {
+  const { dwellMs, reads } = SCAN_SPEEDS[speed];
+  return Math.round((points * (TUNE_MS + dwellMs + reads * READ_MS + (reads - 1) * READ_GAP_MS)) / 1000);
+}
+
+/** The speed a saved scan ran at, from its dwell and reads (`null` for a dwell no speed has). */
+export const speedOf = (s: Pick<ScanSummary, 'dwell_ms' | 'reads'>): ScanSpeed | null =>
+  SPEED_CHOICES.find((k) => SCAN_SPEEDS[k].dwellMs === s.dwell_ms && SCAN_SPEEDS[k].reads === s.reads) ?? null;
 
 /** `5`, `2.5`, `12.5`: a step in kHz. */
 export const stepKhz = (hz: number) => String(hz / 1000);

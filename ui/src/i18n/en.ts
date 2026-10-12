@@ -7,6 +7,7 @@ import type { Hint } from '../types/generated/Hint';
 import type { ManualReason } from '../types/generated/ManualReason';
 import type { Os } from '../types/generated/Os';
 import type { ScanOutcome } from '../types/generated/ScanOutcome';
+import type { ScanSpeed } from '../types/generated/ScanSpeed';
 import type { Verdict } from '../types/generated/Verdict';
 
 /** Hint texts that differ on some OS (the shared text is the Linux one). */
@@ -63,6 +64,9 @@ export const en = {
   scanStopTitle: 'Stop the scan (tuning anywhere stops it too)',
   scanNoBand: 'Tune into a band to scan it',
   scanStep: 'Scan step',
+  scanSpeed: 'Scan speed',
+  scanSpeedTitle: 'How long the scan lingers on each step: Fast reads the S-meter once, sooner, and can miss a signal in a fade',
+  scanSpeeds: { fast: 'Fast', normal: 'Normal', thorough: 'Thorough' } as Record<ScanSpeed, string>,
   scanEstimate: (n: number, dur: string) => `${n} steps · ~${dur}`,
   scanProfile: 'Signal strength from the last scan',
   moreControls: 'More receiver controls',
@@ -405,7 +409,7 @@ export const en = {
   scanShowTitle: 'List the stations this scan heard and missed, with the globe and the station panel in view',
   favoritesBtn: 'Favorites',
   scanCount: (signals: number, logged: number, expected: number) => `${signals} signals · ${logged} of ${expected} logged`,
-  scanMeta: (step: string, dwell: number, floor: string) => `${step} kHz steps · ${dwell} ms · floor ${floor}`,
+  scanMeta: (step: string, pace: string, floor: string) => `${step} kHz steps · ${pace} · floor ${floor}`,
   scanOutcome: { complete: 'Complete', stopped: 'Stopped', failed: 'Failed' } as Record<ScanOutcome['kind'], string>,
   scanSignals: 'Signals',
   scanMissed: 'On the air, not heard',

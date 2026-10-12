@@ -326,7 +326,10 @@ mod tests {
         let c: Call =
             serde_json::from_str(r#"{"cmd":"start_scan","args":{"band_id":"49m","step_hz":null,"dwell_ms":null}}"#)
                 .unwrap();
-        assert_eq!(c, Call::StartScan(ScanRequest { band_id: "49m".into(), step_hz: None, dwell_ms: None }));
+        assert_eq!(
+            c,
+            Call::StartScan(ScanRequest { band_id: "49m".into(), step_hz: None, dwell_ms: None, speed: None })
+        );
         let c: Call = serde_json::from_str(r#"{"cmd":"delete_scan","args":{"id":"x"}}"#).unwrap();
         assert_eq!(c, Call::DeleteScan { id: "x".into() });
         let c: Call = serde_json::from_str(r#"{"cmd":"delete_scans"}"#).unwrap();
