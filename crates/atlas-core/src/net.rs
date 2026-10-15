@@ -4,7 +4,12 @@
 //! `Catalog`, which is a frequency index, and nothing here touches the rig or the listening
 //! history.
 //!
-//! Pure: building the directory's query and reading its answers. `atlas-server` does the HTTP.
+//! Pure: building the directory's queries and reading its answers, which streams can play and
+//! from where, and the jitter buffer that paces a stream's PCM. `atlas-server` does the HTTP and
+//! the decoding.
+
+use std::collections::VecDeque;
+use std::net::{IpAddr, Ipv4Addr};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -21,6 +26,12 @@ pub const SERVERS_URL: &str = "https://all.api.radio-browser.info/json/servers";
 /// Rows per page when the query does not say.
 pub const DEFAULT_LIMIT: u32 = 50;
 pub const MAX_LIMIT: u32 = 200;
+/// Sample rate of the PCM a stream is decoded to (mono, 16-bit, like the rig's).
+pub const NET_RATE: u32 = 32_000;
+/// Stream audio held before it starts, and again after it ran dry: rides out network bursts.
+pub const NET_PREBUFFER_MS: u32 = 1500;
+/// Most stream audio held; past this the oldest goes (the source runs fast).
+pub const NET_BUFFER_MAX_MS: u32 = 5000;
 
 /// Argument of `Call::NetSearch`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -70,6 +81,191 @@ pub struct NetStation {
     /// The directory's last check reached the stream.
     pub ok: bool,
     pub votes: u32,
+    /// Its format can be decoded here (not HLS; MP3, AAC, Ogg Vorbis, FLAC, or not said).
+    pub playable: bool,
+}
+
+/// A station being played: what the dock and the history show of it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NetPlaying {
+    pub uuid: String,
+    pub name: String,
+    pub itu: Option<String>,
+    pub flag: Option<String>,
+    pub codec: Option<String>,
+    pub bitrate: Option<u32>,
+}
+
+/// A station to play: as above, and where its stream is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NetStream {
+    pub station: NetPlaying,
+    pub url: String,
+}
+
+/// How the stream being played is doing.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "state", rename_all = "snake_case")]
+#[ts(export)]
+pub enum NetState {
+    Connecting,
+    Playing,
+    Failed { message: String },
+}
+
+/// Result of `Call::NetNow`: the internet station the receiver plays instead of the rig.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NetNow {
+    pub station: NetPlaying,
+    pub state: NetState,
+}
+
+/// Whether a stream in this format can be decoded here. HLS is a playlist of segments, not one
+/// stream; an unknown codec is tried (the decoder probes it).
+pub fn playable(codec: Option<&str>, hls: bool) -> bool {
+    if hls {
+        return false;
+    }
+    match codec.map(str::to_ascii_uppercase).as_deref() {
+        None => true,
+        Some(c) => ["MP3", "AAC", "AAC+", "OGG", "VORBIS", "FLAC"].contains(&c),
+    }
+}
+
+/// A stream URL the server may open: http or https, and not an address on the listener's own
+/// machine or network (a directory entry must not make the server reach into the LAN).
+pub fn stream_url_ok(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    let Some(rest) = lower.strip_prefix("http://").or_else(|| lower.strip_prefix("https://")) else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty() || authority.contains('@') {
+        return false;
+    }
+    if authority.starts_with('[') {
+        // an IPv6 literal: none of the directory's streams need one
+        return false;
+    }
+    let host = authority.split(':').next().unwrap_or("");
+    if host.is_empty() || host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
+        return false;
+    }
+    match host.parse::<Ipv4Addr>() {
+        Ok(ip) => public(IpAddr::V4(ip)),
+        Err(_) => host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-'),
+    }
+}
+
+fn public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            !(v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || a == 0
+                || (a == 100 && (64..128).contains(&b)))
+        }
+        IpAddr::V6(_) => false,
+    }
+}
+
+/// A station uuid as the directory writes them: hex digits and dashes.
+fn uuid_ok(uuid: &str) -> bool {
+    (8..=64).contains(&uuid.len()) && uuid.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+}
+
+/// Path of a station's details on any directory server.
+pub fn station_path(uuid: &str) -> Option<String> {
+    uuid_ok(uuid).then(|| format!("/json/stations/byuuid/{uuid}"))
+}
+
+/// Path that counts a click on a station and answers its stream URL.
+pub fn click_path(uuid: &str) -> Option<String> {
+    uuid_ok(uuid).then(|| format!("/json/url/{uuid}"))
+}
+
+/// The station and its stream from a `station_path` answer.
+pub fn parse_stream(json: &str) -> Result<NetStream, String> {
+    let v: Value = serde_json::from_str(json).map_err(|e| format!("station: {e}"))?;
+    let r = v.as_array().and_then(|a| a.first()).ok_or("the directory does not know that station")?;
+    let st = station(r).ok_or("the directory's answer has no station")?;
+    if !st.playable {
+        return Err("this stream's format can't be played yet".into());
+    }
+    let url = text(r, "url_resolved").or_else(|| text(r, "url")).ok_or("the station has no stream")?;
+    let station =
+        NetPlaying { uuid: st.uuid, name: st.name, itu: st.itu, flag: st.flag, codec: st.codec, bitrate: st.bitrate };
+    Ok(NetStream { station, url })
+}
+
+/// The stream URL in a `click_path` answer, if it gives one.
+pub fn parse_click(json: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(json).ok()?;
+    (v.get("ok").and_then(Value::as_bool) == Some(true)).then(|| text(&v, "url")).flatten()
+}
+
+/// Paces a stream's PCM (16-bit mono) at real time: holds `NET_PREBUFFER_MS` before it starts and
+/// again after running dry, and at most `NET_BUFFER_MAX_MS`, dropping the oldest past that.
+pub struct JitterBuffer {
+    buf: VecDeque<u8>,
+    block: usize,
+    prebuffer: usize,
+    max: usize,
+    playing: bool,
+}
+
+impl JitterBuffer {
+    /// For PCM at `rate`, handed out `block_ms` at a time.
+    pub fn new(rate: u32, block_ms: u32) -> Self {
+        let bytes = |ms: u32| (rate as usize * 2 * ms as usize / 1000) & !1;
+        let block = bytes(block_ms).max(2);
+        Self {
+            buf: VecDeque::new(),
+            block,
+            prebuffer: bytes(NET_PREBUFFER_MS).max(block),
+            max: bytes(NET_BUFFER_MAX_MS).max(2 * block),
+            playing: false,
+        }
+    }
+
+    pub fn push(&mut self, pcm: &[u8]) {
+        self.buf.extend(pcm);
+        let over = self.buf.len().saturating_sub(self.max);
+        // whole samples only, so the bytes stay paired
+        let drop = (over + (over & 1)).min(self.buf.len());
+        self.buf.drain(..drop);
+    }
+
+    /// The next block, when one is due; `None` while filling up.
+    pub fn pop(&mut self) -> Option<Vec<u8>> {
+        if !self.playing {
+            if self.buf.len() < self.prebuffer {
+                return None;
+            }
+            self.playing = true;
+        }
+        if self.buf.len() < self.block {
+            self.playing = false;
+            return None;
+        }
+        Some(self.buf.drain(..self.block).collect())
+    }
+
+    /// Audio held, in bytes.
+    pub fn held(&self) -> usize {
+        self.buf.len()
+    }
+
+    /// Handing blocks out (not filling up).
+    pub fn playing(&self) -> bool {
+        self.playing
+    }
 }
 
 /// Result of `Call::NetSearch`.
@@ -196,6 +392,11 @@ fn station(r: &Value) -> Option<NetStation> {
         ok: number(r, "lastcheckok").is_some_and(|n| n > 0)
             || r.get("lastcheckok").and_then(Value::as_bool) == Some(true),
         votes: number(r, "votes").unwrap_or(0),
+        playable: false,
+    })
+    .map(|mut s| {
+        s.playable = playable(s.codec.as_deref(), s.hls);
+        s
     })
 }
 
@@ -320,6 +521,108 @@ mod tests {
         assert!(c
             .iter()
             .all(|c| search_path(&NetQuery { country: Some(c.itu.clone()), ..Default::default() }).is_some()));
+    }
+
+    #[test]
+    fn what_can_play() {
+        let (st, _) = parse_stations(ANSWER).unwrap();
+        assert_eq!(st.iter().map(|s| s.playable).collect::<Vec<_>>(), [true, true, false, true], "the third is HLS");
+        assert!(playable(Some("mp3"), false));
+        assert!(playable(Some("AAC+"), false));
+        assert!(playable(None, false));
+        assert!(!playable(Some("MP3"), true));
+        assert!(!playable(Some("OPUS"), false));
+    }
+
+    #[test]
+    fn stream_urls_the_server_may_open() {
+        for ok in [
+            "http://stream2.srr.ro:8052/;",
+            "https://stream4.srr.ro:8443/romania-rri3",
+            "http://8.8.8.8/x",
+            "HTTP://Example.com",
+            "http://100.128.0.1/",
+        ] {
+            assert!(stream_url_ok(ok), "{ok}");
+        }
+        for bad in [
+            "file:///etc/passwd",
+            "ftp://example.com/a",
+            "http://127.0.0.1:8080/api/audio",
+            "http://localhost:8080/",
+            "http://radio.localhost/",
+            "http://printer.local/",
+            "http://192.168.1.1/",
+            "http://10.0.0.5/",
+            "http://172.16.3.4/",
+            "http://169.254.1.1/",
+            "http://0.0.0.0/",
+            "http://100.64.0.1/",
+            "http://[::1]/",
+            "http://user:pw@example.com/",
+            "http:///nohost",
+            "http://exa mple.com/",
+        ] {
+            assert!(!stream_url_ok(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn station_and_click_answers() {
+        let rri = "9644d860-0601-11e8-ae97-52543be04c81";
+        assert_eq!(station_path(rri), Some(format!("/json/stations/byuuid/{rri}")));
+        assert_eq!(click_path(rri), Some(format!("/json/url/{rri}")));
+        assert_eq!(station_path("../servers"), None);
+        assert_eq!(click_path("x?y=1"), None);
+
+        let json = r#"[{"stationuuid":"9644d860-0601-11e8-ae97-52543be04c81","name":"Radio Romania International",
+            "url":"http://stream2.srr.ro:8052/;","url_resolved":"http://stream2.srr.ro:8052/;","countrycode":"RO",
+            "codec":"MP3","bitrate":128,"hls":0,"lastcheckok":1}]"#;
+        let s = parse_stream(json).unwrap();
+        assert_eq!(s.url, "http://stream2.srr.ro:8052/;");
+        assert_eq!(
+            s.station,
+            NetPlaying {
+                uuid: rri.into(),
+                name: "Radio Romania International".into(),
+                itu: Some("ROU".into()),
+                flag: Some("ro".into()),
+                codec: Some("MP3".into()),
+                bitrate: Some(128),
+            }
+        );
+        assert!(parse_stream("[]").is_err());
+        assert!(parse_stream(r#"[{"stationuuid":"u","name":"n","codec":"MP3","hls":1,"url":"http://a.b/"}]"#).is_err());
+        assert!(parse_stream(r#"[{"stationuuid":"u","name":"n","codec":"MP3"}]"#).is_err(), "no stream");
+
+        let click = r#"{"ok":true,"message":"retrieved station url","stationuuid":"9644d860-0601-11e8-ae97-52543be04c81",
+            "name":"Radio Romania International","url":"http://stream2.srr.ro:8052/;"}"#;
+        assert_eq!(parse_click(click).as_deref(), Some("http://stream2.srr.ro:8052/;"));
+        assert_eq!(parse_click(r#"{"ok":false,"url":"http://a.b/"}"#), None);
+        assert_eq!(parse_click(""), None);
+    }
+
+    #[test]
+    fn jitter_buffer_paces_the_stream() {
+        // 1000 Hz, 100 ms blocks: 200 bytes a block, 3000 to start, 10000 at most
+        let mut jb = JitterBuffer::new(1000, 100);
+        jb.push(&[1; 2800]);
+        assert_eq!(jb.pop(), None, "still filling up");
+        jb.push(&[2; 200]);
+        assert_eq!(jb.pop().map(|b| b.len()), Some(200));
+        assert!(jb.playing());
+        for _ in 0..14 {
+            assert!(jb.pop().is_some());
+        }
+        assert_eq!(jb.held(), 0);
+        assert_eq!(jb.pop(), None, "ran dry: fills up again");
+        assert!(!jb.playing());
+        jb.push(&[3; 1000]);
+        assert_eq!(jb.pop(), None);
+        // a fast source: the oldest goes, in whole samples
+        jb.push(&[4; 12_000]);
+        assert_eq!(jb.held(), 10_000);
+        assert_eq!(jb.pop().unwrap()[0], 4);
     }
 
     #[test]

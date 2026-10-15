@@ -39,4 +39,8 @@ homepage: string | null,
 /**
  * The directory's last check reached the stream.
  */
-ok: boolean, votes: number, };
+ok: boolean, votes: number, 
+/**
+ * Its format can be decoded here (not HLS; MP3, AAC, Ogg Vorbis, FLAC, or not said).
+ */
+playable: boolean, };

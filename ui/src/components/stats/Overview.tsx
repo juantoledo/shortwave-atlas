@@ -1,6 +1,7 @@
 // Stats › Overview: what is being recorded now, the period in numbers against the one before,
 // when it happened, what it was (station, country, language, target, band, mode), how far,
-// the latest sessions, and cleaning the history up (each choice asks first).
+// the latest sessions, and cleaning the history up (each choice asks first). Internet stations
+// (the NET band) have a card of their own, apart from every DX figure.
 
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNames } from '../../catalog/names';
@@ -8,6 +9,7 @@ import { useNow } from '../../hooks/useCore';
 import { fmtKm, fmtSecs, fmtStamp, sLabel, useT, weekdayName } from '../../i18n';
 import type { Messages } from '../../i18n';
 import type { Mode } from '../../types/generated/Mode';
+import type { NetStats } from '../../types/generated/NetStats';
 import type { Session } from '../../types/generated/Session';
 import type { Share } from '../../types/generated/Share';
 import type { StationRef } from '../../types/generated/StationRef';
@@ -58,6 +60,37 @@ function Delta({ now, before, fmt }: { now: number; before: number | null | unde
   return <small className={'st-delta ' + tr.dir} title={t.statsBefore(fmt ? fmt(before) : String(before))}>{text}</small>;
 }
 
+/** Internet stations listened to in the period (the NET band): apart from every DX figure here. */
+function NetCard({ n }: { n: NetStats }) {
+  const t = useT();
+  const dur = (v: number) => fmtSecs(t, v);
+  const max = Math.max(0, ...n.top.map((s) => s.seconds));
+  return (
+    <section className="st-card st-net">
+      <h3 className="h"><span>{t.statsNet}</span><span>{t.statsPeriods[n.period]}</span></h3>
+      {n.sessions === 0 ? <p className="empty-d">{t.statsNetEmpty}</p> : (
+        <>
+          <p className="st-net-kpis">
+            <b>{dur(n.seconds)}</b> · {t.statsNetCounts(n.stations, n.countries)}
+          </p>
+          <ul className="st-hbars">
+            {n.top.map((s) => (
+              <li key={s.uuid}>
+                <div className="st-hrow" title={t.statsSessions(s.sessions)}>
+                  <span className="st-hl"><Flag flag={s.flag} title={s.itu ?? ''} />{s.name}</span>
+                  <span className="st-hv">{dur(s.seconds)}</span>
+                  <span className="st-ht" aria-hidden="true"><i style={{ width: `${max ? (s.seconds / max) * 100 : 0}%` }} /></span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <p className="note">{t.statsNetNote}</p>
+    </section>
+  );
+}
+
 function NowCard({ s, usual, onTune }: { s: Stats; usual: Usual | null; onTune: Tune }) {
   const t = useT();
   const clock = useNow(1000);
@@ -103,6 +136,8 @@ function shareLabel(t: Messages, names: ReturnType<typeof useNames>, by: Breakdo
 
 interface Props {
   s: Stats;
+  /** Internet listening in the same period (the NET band), apart from the rest. */
+  net: NetStats | null;
   /** When nothing is being recorded: the station usually listened to at this hour, if on. */
   usual: Usual | null;
   /** The breakdown tab, kept by the view (Propagation's trend follows its station). */
@@ -118,7 +153,7 @@ interface Props {
   onClear: (before: number | null) => Promise<void>;
 }
 
-export function Overview({ s, usual, by, onBy, onTune, onCountry, onShowGlobe, onTrend, withMilestones, onClear }: Props) {
+export function Overview({ s, net, usual, by, onBy, onTune, onCountry, onShowGlobe, onTrend, withMilestones, onClear }: Props) {
   const t = useT();
   const names = useNames();
   const p = s.previous;
@@ -211,6 +246,8 @@ export function Overview({ s, usual, by, onBy, onTune, onCountry, onShowGlobe, o
           <p className="note">{t.statsFarthest} <b><StationName r={s.farthest.station} /></b> · {fmtKm(t, s.farthest.km ?? 0)}</p>
         )}
       </section>
+
+      {net && (net.sessions > 0 || net.now) && <NetCard n={net} />}
 
       {withMilestones && <Milestones s={s} />}
 

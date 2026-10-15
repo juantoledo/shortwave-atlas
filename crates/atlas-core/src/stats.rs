@@ -50,7 +50,7 @@ pub enum Period {
 }
 
 impl Period {
-    fn days(self) -> Option<i32> {
+    pub fn days(self) -> Option<i32> {
         match self {
             Period::Day => Some(1),
             Period::Week => Some(7),

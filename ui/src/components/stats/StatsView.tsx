@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { Api } from '../../api/client';
-import { useHunt, useStats } from '../../hooks/useStats';
+import { useHunt, useNetStats, useStats } from '../../hooks/useStats';
 import { useT } from '../../i18n';
 import type { Period } from '../../types/generated/Period';
 import type { Share } from '../../types/generated/Share';
@@ -54,6 +54,7 @@ export function StatsView({ api, collection, tab: asked, onTab, period, onPeriod
   const t = useT();
   const tab: StatsTab = asked === 'collection' && !collection ? 'overview' : asked;
   const { stats, reload } = useStats(api, period, true);
+  const { netStats, reloadNet } = useNetStats(api, period, true);
   const hunt = useHunt(api, tab === 'hunt', clock.getTime());
   const [by, setBy] = useState<Breakdown>('stations');
   const [trendOf, setTrendOf] = useState<StationRef | null>(null);
@@ -90,7 +91,8 @@ export function StatsView({ api, collection, tab: asked, onTab, period, onPeriod
       onError(e);
     }
     reload();
-  }, [api, onError, reload]);
+    reloadNet();
+  }, [api, onError, reload, reloadNet]);
 
   const tabs: StatsTab[] = collection ? ['overview', 'collection', 'propagation', 'hunt'] : ['overview', 'propagation', 'hunt'];
   const withPeriod = tab === 'overview' || tab === 'propagation';
@@ -120,6 +122,7 @@ export function StatsView({ api, collection, tab: asked, onTab, period, onPeriod
           : tab === 'overview' ? (
             <Overview
               s={stats}
+              net={netStats}
               usual={usual}
               by={by}
               onBy={setBy}

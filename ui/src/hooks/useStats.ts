@@ -8,6 +8,7 @@ import type { Api } from '../api/client';
 import type { FreqHeat } from '../types/generated/FreqHeat';
 import type { Hunt } from '../types/generated/Hunt';
 import type { ListeningNow } from '../types/generated/ListeningNow';
+import type { NetStats } from '../types/generated/NetStats';
 import type { Period } from '../types/generated/Period';
 import type { Stats } from '../types/generated/Stats';
 
@@ -43,6 +44,16 @@ export function useStats(api: Api | null, period: Period, on: boolean) {
   }, [api, period]);
   usePoll(on && api !== null, POLL_MS, load);
   return { stats, reload: load };
+}
+
+/** Internet listening in `period` (the NET band, kept apart from the rig's stats), live while `on`. */
+export function useNetStats(api: Api | null, period: Period, on: boolean) {
+  const [stats, setStats] = useState<NetStats | null>(null);
+  const load = useCallback(() => {
+    api?.netStats({ period, tz_offset_min: tzOffsetMin() }).then(setStats, () => {});
+  }, [api, period]);
+  usePoll(on && api !== null, POLL_MS, load);
+  return { netStats: stats, reloadNet: load };
 }
 
 /** What to hunt now; asked again with `key` (the app's clock). */

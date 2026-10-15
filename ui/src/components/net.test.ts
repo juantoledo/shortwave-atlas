@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NO_FILTERS, type Filters } from '../hooks/useCore';
-import { isNet, lensFilters, leaveNet, NET_BAND, netCountryOpts, netQuery, streamLabel } from './net';
+import type { NetNow } from '../types/generated/NetNow';
+import { audioCell, canListen, isNet, lensFilters, leaveNet, NET_BAND, netCountryOpts, netQuery, playingUuid, streamLabel } from './net';
 
 const radio: Filters = { ...NO_FILTERS, q: 'radio', langs: ['S'], regions: ['am'], countries: ['ARG'], sources: ['eibi'], site: 7, scan: 's1', lens: 'all' };
 const onNet: Filters = { ...radio, bands: [NET_BAND] };
@@ -37,6 +38,20 @@ describe('NET band', () => {
     expect(streamLabel({ codec: 'AAC+', bitrate: null, hls: false })).toBe('AAC+');
     expect(streamLabel({ codec: null, bitrate: null, hls: true })).toBe('HLS');
     expect(streamLabel({ codec: null, bitrate: null, hls: false })).toBe('');
+  });
+
+  it('keeps the audio panel while there is something to hear', () => {
+    expect(audioCell(true, false)).toBe('panel');
+    expect(audioCell(false, true)).toBe('panel');
+    expect(audioCell(false, false)).toBe('off');
+    const playing: NetNow = { station: { uuid: 'u1', name: 'La 100', itu: 'ARG', flag: 'ar', codec: 'MP3', bitrate: 128 }, state: { state: 'playing' } };
+    expect(canListen(false, null)).toBe(false);
+    expect(canListen(false, playing)).toBe(true);
+    expect(canListen(true, null)).toBe(true);
+    expect(playingUuid(playing)).toBe('u1');
+    expect(playingUuid({ ...playing, state: { state: 'connecting' } })).toBe('u1');
+    expect(playingUuid({ ...playing, state: { state: 'failed', message: 'gone' } })).toBeNull();
+    expect(playingUuid(null)).toBeNull();
   });
 
   it('offers countries by name in the UI language', () => {

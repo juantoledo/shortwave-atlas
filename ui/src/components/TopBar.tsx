@@ -67,8 +67,10 @@ export function TopBar({ info, chrome, status, on, powerBusy, powerDisabled, onP
   const power = useRef<HTMLDivElement>(null);
   const setup = info && !info.configured && info.backend === 'sim';
   const rec = listening?.now ?? null;
+  const netRec = listening?.net ?? null;
   const statsTitle = rec
     ? t.statsRecording(rec.session.station?.name ?? `${rec.session.freq_hz / 1000} kHz`, fmtSecs(t, Math.max(0, rec.session.end - rec.session.start)))
+    : netRec ? t.statsRecordingNet(netRec.name, fmtSecs(t, Math.max(0, netRec.end - netRec.start)))
     : listening?.usual ? t.statsUsual(listening.usual.station.name) : t.statsTitle;
   return (
     <header className="topbar" data-chrome={chrome ?? undefined} data-tauri-drag-region={chrome ? 'deep' : undefined}>
@@ -100,7 +102,7 @@ export function TopBar({ info, chrome, status, on, powerBusy, powerDisabled, onP
         <button className="top-btn stats" type="button" aria-pressed={statsOn} aria-label={statsTitle} title={statsTitle} onClick={onStats}>
           <svg className="top-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 14h14v1H1zM1 11.6l4.2-5.1 3 3L14 2.8l1 .9-6.7 7.6-3-3L2.1 12.5z" /></svg>
           <span className="top-txt">{t.statsBtn}</span>
-          {rec && <span className="rec-lamp" />}
+          {(rec || netRec) && <span className="rec-lamp" />}
         </button>
         <button className="top-btn fav" type="button" aria-pressed={favOn} aria-label={t.favoritesBtn} title={t.favoritesBtn} onClick={onFavorites}>
           <span className="top-ico" aria-hidden="true">★</span>

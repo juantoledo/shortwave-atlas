@@ -17,8 +17,10 @@ import type { Info } from '../types/generated/Info';
 import type { ListeningNow } from '../types/generated/ListeningNow';
 import type { Logged } from '../types/generated/Logged';
 import type { NetCountry } from '../types/generated/NetCountry';
+import type { NetNow } from '../types/generated/NetNow';
 import type { NetPage } from '../types/generated/NetPage';
 import type { NetQuery } from '../types/generated/NetQuery';
+import type { NetStats } from '../types/generated/NetStats';
 import type { Overview } from '../types/generated/Overview';
 import type { Qth } from '../types/generated/Qth';
 import type { RigChoice } from '../types/generated/RigChoice';
@@ -114,4 +116,10 @@ export class Api {
   netSearch = (args: NetQuery) => this.transport.call({ cmd: 'net_search', args }) as Promise<NetPage>;
   netCountries = () => this.transport.call({ cmd: 'net_countries' }) as Promise<NetCountry[]>;
   setNet = (enabled: boolean) => this.transport.call({ cmd: 'set_net', args: { enabled } }) as Promise<null>;
+  /** Play an internet station instead of the rig, for every window (the audio stream switches). */
+  netPlay = (uuid: string) => this.transport.call({ cmd: 'net_play', args: { uuid } }) as Promise<NetNow>;
+  /** Back to the rig's audio. */
+  netStop = () => this.transport.call({ cmd: 'net_stop' }) as Promise<null>;
+  netNow = () => this.transport.call({ cmd: 'net_now' }) as Promise<NetNow | null>;
+  netStats = (args: StatsQuery) => this.transport.call({ cmd: 'net_stats', args }) as Promise<NetStats>;
 }

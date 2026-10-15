@@ -713,6 +713,15 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 .net-more { padding: 0 6px 10px 78px; }
 .net-more p { margin: 4px 0 0; font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
 .net-foot { margin: 12px 0 6px; }
+.rn b .net-on { margin-left: 6px; font-size: 12px; color: var(--amber); }
+.net-more .btn { margin-top: 2px; }
+/* the audio cell playing an internet station instead of the rig */
+.audio-net { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 8px; font-size: 13px; }
+.audio-net b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.audio-net-codec { font: 500 11px var(--font-mono); color: var(--dim); }
+.audio-net .link { margin-left: auto; flex: none; font-size: 12px; }
+.st-net-kpis { margin: 4px 0 10px; color: var(--dim); }
+.st-net-kpis b { color: var(--text); font-size: 18px; font-weight: 500; }
 .flag { display: inline-block; width: 1.25em; height: 0.94em; margin-right: 0.4em; vertical-align: -0.1em; border-radius: 2px; object-fit: cover; box-shadow: 0 0 0 1px rgba(140, 185, 230, 0.25); }
 svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: none; }
 

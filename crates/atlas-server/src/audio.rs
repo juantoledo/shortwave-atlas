@@ -5,6 +5,10 @@
 //! browsers on `GET /api/audio`, the desktop app over a Tauri channel. The capture runs only
 //! while someone listens. A slow listener loses blocks instead of growing a backlog, so
 //! latency cannot creep up.
+//!
+//! The hub is the receiver's one output: it plays the rig, or an internet station instead (the
+//! NET band, `net_audio`) for every listener alike. Switching ends every listener's stream, as a
+//! new audio choice does, and they reconnect to the new source and rate.
 
 use std::collections::VecDeque;
 use std::path::Path;
@@ -18,6 +22,7 @@ use atlas_core::audio::{
     cards_from_names, find_device, parse_asound, pick_capture_format, rate_drift, AudioChoice, AudioStatus,
     AudioTuning, CaptureFailure, CaptureFormat, CaptureOffer, Converter, SampleKind, SoundCard,
 };
+use atlas_core::net::{NetNow, NetPlaying, NetState, NetStream, NET_RATE};
 use atlas_core::platform::Os;
 use bytes::Bytes;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -34,11 +39,15 @@ const DRIFT_CHECK: Duration = Duration::from_secs(10);
 const SILENCE: Duration = Duration::from_secs(3);
 /// How often the capture thread looks at its stop flag.
 const POLL: Duration = Duration::from_millis(100);
+/// After an internet stream fails, listeners are refused this long before it is tried again.
+const NET_BACKOFF: Duration = Duration::from_secs(10);
 
-/// A running capture thread; it owns the cpal stream and stops it when `stop` is set.
-struct Capture {
-    stop: Arc<AtomicBool>,
-    thread: JoinHandle<()>,
+/// A running source: the capture thread (it owns the cpal stream and stops it when `stop` is
+/// set), or an internet stream's decoder thread and its tasks.
+pub(crate) struct Capture {
+    pub(crate) stop: Arc<AtomicBool>,
+    pub(crate) thread: JoinHandle<()>,
+    pub(crate) tasks: Vec<tokio::task::AbortHandle>,
 }
 
 struct Inner {
@@ -53,6 +62,10 @@ struct Inner {
     last_error: Option<String>,
     failure: Option<CaptureFailure>,
     log: VecDeque<String>,
+    /// The internet station played instead of the rig.
+    net: Option<NetStream>,
+    /// Why its stream last failed, and when.
+    net_failed: Option<(Instant, String)>,
 }
 
 impl Inner {
@@ -62,7 +75,19 @@ impl Inner {
         self.silent = false;
         let c = self.capture.take()?;
         c.stop.store(true, Ordering::Relaxed);
+        for t in &c.tasks {
+            t.abort();
+        }
         Some(c.thread)
+    }
+
+    /// End every stream and start from a new source: listeners reconnect to it.
+    fn switch(&mut self, net: Option<NetStream>) {
+        self.stop();
+        self.subs.clear(); // dropping the senders closes the streams
+        self.generation += 1;
+        self.net = net;
+        self.net_failed = None;
     }
 }
 
@@ -75,6 +100,8 @@ pub enum OpenError {
     Disabled,
     /// The capture thread could not be started.
     Spawn(std::io::Error),
+    /// The internet station's stream failed a moment ago.
+    Net(String),
 }
 
 impl std::fmt::Display for OpenError {
@@ -82,6 +109,7 @@ impl std::fmt::Display for OpenError {
         match self {
             Self::Disabled => write!(f, "audio is disabled"),
             Self::Spawn(e) => write!(f, "could not start the audio capture: {e}"),
+            Self::Net(why) => write!(f, "the internet station can't be played: {why}"),
         }
     }
 }
@@ -125,6 +153,8 @@ impl AudioHub {
                 last_error: None,
                 failure: None,
                 log: VecDeque::new(),
+                net: None,
+                net_failed: None,
             }),
         })
     }
@@ -141,28 +171,93 @@ impl AudioHub {
 
     pub fn subscribe(self: &Arc<Self>) -> Result<Subscription, OpenError> {
         let mut inner = self.inner.lock().expect("audio lock");
-        if !inner.choice.enabled {
-            return Err(OpenError::Disabled);
+        match (&inner.net, &inner.net_failed) {
+            (None, _) if !inner.choice.enabled => return Err(OpenError::Disabled),
+            (Some(_), Some((at, why))) if at.elapsed() < NET_BACKOFF => return Err(OpenError::Net(why.clone())),
+            _ => {}
         }
         if inner.capture.is_none() {
             inner.generation += 1;
-            let (hub, generation, choice) = (Arc::downgrade(self), inner.generation, inner.choice.clone());
-            let stop = Arc::new(AtomicBool::new(false));
-            let flag = stop.clone();
-            let thread = std::thread::Builder::new()
-                .name("audio-capture".into())
-                .spawn(move || run_capture(hub, generation, choice, flag))
-                .map_err(OpenError::Spawn)?;
-            inner.capture = Some(Capture { stop, thread });
-            inner.last_error = None;
-            inner.failure = None;
-            inner.log.clear();
+            let (hub, generation) = (Arc::downgrade(self), inner.generation);
+            match inner.net.clone() {
+                Some(stream) => {
+                    let block_ms = inner.choice.tuning.block_ms;
+                    inner.capture = Some(crate::net_audio::start(hub, generation, stream, block_ms)?);
+                    inner.net_failed = None;
+                }
+                None => {
+                    let choice = inner.choice.clone();
+                    let stop = Arc::new(AtomicBool::new(false));
+                    let flag = stop.clone();
+                    let thread = std::thread::Builder::new()
+                        .name("audio-capture".into())
+                        .spawn(move || run_capture(hub, generation, choice, flag))
+                        .map_err(OpenError::Spawn)?;
+                    inner.capture = Some(Capture { stop, thread, tasks: vec![] });
+                    inner.last_error = None;
+                    inner.failure = None;
+                    inner.log.clear();
+                }
+            }
         }
         let (tx, rx) = mpsc::channel(Self::queue_blocks(&inner.choice.tuning));
         let id = inner.next_id;
         inner.next_id += 1;
         inner.subs.push((id, tx));
-        Ok(Subscription { rate: inner.choice.rate, rx, id, hub: Arc::downgrade(self) })
+        let rate = if inner.net.is_some() { NET_RATE } else { inner.choice.rate };
+        Ok(Subscription { rate, rx, id, hub: Arc::downgrade(self) })
+    }
+
+    /// Play an internet station instead of the rig, for every listener.
+    pub fn play_net(&self, stream: NetStream) {
+        self.inner.lock().expect("audio lock").switch(Some(stream));
+    }
+
+    /// Back to the rig, if an internet station was playing; `true` if one was.
+    pub fn stop_net(&self) -> bool {
+        let mut inner = self.inner.lock().expect("audio lock");
+        let was = inner.net.is_some();
+        if was {
+            inner.switch(None);
+        }
+        was
+    }
+
+    /// An internet station is the source (playing, connecting or failed).
+    pub fn net_selected(&self) -> bool {
+        self.inner.lock().expect("audio lock").net.is_some()
+    }
+
+    /// The internet station chosen and how its stream is doing.
+    pub fn net_now(&self) -> Option<NetNow> {
+        let inner = self.inner.lock().expect("audio lock");
+        let stream = inner.net.as_ref()?;
+        let state = match (&inner.net_failed, inner.running) {
+            (Some((_, why)), _) => NetState::Failed { message: why.clone() },
+            (None, true) => NetState::Playing,
+            (None, false) => NetState::Connecting,
+        };
+        Some(NetNow { station: stream.station.clone(), state })
+    }
+
+    /// The internet station whose audio is going out now (for the NET listening history).
+    pub fn net_playing(&self) -> Option<NetPlaying> {
+        let inner = self.inner.lock().expect("audio lock");
+        let playing = inner.running && inner.net_failed.is_none();
+        inner.net.as_ref().filter(|_| playing).map(|s| s.station.clone())
+    }
+
+    /// The internet stream stopped on its own: say why, end every stream, and refuse listeners
+    /// for `NET_BACKOFF` (they come back and try again after it).
+    pub(crate) fn net_ended(&self, generation: u64, why: String) {
+        let mut inner = self.inner.lock().expect("audio lock");
+        if inner.generation != generation || inner.net.is_none() || inner.capture.is_none() {
+            return;
+        }
+        tracing::warn!("internet station stopped: {why}");
+        inner.stop();
+        inner.subs.clear();
+        inner.net_failed = Some((Instant::now(), why));
     }
 
     fn unsubscribe(&self, id: u64) {
@@ -174,9 +269,14 @@ impl AudioHub {
     }
 
     /// Switch to a new choice: stop the capture and end every stream. Listeners reconnect
-    /// and get the new device and rate (or a refusal, if audio is now disabled).
+    /// and get the new device and rate (or a refusal, if audio is now disabled). An internet
+    /// station playing instead goes on.
     pub fn reconfigure(&self, choice: AudioChoice) {
         let mut inner = self.inner.lock().expect("audio lock");
+        if inner.net.is_some() {
+            inner.choice = choice;
+            return;
+        }
         inner.stop();
         inner.subs.clear(); // dropping the senders closes the streams
         inner.generation += 1;
@@ -205,9 +305,10 @@ impl AudioHub {
 
     pub fn status(&self) -> AudioStatus {
         let inner = self.inner.lock().expect("audio lock");
+        // the rig's capture: an internet station playing instead is not it
         AudioStatus {
             enabled: inner.choice.enabled,
-            running: inner.running,
+            running: inner.running && inner.net.is_none(),
             listeners: inner.subs.len() as u32,
             last_error: inner.last_error.clone(),
             failure: inner.failure,
@@ -216,7 +317,7 @@ impl AudioHub {
         }
     }
 
-    fn fan_out(&self, generation: u64, block: Bytes) {
+    pub(crate) fn fan_out(&self, generation: u64, block: Bytes) {
         let mut inner = self.inner.lock().expect("audio lock");
         if inner.generation != generation {
             return;
@@ -493,6 +594,61 @@ mod tests {
         assert_eq!(AudioHub::chunk(16_000, &t), 1_280);
         assert_eq!(AudioHub::queue_blocks(&t), 13); // rounded up
         assert_eq!(AudioHub::queue_blocks(&AudioTuning { block_ms: 100, queue_ms: 100, ..t }), 2);
+    }
+
+    fn station(uuid: &str, url: &str) -> NetStream {
+        NetStream {
+            station: NetPlaying {
+                uuid: uuid.into(),
+                name: format!("Radio {uuid}"),
+                itu: None,
+                flag: None,
+                codec: Some("MP3".into()),
+                bitrate: None,
+            },
+            url: url.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_internet_station_plays_without_rig_audio_and_waits_after_failing() {
+        let hub = AudioHub::new(AudioChoice { enabled: false, ..codec(16_000) });
+        // nothing listens there: the stream fails at once
+        hub.play_net(station("a", "http://127.0.0.1:9/"));
+        let mut sub = hub.subscribe().unwrap();
+        assert_eq!(sub.rate, NET_RATE);
+        assert_eq!(hub.net_now().map(|n| n.state), Some(NetState::Connecting));
+        assert!(sub.next_block().await.is_none());
+        for _ in 0..100 {
+            if matches!(hub.net_now().map(|n| n.state), Some(NetState::Failed { .. })) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(matches!(hub.net_now().map(|n| n.state), Some(NetState::Failed { .. })), "{:?}", hub.net_now());
+        assert!(matches!(hub.subscribe(), Err(OpenError::Net(_))), "listeners wait out the backoff");
+        assert_eq!(hub.net_playing(), None);
+        assert!(!hub.status().running, "the rig's capture is not running");
+        // back to the rig, whose audio is off
+        assert!(hub.stop_net());
+        assert!(!hub.stop_net());
+        assert!(matches!(hub.subscribe(), Err(OpenError::Disabled)));
+        hub.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn another_station_ends_every_stream() {
+        let hub = AudioHub::new(AudioChoice { enabled: false, ..codec(16_000) });
+        hub.play_net(station("a", "http://127.0.0.1:9/"));
+        let mut sub = hub.subscribe().unwrap();
+        hub.play_net(station("b", "http://127.0.0.1:9/"));
+        assert_eq!(hub.status().listeners, 0);
+        assert!(sub.next_block().await.is_none());
+        assert_eq!(hub.net_now().map(|n| n.station.uuid), Some("b".into()));
+        // a new audio choice leaves the station playing
+        hub.reconfigure(codec(8_000));
+        assert!(hub.net_selected());
+        hub.shutdown().await;
     }
 
     #[tokio::test]

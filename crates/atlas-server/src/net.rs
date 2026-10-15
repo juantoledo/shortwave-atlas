@@ -1,4 +1,5 @@
-//! The NET band's IO: station searches on the radio-browser.info directory, off unless the
+//! The NET band's IO: station searches on the radio-browser.info directory, and finding a
+//! station's stream to play (which counts the click, as the directory asks), off unless the
 //! listener turns internet radio on. The directory asks its clients to find its servers from its
 //! server list and to move on to the next one when a server fails; a short cache keeps typing and
 //! paging from asking it the same thing twice. Nothing here touches the rig or the listening
@@ -12,7 +13,10 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use atlas_core::api::{ApiError, ErrorKind};
-use atlas_core::net::{page, parse_servers, search_path, NetPage, NetQuery, SERVERS_URL};
+use atlas_core::net::{
+    click_path, page, parse_click, parse_servers, parse_stream, search_path, station_path, stream_url_ok, NetPage,
+    NetQuery, NetStream, SERVERS_URL,
+};
 
 /// A search answer is reused this long.
 const PAGE_TTL: Duration = Duration::from_secs(5 * 60);
@@ -71,27 +75,20 @@ impl NetService {
         }
     }
 
-    pub async fn search(&self, q: &NetQuery) -> Result<NetPage, ApiError> {
-        if !self.enabled() {
-            return Err(ApiError { kind: ErrorKind::Conflict, message: "Internet radio is off".into() });
+    fn check_on(&self) -> Result<(), ApiError> {
+        match self.enabled() {
+            true => Ok(()),
+            false => Err(ApiError { kind: ErrorKind::Conflict, message: "Internet radio is off".into() }),
         }
-        if let Some((at, p)) = self.pages.lock().expect("net pages").get(q) {
-            if at.elapsed() < PAGE_TTL {
-                return Ok(p.clone());
-            }
-        }
-        let Some(path) = search_path(q) else { return Ok(NetPage::default()) };
+    }
+
+    /// Ask the directory for `path`, server after server until one answers something `read`
+    /// takes.
+    async fn ask<T>(&self, path: &str, read: impl Fn(&str) -> Result<T, String>) -> Result<T, ApiError> {
         let mut last = String::new();
         for server in self.servers().await {
-            match self.get(format!("https://{server}{path}")).await.and_then(|json| page(&json, q)) {
-                Ok(p) => {
-                    let mut pages = self.pages.lock().expect("net pages");
-                    if pages.len() >= PAGE_CACHE {
-                        pages.clear();
-                    }
-                    pages.insert(q.clone(), (Instant::now(), p.clone()));
-                    return Ok(p);
-                }
+            match self.get(format!("https://{server}{path}")).await.and_then(|json| read(&json)) {
+                Ok(v) => return Ok(v),
                 Err(e) => {
                     tracing::warn!("radio-browser {server}: {e}");
                     last = e;
@@ -99,6 +96,43 @@ impl NetService {
             }
         }
         Err(ApiError::internal(format!("Internet radio is unreachable: {last}")))
+    }
+
+    pub async fn search(&self, q: &NetQuery) -> Result<NetPage, ApiError> {
+        self.check_on()?;
+        if let Some((at, p)) = self.pages.lock().expect("net pages").get(q) {
+            if at.elapsed() < PAGE_TTL {
+                return Ok(p.clone());
+            }
+        }
+        let Some(path) = search_path(q) else { return Ok(NetPage::default()) };
+        let p = self.ask(&path, |json| page(json, q)).await?;
+        let mut pages = self.pages.lock().expect("net pages");
+        if pages.len() >= PAGE_CACHE {
+            pages.clear();
+        }
+        pages.insert(q.clone(), (Instant::now(), p.clone()));
+        Ok(p)
+    }
+
+    /// A station to play: its details, then its stream, asked the way that counts the click.
+    /// Only a stream the server may open (`stream_url_ok`) in a format it can decode.
+    pub async fn resolve(&self, uuid: &str) -> Result<NetStream, ApiError> {
+        self.check_on()?;
+        let invalid = |m: String| ApiError { kind: ErrorKind::Invalid, message: m };
+        let (Some(details), Some(click)) = (station_path(uuid), click_path(uuid)) else {
+            return Err(invalid("No such internet station".into()));
+        };
+        let json = self.ask(&details, |j| Ok(j.to_string())).await?;
+        let mut stream = parse_stream(&json).map_err(invalid)?;
+        // the click is counted even if its answer is no use: the details' address stands then
+        if let Ok(Some(url)) = self.ask(&click, |j| Ok(parse_click(j))).await {
+            stream.url = url;
+        }
+        if !stream_url_ok(&stream.url) {
+            return Err(invalid("This station's stream address can't be played".into()));
+        }
+        Ok(stream)
     }
 
     /// The directory's servers, starting at a different one each time so the load spreads;
@@ -136,7 +170,8 @@ pub(crate) mod tests {
     use super::*;
 
     pub(crate) const ROW: &str = r#"{"stationuuid":"u1","name":"La 100 - 99.9 FM","countrycode":"AR",
-        "language":"spanish","tags":"pop","codec":"MP3","bitrate":128,"hls":0,"lastcheckok":1,"votes":3}"#;
+        "language":"spanish","tags":"pop","codec":"MP3","bitrate":128,"hls":0,"lastcheckok":1,"votes":3,
+        "url_resolved":"http://stream.example.com/la100"}"#;
 
     /// A directory with two servers, the first of them down; every URL asked is kept.
     pub(crate) fn fake(asked: Arc<Mutex<Vec<String>>>) -> Fetch {
@@ -145,6 +180,8 @@ pub(crate) mod tests {
             Box::pin(async move {
                 if url == SERVERS_URL {
                     Ok(r#"[{"name":"down.api.radio-browser.info"},{"name":"up.api.radio-browser.info"}]"#.into())
+                } else if url.starts_with("https://up.") && url.contains("/json/url/") {
+                    Ok(r#"{"ok":true,"message":"retrieved station url","url":"http://stream.example.com/la100?clicked"}"#.into())
                 } else if url.starts_with("https://up.") {
                     Ok(format!("[{ROW}]"))
                 } else {
@@ -195,6 +232,40 @@ pub(crate) mod tests {
         assert!(p.more);
         assert!(p.items.iter().all(|s| s.itu.as_deref() == Some("ARG") && !s.uuid.is_empty()), "{p:?}");
         assert!(p.items.iter().all(|s| s.name == s.name.trim()));
+    }
+
+    #[tokio::test]
+    async fn finds_a_stream_and_counts_the_click() {
+        let asked = Arc::new(Mutex::new(vec![]));
+        let net = NetService::with_fetch(true, fake(asked.clone()));
+        let s = net.resolve("0a1b2c3d-1111").await.unwrap();
+        assert_eq!((s.station.name.as_str(), s.station.itu.as_deref()), ("La 100 - 99.9 FM", Some("ARG")));
+        assert_eq!(s.url, "http://stream.example.com/la100?clicked");
+        let asked = asked.lock().unwrap().clone();
+        assert!(asked.iter().any(|u| u.ends_with("/json/stations/byuuid/0a1b2c3d-1111")), "{asked:?}");
+        assert!(asked.iter().any(|u| u.ends_with("/json/url/0a1b2c3d-1111")), "{asked:?}");
+        assert_eq!(net.resolve("../servers").await.unwrap_err().kind, ErrorKind::Invalid);
+        net.set_enabled(false);
+        assert_eq!(net.resolve("0a1b2c3d-1111").await.unwrap_err().kind, ErrorKind::Conflict);
+    }
+
+    #[tokio::test]
+    async fn refuses_streams_on_the_local_network() {
+        let row = ROW.replace("http://stream.example.com/la100", "http://192.168.1.1/admin");
+        let net = NetService::with_fetch(
+            true,
+            Box::new(move |url| {
+                let row = row.clone();
+                Box::pin(async move {
+                    match url.contains("/json/url/") {
+                        true => Ok(r#"{"ok":false}"#.into()),
+                        false => Ok(format!("[{row}]")),
+                    }
+                })
+            }),
+        );
+        let e = net.resolve("0a1b2c3d").await.unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Invalid, "{}", e.message);
     }
 
     #[tokio::test]

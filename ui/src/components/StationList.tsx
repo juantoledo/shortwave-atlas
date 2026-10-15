@@ -2,7 +2,8 @@
 // the listening history has), search, filters with counts (the listener's own stations are a source to filter by), a
 // transmitter picked on the globe or a scan to go through, and
 // pages. With internet radio on, the band filter also offers NET: internet stations from
-// radio-browser.info, searched by text and country, which open their details instead of tuning.
+// radio-browser.info, searched by text and country, which open their details (and Listen) instead
+// of tuning.
 // Signals and favorites the schedule has no row for come first; in Heard they share one
 // list with the logged stations, sorted as asked, each with its best reading and when it was
 // last heard (nothing about the schedule there). It fills its panel: the controls are fixed,
@@ -71,8 +72,17 @@ interface Props {
   onTuneHz: (hz: number) => void;
   onMore: () => void;
   searchRef: RefObject<HTMLInputElement | null>;
-  /** The NET band: offered while internet radio is on; `active` = the list shows it. */
-  net: { enabled: boolean; active: boolean; search: NetSearch; countries: NetCountry[] };
+  /** The NET band: offered while internet radio is on; `active` = the list shows it; `playing`:
+   *  the uuid of the station the receiver plays. */
+  net: {
+    enabled: boolean;
+    active: boolean;
+    search: NetSearch;
+    countries: NetCountry[];
+    playing: string | null;
+    onListen: (s: NetStation) => void;
+    onStop: () => void;
+  };
 }
 
 /** A labelled filter dropdown; options that would give no rows are greyed out. */
@@ -172,27 +182,38 @@ function OffItem({ o, p }: { o: OffSchedule; p: Props }) {
 
 const offKey = (o: OffSchedule) => `${o.freq_hz}-${o.favorite ?? ''}`;
 
-/** An internet station: NET where the kHz would be, and a click opens its details (it tunes
- *  nothing, so it works with the rig off too). */
-function NetItem({ s, country, open, onToggle }: { s: NetStation; country: string; open: boolean; onToggle: () => void }) {
+/** An internet station: NET where the kHz would be, and a click opens its details, where it can
+ *  be listened to (it tunes nothing, so it works with the rig off too). */
+function NetItem({ s, country, open, playing, onToggle, onListen, onStop }: {
+  s: NetStation; country: string; open: boolean; playing: boolean; onToggle: () => void; onListen: () => void; onStop: () => void;
+}) {
   const t = useT();
   const line = [country, s.langs.join(', '), s.tags.slice(0, 3).join(', ')].filter(Boolean).join(' · ');
   return (
     <li>
-      <button className={'row net-row' + (s.ok ? '' : ' dead')} type="button" aria-expanded={open} onClick={onToggle}>
+      <button className={'row net-row' + (s.ok ? '' : ' dead')} type="button" aria-expanded={open} aria-current={playing} onClick={onToggle}>
         <span className="rf net-rf" title={t.netBadgeTitle}>{t.netBadge}</span>
         <span className="rn">
-          <b><Flag flag={s.flag} title={country} />{s.name}</b>
+          <b>
+            <Flag flag={s.flag} title={country} />{s.name}
+            {playing && <span className="net-on" title={t.netPlayingNow} aria-label={t.netPlayingNow}>♪</span>}
+          </b>
           <em>{line}</em>
         </span>
         <span className="sval">{streamLabel(s)}</span>
       </button>
       {open && (
         <div className="net-more">
+          <p>
+            {playing
+              ? <button className="btn primary" type="button" onClick={onStop}>■ {t.stop}</button>
+              : s.playable
+                ? <button className="btn" type="button" onClick={onListen}>▶ {t.listen}</button>
+                : t.netNotPlayable}
+          </p>
           {s.homepage && <p><a className="link" href={s.homepage} target="_blank" rel="noreferrer">{t.netHomepage}: {s.homepage.replace(/^https?:\/\//, '').replace(/\/$/, '')}</a></p>}
           {s.tags.length > 3 && <p>{s.tags.join(', ')}</p>}
           <p>{s.ok ? t.netCheckOk : t.netCheckFailed} · {t.netVotes(s.votes)}</p>
-          <p>{t.netListenSoon}</p>
         </div>
       )}
     </li>
@@ -366,7 +387,16 @@ export function StationList(p: Props) {
         {net ? (
           <ul className="list">
             {p.net.search.items.map((s) => (
-              <NetItem key={s.uuid} s={s} country={(s.itu && netCountry.get(s.itu)) || (s.itu ? names.country(s.itu) : '')} open={openNet === s.uuid} onToggle={() => setOpenNet((o) => (o === s.uuid ? null : s.uuid))} />
+              <NetItem
+                key={s.uuid}
+                s={s}
+                country={(s.itu && netCountry.get(s.itu)) || (s.itu ? names.country(s.itu) : '')}
+                open={openNet === s.uuid}
+                playing={p.net.playing === s.uuid}
+                onToggle={() => setOpenNet((o) => (o === s.uuid ? null : s.uuid))}
+                onListen={() => p.net.onListen(s)}
+                onStop={p.net.onStop}
+              />
             ))}
           </ul>
         ) : heardList ? (

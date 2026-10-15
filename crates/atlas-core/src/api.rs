@@ -176,6 +176,18 @@ pub enum Call {
     SetNet {
         enabled: bool,
     },
+    /// Play an internet station instead of the rig: the receiver's audio (`GET /api/audio`,
+    /// `audio_open`) switches to its stream for every listener. Refused while internet radio is
+    /// off or if the stream can't be played (result: `NetNow`).
+    NetPlay {
+        uuid: String,
+    },
+    /// Back to the rig's audio. Tuning the rig, a scan, or turning internet radio off do it too.
+    NetStop,
+    /// The internet station playing, if any (result: `NetNow | null`).
+    NetNow,
+    /// Internet listening in a period, kept apart from the rig's Stats (result: `NetStats`).
+    NetStats(StatsQuery),
 }
 
 /// Argument of `Call::SetUpdatePrefs`.
@@ -398,6 +410,13 @@ mod tests {
             (r#"{"cmd":"net_search","args":{}}"#, Call::NetSearch(NetQuery::default())),
             (r#"{"cmd":"set_net","args":{"enabled":true}}"#, Call::SetNet { enabled: true }),
             (r#"{"cmd":"net_countries"}"#, Call::NetCountries),
+            (r#"{"cmd":"net_play","args":{"uuid":"u1"}}"#, Call::NetPlay { uuid: "u1".into() }),
+            (r#"{"cmd":"net_stop"}"#, Call::NetStop),
+            (r#"{"cmd":"net_now"}"#, Call::NetNow),
+            (
+                r#"{"cmd":"net_stats","args":{"period":"week","tz_offset_min":60}}"#,
+                Call::NetStats(StatsQuery { period: crate::stats::Period::Week, tz_offset_min: 60 }),
+            ),
             (r#"{"cmd":"delete_user_station","args":{"id":"x"}}"#, Call::DeleteUserStation { id: "x".into() }),
             (
                 r#"{"cmd":"import_user_stations","args":{"json":"{}","replace":true}}"#,

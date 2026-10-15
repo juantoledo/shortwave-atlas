@@ -14,6 +14,7 @@ pub mod hunt;
 pub mod lens;
 pub mod listening;
 pub mod net;
+pub mod net_listening;
 pub mod platform;
 pub mod rig;
 pub mod scan;

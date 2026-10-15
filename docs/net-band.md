@@ -4,7 +4,8 @@ How [radio-browser.info](https://www.radio-browser.info) could come into Shortwa
 legal position, the data, the decisions taken so far, and a first step that leaves today's
 features unchanged.
 
-Status (October 2026): step 1 (§8, §11) is implemented. Everything after it is still design notes.
+Status (October 2026): steps 1 and 2 are implemented: browsing (§8, §11) and listening, with
+its own history (§10). Everything after that is still design notes.
 
 ---
 
@@ -316,9 +317,28 @@ appears in the UI only as a band, never as a source.**
 
 ---
 
-## 10. Playback (later)
-**Recommendation:** decode the stream in Rust and feed the existing `AudioHub` path (`/api/audio`,
-Tauri `audio_open`).
+## 10. Playback (implemented in step 2)
+**As built:** the server decodes the stream in Rust and feeds the existing `AudioHub` path
+(`/api/audio`, Tauri `audio_open`). The output is shared, like the rig's: starting a station
+switches every window over, and tuning the rig, a scan or turning internet radio off switches back.
+
+- **Decoding:** symphonia, pure Rust. MP3, AAC, Ogg Vorbis and FLAC play.
+  - AAC+ (HE-AAC) plays its AAC core only (no SBR), at reduced high-frequency fidelity, roughly
+    AM-broadcast quality.
+  - HLS streams show as not playable.
+- **Pacing:** PCM is mono 16-bit at 32 kHz (`NET_RATE`). A `JitterBuffer` holds 1.5 s before
+  playing, at most 5 s, and hands out one block per tick, so network bursts don't reach the
+  player.
+- **Safety:** the UI sends only a station uuid. The server reads the station's details, counts the
+  click (`/json/url/{uuid}`), and opens the URL only if `stream_url_ok` allows it: http(s), no
+  local or private addresses.
+- **Failures:** the station shows the reason, and listeners are refused for 10 s, then it's tried
+  again.
+- **History:** NET sessions (30 s to count, 20 s reconnect gap) go to `net-listening.jsonl`. The
+  rig's sessions pause while a stream plays. Stats has its own NET card, and `ClearListening`
+  clears both files.
+
+The original notes, kept for the reasoning:
 - **Same everywhere:** one transport for desktop, browser and remote clients, unchanged
   `audio/player.ts`, the waterfall working, and A/B with the rig on one clock.
 - **Avoids webview limits:** playing `<audio src=http://…>` directly hits cross-origin audio
@@ -396,8 +416,8 @@ Tauri `audio_open`).
 | Phase | Content |
 |---|---|
 | 1 | NET band in the filter, browse only (§8, §11) |
-| 2 | Playback spike (codecs: MP3, AAC-LC, HE-AAC, HLS), then playback through `AudioHub`, click counting |
-| 3 | NET favorites; NET listening sessions with the source tagged on `StationRef`; separate online totals in Stats |
+| 2 | **Done.** Playback through `AudioHub` (symphonia: MP3, AAC, Vorbis, FLAC; HE-AAC core only; no HLS), click counting, a separate NET listening history and Stats card |
+| 3 | NET favorites; full HE-AAC and HLS if wanted (an ffmpeg sidecar) |
 | 4 | EiBi↔NET links (curated table, scoring, user confirmation); "Also online" in the station panel; A/B with the rig |
 | 5 | Remote-receiver dial: frequency parser, listening posts, MW/FM/SW/WEB bands on NET |
 

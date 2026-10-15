@@ -39,7 +39,9 @@ import { useUserStations } from './hooks/useUserStations';
 import { useWelcome } from './hooks/useWelcome';
 import { useFreqHeat, useListening, useStats } from './hooks/useStats';
 import { useNetCountries, useNetSearch } from './hooks/useNetSearch';
-import { isNet, leaveNet } from './components/net';
+import { audioCell, isNet, leaveNet, NET_RATE, playingUuid } from './components/net';
+import { useNetNow } from './hooks/useNetNow';
+import type { NetStation } from './types/generated/NetStation';
 import { fmtStamp, I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
 import { stepIndex, type Action } from './keys/keymap';
@@ -139,6 +141,7 @@ export function App() {
   const search = useStationSearch(netActive ? null : api, filters, lensKey);
   const netSearch = useNetSearch(api, filters, netActive);
   const netCountries = useNetCountries(api, netActive);
+  const { netNow, setNetNow } = useNetNow(api, netEnabled);
   // internet radio turned off while the list was on NET: back to the radio bands
   useEffect(() => {
     if (!netEnabled) setFilters((f) => leaveNet(f));
@@ -317,6 +320,17 @@ export function App() {
   // the keyboard (keys/keymap.ts): typing anywhere starts a new search
   const searchRef = useRef<HTMLInputElement>(null);
   const audioKeys = useRef<AudioKeys>(null);
+  // an internet station instead of the rig: the player starts inside the click (browsers ask
+  // that), shown connecting at once, and the core switches the audio over
+  const listenNet = (s: NetStation) => {
+    setNetNow({ station: { uuid: s.uuid, name: s.name, itu: s.itu, flag: s.flag, codec: s.codec, bitrate: s.bitrate }, state: { state: 'connecting' } });
+    audioKeys.current?.start();
+    api?.netPlay(s.uuid).then(setNetNow, (e) => { setNetNow(null); onError(e); });
+  };
+  const stopNet = () => {
+    setNetNow(null);
+    api?.netStop().catch(onError);
+  };
   const focusSearch = (select: boolean) => {
     if (phone) setView('browse');
     const go = () => {
@@ -459,7 +473,7 @@ export function App() {
             onTuneHz={tune}
             onMore={search.more}
             searchRef={searchRef}
-            net={{ enabled: netEnabled, active: netActive, search: netSearch, countries: netCountries }}
+            net={{ enabled: netEnabled, active: netActive, search: netSearch, countries: netCountries, playing: playingUuid(netNow), onListen: listenNet, onStop: stopNet }}
           />
         </section>
 
@@ -527,8 +541,21 @@ export function App() {
             onMode={setMode}
           />
           {/* always mounted, so audio keeps playing whatever else opens */}
-          {info?.audio && api ? (
-            <AudioPanel openAudio={api.transport.openAudio.bind(api.transport)} rate={info.audio_rate} buffer={{ cushionMs: info.audio_cushion_ms, maxAheadMs: info.audio_max_ahead_ms }} mode={rig.mode} cwPitch={rig.cw_pitch_hz} freqHz={freqHz} onTune={tune} keys={audioKeys} />
+          {info && api && audioCell(info.audio, netEnabled) === 'panel' ? (
+            <AudioPanel
+              openAudio={api.transport.openAudio.bind(api.transport)}
+              rate={netNow ? NET_RATE : info.audio_rate}
+              buffer={{ cushionMs: info.audio_cushion_ms, maxAheadMs: info.audio_max_ahead_ms }}
+              mode={rig.mode}
+              cwPitch={rig.cw_pitch_hz}
+              freqHz={freqHz}
+              onTune={tune}
+              keys={audioKeys}
+              rigAudio={info.audio}
+              net={netNow}
+              onNetStop={stopNet}
+              onSetUp={() => openSettings('audio')}
+            />
           ) : (
             info && <AudioOff onSetUp={() => openSettings('audio')} />
           )}
