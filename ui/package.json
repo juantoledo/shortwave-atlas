@@ -1,7 +1,7 @@
 {
   "name": "swatlas-ui",
   "private": true,
-  "version": "0.8.1",
+  "version": "0.10.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,8 +11,8 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.12.1",
-    "@tauri-apps/plugin-opener": "^2.7.0",
+    "@tauri-apps/api": "^2.12.3",
+    "@tauri-apps/plugin-opener": "^2.7.1",
     "d3-geo": "^3.1.1",
     "flag-icons": "^7.5.0",
     "react": "^19.3.0",
@@ -32,6 +32,6 @@
     "@vitejs/plugin-react": "^6.1.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.4"
   }
 }
