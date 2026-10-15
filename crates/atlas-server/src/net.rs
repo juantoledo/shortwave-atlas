@@ -14,9 +14,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use atlas_core::api::{ApiError, ErrorKind};
 use atlas_core::net::{
-    click_path, page, parse_click, parse_servers, parse_stream, search_path, station_path, stream_url_ok, NetPage,
-    NetQuery, NetStream, SERVERS_URL,
+    click_path, page, parse_click, parse_countries, parse_details, parse_servers, parse_stream, search_path,
+    station_path, stream_url_ok, NetDot, NetPage, NetQuery, NetStation, NetStream, COUNTRIES_PATH, SERVERS_URL,
 };
+use atlas_core::source::Gazetteer;
 
 /// A search answer is reused this long.
 const PAGE_TTL: Duration = Duration::from_secs(5 * 60);
@@ -36,6 +37,8 @@ pub struct NetService {
     fetch: RwLock<SharedFetch>,
     servers: Mutex<Option<(Instant, Vec<String>)>>,
     pages: Mutex<HashMap<NetQuery, (Instant, NetPage)>>,
+    /// The countries on the map, and when they were read.
+    overview: Mutex<Option<(Instant, Vec<NetDot>)>>,
 }
 
 impl NetService {
@@ -50,6 +53,7 @@ impl NetService {
             fetch: RwLock::new(Arc::from(fetch)),
             servers: Mutex::new(None),
             pages: Mutex::new(HashMap::new()),
+            overview: Mutex::new(None),
         }
     }
 
@@ -113,6 +117,28 @@ impl NetService {
         }
         pages.insert(q.clone(), (Instant::now(), p.clone()));
         Ok(p)
+    }
+
+    /// A station's details, without counting a click (keeping it as a favorite).
+    pub async fn details(&self, uuid: &str) -> Result<NetStation, ApiError> {
+        self.check_on()?;
+        let path = station_path(uuid)
+            .ok_or_else(|| ApiError { kind: ErrorKind::Invalid, message: "No such internet station".into() })?;
+        let json = self.ask(&path, |j| Ok(j.to_string())).await?;
+        parse_details(&json).map_err(|m| ApiError { kind: ErrorKind::Invalid, message: m })
+    }
+
+    /// The countries with internet stations, placed with `gaz`; read again after `SERVERS_TTL`.
+    pub async fn overview(&self, gaz: &Gazetteer) -> Result<Vec<NetDot>, ApiError> {
+        self.check_on()?;
+        if let Some((at, dots)) = self.overview.lock().expect("net overview").as_ref() {
+            if at.elapsed() < SERVERS_TTL {
+                return Ok(dots.clone());
+            }
+        }
+        let dots = self.ask(COUNTRIES_PATH, |j| parse_countries(j, gaz)).await?;
+        *self.overview.lock().expect("net overview") = Some((Instant::now(), dots.clone()));
+        Ok(dots)
     }
 
     /// A station to play: its details, then its stream, asked the way that counts the click.
@@ -180,6 +206,8 @@ pub(crate) mod tests {
             Box::pin(async move {
                 if url == SERVERS_URL {
                     Ok(r#"[{"name":"down.api.radio-browser.info"},{"name":"up.api.radio-browser.info"}]"#.into())
+                } else if url.starts_with("https://up.") && url.ends_with("/json/countries") {
+                    Ok(r#"[{"name":"Argentina","iso_3166_1":"AR","stationcount":1240},{"name":"X","iso_3166_1":"ZZ","stationcount":2}]"#.into())
                 } else if url.starts_with("https://up.") && url.contains("/json/url/") {
                     Ok(r#"{"ok":true,"message":"retrieved station url","url":"http://stream.example.com/la100?clicked"}"#.into())
                 } else if url.starts_with("https://up.") {

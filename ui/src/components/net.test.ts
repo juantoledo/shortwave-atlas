@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NO_FILTERS, type Filters } from '../hooks/useCore';
 import type { NetNow } from '../types/generated/NetNow';
-import { audioCell, canListen, isNet, lensFilters, leaveNet, NET_BAND, netCountryOpts, netQuery, playingUuid, streamLabel } from './net';
+import { audioCell, bufferSegs, canListen, dimSites, favFilter, isNet, lensFilters, leaveNet, NET_BAND, NET_DOT_ID, netCountryOpts, netQuery, netSiteDots, playingUuid, stepChannel, streamLabel } from './net';
 
 const radio: Filters = { ...NO_FILTERS, q: 'radio', langs: ['S'], regions: ['am'], countries: ['ARG'], sources: ['eibi'], site: 7, scan: 's1', lens: 'all' };
 const onNet: Filters = { ...radio, bands: [NET_BAND] };
@@ -26,9 +26,10 @@ describe('NET band', () => {
     expect(netQuery({ ...onNet, countries: [] }, 0, 50).country).toBeNull();
   });
 
-  it('a lens about the schedule leaves NET; All keeps it', () => {
+  it('a lens about the schedule leaves NET; All and Favorites keep it', () => {
     expect(lensFilters(onNet, 'all')).toEqual(onNet);
-    expect(lensFilters(onNet, 'favorites')).toEqual({ ...radio, lens: 'favorites' });
+    expect(lensFilters(onNet, 'favorites')).toEqual({ ...onNet, lens: 'favorites' });
+    expect(lensFilters(radio, 'favorites')).toEqual({ ...radio, lens: 'favorites' });
     expect(lensFilters(onNet, 'heard').bands).toEqual([]);
     expect(lensFilters(radio, 'listened')).toEqual({ ...radio, lens: 'listened' });
   });
@@ -44,7 +45,8 @@ describe('NET band', () => {
     expect(audioCell(true, false)).toBe('panel');
     expect(audioCell(false, true)).toBe('panel');
     expect(audioCell(false, false)).toBe('off');
-    const playing: NetNow = { station: { uuid: 'u1', name: 'La 100', itu: 'ARG', flag: 'ar', codec: 'MP3', bitrate: 128 }, state: { state: 'playing' } };
+    const station = { uuid: 'u1', name: 'La 100', itu: 'ARG', flag: 'ar', langs: [], tags: [], codec: 'MP3', bitrate: 128, hls: false, homepage: null, ok: true, votes: 0, playable: true, pos: null };
+    const playing: NetNow = { station, state: { state: 'playing' }, buffer_ms: 1500, place: null, route: null, sun: null, listened_secs: 0 };
     expect(canListen(false, null)).toBe(false);
     expect(canListen(false, playing)).toBe(true);
     expect(canListen(true, null)).toBe(true);
@@ -52,6 +54,41 @@ describe('NET band', () => {
     expect(playingUuid({ ...playing, state: { state: 'connecting' } })).toBe('u1');
     expect(playingUuid({ ...playing, state: { state: 'failed', message: 'gone' } })).toBeNull();
     expect(playingUuid(null)).toBeNull();
+  });
+
+  it('steps memory channels round the ends', () => {
+    const ch = [{ uuid: 'a' }, { uuid: 'b' }, { uuid: 'c' }];
+    expect(stepChannel(ch, 'a', 1)?.uuid).toBe('b');
+    expect(stepChannel(ch, 'c', 1)?.uuid).toBe('a');
+    expect(stepChannel(ch, 'a', -1)?.uuid).toBe('c');
+    expect(stepChannel(ch, 'b', 4)?.uuid).toBe('c');
+    expect(stepChannel(ch, null, 1)?.uuid).toBe('a');
+    expect(stepChannel(ch, 'zz', -1)?.uuid).toBe('c');
+    expect(stepChannel([], 'a', 1)).toBeNull();
+  });
+
+  it('fills the buffer meter over 5 s', () => {
+    expect(bufferSegs(0, 11)).toBe(0);
+    expect(bufferSegs(2500, 11)).toBe(6);
+    expect(bufferSegs(9000, 11)).toBe(11);
+  });
+
+  it('finds favorites by name or label', () => {
+    const f = (uuid: string, name: string, label = '') => ({ id: uuid, uuid, name, label, itu: null, flag: null, codec: null, added: 0 });
+    const list = [f('a', 'Radio Mitre', 'Mitre AM'), f('b', 'La 100')];
+    expect(favFilter(list, '').length).toBe(2);
+    expect(favFilter(list, 'mitre').map((x) => x.uuid)).toEqual(['a']);
+    expect(favFilter(list, ' 100 ').map((x) => x.uuid)).toEqual(['b']);
+  });
+
+  it('puts countries on the globe and dims the sites', () => {
+    const dots = netSiteDots([{ itu: 'ARG', flag: 'ar', lat: -34, lon: -58, stations: 1240 }, { itu: 'AND', flag: 'ad', lat: 42, lon: 1, stations: 3 }], (c) => `<${c}>`);
+    expect(dots.map((d) => [d.id, d.name, d.total])).toEqual([[NET_DOT_ID, '<ARG>', 1240], [NET_DOT_ID + 1, '<AND>', 3]]);
+    expect(dots[0].on).toBe(13);
+    expect(dots[1].on).toBe(3);
+    const sites = [{ ...dots[0], id: 1, on: 4 }, { ...dots[1], id: 2, on: 0 }];
+    expect(dimSites(sites).map((s) => s.on)).toEqual([0, 0]);
+    expect(dimSites(sites)[1]).toBe(sites[1]);
   });
 
   it('offers countries by name in the UI language', () => {

@@ -156,6 +156,13 @@ impl NetTracker {
     }
 }
 
+/// Seconds listened to station `uuid` since `from` (up to `now`).
+pub fn secs_with(closed: &[NetSession], open: Option<&NetSession>, uuid: &str, from: i64, now: i64) -> u32 {
+    let secs: i64 =
+        closed.iter().chain(open).filter(|s| s.uuid == uuid).map(|s| (s.end.min(now) - s.start.max(from)).max(0)).sum();
+    secs.clamp(0, i64::from(u32::MAX)) as u32
+}
+
 /// One station in the NET totals.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -283,6 +290,19 @@ mod tests {
         list[1].end = T0 + 500;
         assert_eq!(clear_before(&mut list, Some(T0 + 100)), 1);
         assert_eq!(clear_before(&mut list, None), 1);
+    }
+
+    #[test]
+    fn time_with_one_station() {
+        let list = vec![
+            NetSession::of(&st("a", "ARG"), T0, T0 + 600),
+            NetSession::of(&st("b", "ARG"), T0, T0 + 900),
+            NetSession::of(&st("a", "ARG"), T0 + 1000, T0 + 1300),
+        ];
+        let open = NetSession::of(&st("a", "ARG"), T0 + 2000, T0 + 2100);
+        assert_eq!(secs_with(&list, Some(&open), "a", T0, T0 + 3000), 1000);
+        assert_eq!(secs_with(&list, None, "a", T0 + 300, T0 + 3000), 600, "only since `from`");
+        assert_eq!(secs_with(&list, None, "zz", T0, T0 + 3000), 0);
     }
 
     #[test]

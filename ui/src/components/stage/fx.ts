@@ -17,6 +17,8 @@ export const ROUTE_MS = 1300, TOWER_MS = 700, ARC_IN_MS = 1400;
 /** The turn's speed (OrbitControls' `autoRotateSpeed`: 1 is a turn a minute). */
 export const SPIN = 0.45;
 export const AMBER = '255,179,63', COOL = '127,208,255';
+/** An internet station (the NET band): neither a transmitter's amber nor the QTH's blue. */
+export const NET_RGB = '255,122,196';
 /** A scan ping's size on screen per degree of `pingRadius`. */
 export const PING_PX_PER_DEG = 8;
 

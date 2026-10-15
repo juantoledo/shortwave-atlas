@@ -42,6 +42,7 @@ pub(crate) fn start(
     let (tx, rx) = mpsc::channel::<Bytes>(CHUNKS);
     let stop = Arc::new(AtomicBool::new(false));
     let jitter = Arc::new(Mutex::new(JitterBuffer::new(NET_RATE, block_ms)));
+    let held = jitter.clone();
 
     let (url, h) = (stream.url.clone(), hub.clone());
     let fetch = rt.spawn(async move {
@@ -78,7 +79,7 @@ pub(crate) fn start(
             }
         })
         .map_err(OpenError::Spawn)?;
-    Ok(Capture { stop, thread, tasks: vec![fetch.abort_handle(), pacer.abort_handle()] })
+    Ok(Capture { stop, thread, tasks: vec![fetch.abort_handle(), pacer.abort_handle()], jitter: Some(held) })
 }
 
 /// The stream's bytes as `Read`, from the reader task; end of file once it is gone.
@@ -252,7 +253,7 @@ mod tests {
         let choice =
             AudioChoice { enabled: false, device: String::new(), rate: 16_000, tuning: default_tuning(Os::CURRENT) };
         let hub = AudioHub::new(choice);
-        hub.play_net(stream);
+        hub.tune_net(stream);
         let mut sub = hub.subscribe().unwrap();
         let mut pcm = Vec::new();
         let t0 = std::time::Instant::now();

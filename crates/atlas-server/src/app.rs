@@ -29,6 +29,7 @@ use crate::config::{save_audio, save_net, save_rig, save_update, AppConfig};
 use crate::favorites::FavoriteService;
 use crate::listening::ListeningService;
 use crate::net::NetService;
+use crate::net_favorites::NetFavoriteService;
 use crate::net_listening::NetListeningService;
 use crate::scan::{Context, ScanService};
 use crate::update::{InstallRefused, UpdateService, Updater};
@@ -63,6 +64,8 @@ pub struct Atlas {
     pub net: Arc<NetService>,
     /// What the listener played on the NET band, apart from the rig's history.
     pub net_listening: Arc<NetListeningService>,
+    /// The NET band's favorites (its memory channels).
+    pub net_favorites: Arc<NetFavoriteService>,
     /// Ourselves, for the background install task.
     me: Weak<Atlas>,
 }
@@ -112,6 +115,7 @@ impl Atlas {
         let listening = ListeningService::new(data_dir.as_ref().map(|d| d.join("listening.jsonl")));
         let net = Arc::new(NetService::new(config.net.enabled));
         let net_listening = NetListeningService::new(data_dir.as_ref().map(|d| d.join("net-listening.jsonl")));
+        let net_favorites = NetFavoriteService::new(data_dir.as_ref().map(|d| d.join("net-favorites.json")));
         let atlas = Arc::new_cyclic(|me| Self {
             rig,
             audio,
@@ -129,6 +133,7 @@ impl Atlas {
             listening,
             net,
             net_listening,
+            net_favorites,
             me: me.clone(),
         });
         Self::spawn_tracker(Arc::downgrade(&atlas));
@@ -160,6 +165,18 @@ impl Atlas {
         let away = self.rig.scanning() || self.audio.net_selected();
         self.listening.observe(&self.rig.state(), away, now, &ctx);
         self.net_listening.observe(self.audio.net_playing().as_ref(), now);
+    }
+
+    /// The internet station tuned, and where it is.
+    fn net_now(&self) -> Option<atlas_core::net::NetNow> {
+        let mut now = self.audio.net_now()?;
+        let unix = now_secs();
+        atlas_core::net::locate(&mut now, self.user_stations.gazetteer(), self.qth().pos(), unix);
+        let since = unix - 30 * 86_400;
+        now.listened_secs = self
+            .net_listening
+            .with(|l, open| atlas_core::net_listening::secs_with(l, open, &now.station.uuid, since, unix));
+        Some(now)
     }
 
     /// Back to the rig's audio, ending the internet listening session.
@@ -532,17 +549,36 @@ impl Atlas {
                 self.set_net(enabled)?;
                 Ok(Value::Null)
             }
-            Call::NetPlay { uuid } => {
+            Call::NetTune { uuid } => {
                 let stream = self.net.resolve(&uuid).await?;
-                self.audio.play_net(stream);
+                self.audio.tune_net(stream);
                 self.track(now);
-                json(serde_json::to_value(self.audio.net_now()))
+                json(serde_json::to_value(self.net_now()))
             }
             Call::NetStop => {
                 self.stop_net();
                 Ok(Value::Null)
             }
-            Call::NetNow => json(serde_json::to_value(self.audio.net_now())),
+            Call::NetNow => json(serde_json::to_value(self.net_now())),
+            Call::NetFavorites => json(serde_json::to_value(self.net_favorites.views())),
+            Call::AddNetFavorite { uuid, label } => {
+                // the station tuned is known already; another is asked of the directory
+                let tuned = self.audio.net_now().map(|n| n.station).filter(|s| s.uuid == uuid);
+                let st = match tuned {
+                    Some(s) => s,
+                    None => self.net.details(&uuid).await?,
+                };
+                json(serde_json::to_value(self.net_favorites.add(&st, label.as_deref(), now)?))
+            }
+            Call::RenameNetFavorite { id, label } => {
+                self.net_favorites.rename(&id, &label)?;
+                Ok(Value::Null)
+            }
+            Call::DeleteNetFavorite { id } => {
+                self.net_favorites.delete(&id)?;
+                Ok(Value::Null)
+            }
+            Call::NetOverview => json(serde_json::to_value(self.net.overview(self.user_stations.gazetteer()).await?)),
             Call::NetStats(q) => {
                 json(serde_json::to_value(self.net_listening.with(|l, open| net_stats(l, open, &q, now))))
             }
@@ -1047,13 +1083,13 @@ pub(crate) mod tests {
         tuned(&atlas, hz).await;
 
         // refused while internet radio is off
-        let e = atlas.call(Call::NetPlay { uuid: "0a1b2c3d".into() }).await.unwrap_err();
+        let e = atlas.call(Call::NetTune { uuid: "0a1b2c3d".into() }).await.unwrap_err();
         assert_eq!(e.kind, ErrorKind::Conflict);
         atlas.call(Call::SetNet { enabled: true }).await.unwrap();
-        let now = atlas.call(Call::NetPlay { uuid: "0a1b2c3d".into() }).await.unwrap();
+        let now = atlas.call(Call::NetTune { uuid: "0a1b2c3d".into() }).await.unwrap();
         assert_eq!(
             (now["station"]["name"].as_str(), now["state"]["state"].as_str()),
-            (Some("La 100 - 99.9 FM"), Some("connecting"))
+            (Some("La 100 - 99.9 FM"), Some("tuned"))
         );
         assert_eq!(atlas.call(Call::NetNow).await.unwrap()["station"]["uuid"], "u1");
 
@@ -1077,9 +1113,45 @@ pub(crate) mod tests {
         assert!(!atlas.call(Call::Listening).await.unwrap()["now"].is_null());
 
         // turning internet radio off stops a station playing
-        atlas.call(Call::NetPlay { uuid: "0a1b2c3d".into() }).await.unwrap();
+        atlas.call(Call::NetTune { uuid: "0a1b2c3d".into() }).await.unwrap();
         atlas.call(Call::SetNet { enabled: false }).await.unwrap();
         assert!(atlas.call(Call::NetNow).await.unwrap().is_null());
+    }
+
+    #[tokio::test]
+    async fn net_favorites_and_the_map() {
+        use std::sync::Mutex;
+
+        let atlas = Atlas::start(AppConfig::default(), None, None, no_updates()).unwrap();
+        let asked = Arc::new(Mutex::new(vec![]));
+        atlas.net.replace_fetch(crate::net::tests::fake(asked.clone()));
+        assert_eq!(atlas.call(Call::NetOverview).await.unwrap_err().kind, ErrorKind::Conflict);
+        atlas.call(Call::SetNet { enabled: true }).await.unwrap();
+
+        // the tuned station is kept without asking the directory again, and placed on the map
+        let now = atlas.call(Call::NetTune { uuid: "0a1b2c3d".into() }).await.unwrap();
+        assert_eq!(now["place"]["precise"], false, "Argentina's known site: {now}");
+        let n = asked.lock().unwrap().len();
+        let fav = atlas.call(Call::AddNetFavorite { uuid: "u1".into(), label: None }).await.unwrap();
+        assert_eq!((fav["name"].as_str(), asked.lock().unwrap().len()), (Some("La 100 - 99.9 FM"), n));
+        // another station is asked of the directory, without counting a click
+        atlas.call(Call::AddNetFavorite { uuid: "0a1b2c3d".into(), label: Some("Other".into()) }).await.unwrap();
+        assert!(asked.lock().unwrap().iter().any(|u| u.ends_with("/json/stations/byuuid/0a1b2c3d")));
+        assert_eq!(
+            atlas.call(Call::NetFavorites).await.unwrap().as_array().map(Vec::len),
+            Some(1),
+            "same uuid u1: updated"
+        );
+        let id = fav["id"].as_str().unwrap().to_string();
+        atlas.call(Call::RenameNetFavorite { id: id.clone(), label: "Mitre".into() }).await.unwrap();
+        atlas.call(Call::DeleteNetFavorite { id }).await.unwrap();
+        assert_eq!(atlas.call(Call::NetFavorites).await.unwrap().as_array().map(Vec::len), Some(0));
+
+        let dots = atlas.call(Call::NetOverview).await.unwrap();
+        assert_eq!(
+            (dots[0]["itu"].as_str(), dots[0]["stations"].as_u64(), dots.as_array().map(Vec::len)),
+            (Some("ARG"), Some(1240), Some(1))
+        );
     }
 
     #[tokio::test]

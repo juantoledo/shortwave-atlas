@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { altitudeAt, angleDeg, clamp, easeInOut, frameAltitude, frameWithHome, fromVec, hermiteEase, initialSlope, midpoint, pingAlpha, pingRadius, slerp, toVec, type LatLon, type Vec3 } from '../../geo/geo';
 import { SIGNAL_DB } from '../scan';
-import { ARC_MS, COOL, HOME_ALT, LOCK_ALT, mkPin, mkPulse, NO_FX, NO_SCAN_FX, PING_MS, PING_PX_PER_DEG, qthRing, REDUCE, ROUTE_MS, route, sonarRing, SPIN, START_ALT, AMBER, type Arc, type Fx, type Path, type Pin, type Ring, type ScanFx } from './fx';
+import { ARC_MS, COOL, HOME_ALT, LOCK_ALT, mkPin, mkPulse, NET_RGB, NO_FX, NO_SCAN_FX, PING_MS, PING_PX_PER_DEG, qthRing, REDUCE, ROUTE_MS, route, sonarRing, SPIN, START_ALT, AMBER, type Arc, type Fx, type Path, type Pin, type Ring, type ScanFx } from './fx';
 import type { MapMode } from '../../hooks/useDisplay';
 import type { Candidate } from '../../types/generated/Candidate';
 import type { Qth } from '../../types/generated/Qth';
@@ -71,8 +71,21 @@ export interface Camera {
  *  `alt0` to `alt1` over `ms` from `t0`, leaving with ease slope `v0`. */
 interface Flight { id: number; a: Vec3; b: Vec3; la: LatLon; lb: LatLon; alt0: number; alt1: number; bump: number; ms: number; t0: number; v0: number; done: (landed: boolean) => void }
 
+/** An internet station tuned instead of the rig: pinned where it is, with no route (a stream
+ *  has no radio path). `key` changes when another is tuned. */
+export interface NetPin {
+  key: string;
+  lat: number;
+  lon: number;
+  name: string;
+  sub: string;
+  flag: string | null;
+}
+
 export interface StageInput {
   sel: Candidate | null;
+  /** Wins over `sel` while set. */
+  net: NetPin | null;
   qth: Qth;
   frame: boolean;
   /** Hidden behind another view (phones): stop the frame loop. */
@@ -126,7 +139,7 @@ export interface Stage {
   hover(on: boolean): void;
 }
 
-export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, strengthDb, scan, finale }: StageInput): Stage {
+export function useStage({ sel, net, qth, frame: framing, paused, onInteract, sites, strengthDb, scan, finale }: StageInput): Stage {
   const cam = useRef<Camera | null>(null);
   const [ready, setReady] = useState(false);
   const [fx, setFx] = useState<Fx>(NO_FX);
@@ -157,6 +170,8 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
   const handsOff = () => performance.now() - touched.current > HANDS_OFF_MS;
   const selRef = useRef(sel);
   selRef.current = sel;
+  const netRef = useRef(net);
+  netRef.current = net;
   const interact = useRef(onInteract);
   interact.current = onInteract;
   /** When the user last touched the view (performance.now()). */
@@ -165,7 +180,7 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
   const hovering = useRef(false);
   /** Nothing tuned, nothing hovered, untouched for a while: the view may turn. */
   const idle = useCallback(
-    () => !REDUCE && !selRef.current && !hovering.current && performance.now() - touched.current > IDLE_MS,
+    () => !REDUCE && !selRef.current && !netRef.current && !hovering.current && performance.now() - touched.current > IDLE_MS,
     [],
   );
   const fit = useCallback((alt: number) => cam.current!.fit(alt), []);
@@ -248,7 +263,7 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
 
   // Lock on when the selected station (or its on-air status) changes; not during a scan or its
   // finale (they own the camera), and again when they end.
-  const lockKey = sel ? `${sel.station.id}:${sel.air.on}` : null;
+  const lockKey = net ? `net:${net.key}` : sel ? `${sel.station.id}:${sel.air.on}` : null;
   const lastKey = useRef<string | null>(null);
   useEffect(() => {
     if (!ready) return;
@@ -259,6 +274,26 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
     const my = ++seq.current;
     const was = lastKey.current;
     lastKey.current = lockKey;
+    const n = netRef.current;
+    if (n) {
+      // an internet station: fly there and pin it; no route home and no signal rings
+      setFx(NO_FX);
+      (async () => {
+        if (was !== null) {
+          await sleep(SETTLE_MS);
+          if (my !== seq.current) return;
+        }
+        spin.current = 0;
+        const p0 = cam.current!.pov();
+        const mv = angleDeg({ lat: p0.lat, lon: p0.lon }, { lat: n.lat, lon: n.lon });
+        await fly(n.lat, n.lon, fit(LOCK_ALT), Math.round(1500 + 1700 * Math.min(1, mv / 150)), 0.5 + 1.4 * Math.min(1, mv / 120));
+        if (my !== seq.current) return;
+        const station = { lat: n.lat, lng: n.lon, el: mkPin('net', n.name, n.sub, n.flag) };
+        const ring: Ring = { lat: n.lat, lng: n.lon, maxR: 5, speed: 2, period: 2600, rgb: NET_RGB };
+        setFx({ ...NO_FX, station, rings: [ring] });
+      })();
+      return;
+    }
     if (!sel) {
       flight.current++;
       setFx(NO_FX);

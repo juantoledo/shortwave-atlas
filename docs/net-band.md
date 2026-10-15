@@ -4,8 +4,8 @@ How [radio-browser.info](https://www.radio-browser.info) could come into Shortwa
 legal position, the data, the decisions taken so far, and a first step that leaves today's
 features unchanged.
 
-Status (October 2026): steps 1 and 2 are implemented: browsing (§8, §11) and listening, with
-its own history (§10). Everything after that is still design notes.
+Status (October 2026): steps 1 to 3 are implemented: browsing (§8, §11), listening with its own
+history (§10), and tuning like a radio (§13). Everything after that is still design notes.
 
 ---
 
@@ -419,7 +419,8 @@ The original notes, kept for the reasoning:
 |---|---|
 | 1 | NET band in the filter, browse only (§8, §11) |
 | 2 | **Done.** Playback through `AudioHub` (symphonia: MP3, AAC, Vorbis, FLAC; HE-AAC core only; no HLS), click counting, a separate NET listening history and Stats card |
-| 3 | NET favorites; full HE-AAC and HLS if wanted (an ffmpeg sidecar) |
+| 3 | **Done.** Tuning like a radio (§13): NET favorites as memory channels, the NET station panel and faceplate, the map |
+| 3b | NET favorites on the map; full HE-AAC and HLS if wanted (an ffmpeg sidecar) |
 | 4 | EiBi↔NET links (curated table, scoring, user confirmation); "Also online" in the station panel; A/B with the rig |
 | 5 | Remote-receiver dial: frequency parser, listening posts, MW/FM/SW/WEB bands on NET |
 
@@ -443,3 +444,40 @@ The original notes, kept for the reasoning:
   searches
 - Repo: `crates/atlas-core/src/{source,stations,country}.rs`, `crates/atlas-server/src/{app,update}.rs`,
   `ui/src/{App.tsx,hooks/useCore.ts,components/StationList.tsx}`, `data/eibi/source/sked-a26.csv`
+
+---
+
+## 13. Step 3: tuning like a radio (implemented)
+- **Tune, then listen.**
+  - A NET row click tunes the receiver to the station (`Call::NetTune`). Nothing is fetched until
+    someone listens.
+  - The audio panel's global ▶ Listen plays the receiver's source, the rig or the station. While
+    listening, tuning another station switches at once.
+  - There are no per-station Listen buttons.
+- **The station panel (`NetDossier`)** shows:
+  - the state (tuned, connecting, playing, failed)
+  - country, languages, tags and the stream
+  - distance and bearing "as the crow flies", and the Sun there
+  - the directory's last check, and your time in the last 30 days
+  - a website link
+  - **Back to rig**
+- **Favorites** are kept in `net-favorites.json`, apart from the radio favorites.
+  - They are the band's **memory channels**, in the order added.
+  - The Favorites lens on NET lists them, and the TopBar ★ opens them on NET.
+  - Adding one takes the tuned station's details, or asks the directory without counting a click.
+- **The faceplate:**
+  - the station's name in the readout, unit NET, ★
+  - stream chips (codec and bitrate, country)
+  - the band head: ‹ NET › steps memory channels, and the dropdown goes back to a radio band
+  - the dial: numbered memory channels
+  - a **Buf** meter for the jitter buffer (0–5 s)
+  - the span switch: + NET (a radio span goes back to the rig)
+  - the knob and the tuning keys step channels
+  - "Rig waiting on 9 610 kHz AM · ⟲ Back to rig"
+- **The map:**
+  - The camera flies to the tuned station, and a pink NET pin marks it, at its coordinates or
+    approximately in its country. There is **no route arc**: a stream has no radio path.
+  - The transmitter sites dim while it is tuned.
+  - On the NET band, the sites give way to one tower per country with internet stations (counts
+    from `/json/countries`, cached). Clicking one filters the list to that country.
+

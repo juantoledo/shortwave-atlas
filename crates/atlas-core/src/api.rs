@@ -176,16 +176,34 @@ pub enum Call {
     SetNet {
         enabled: bool,
     },
-    /// Play an internet station instead of the rig: the receiver's audio (`GET /api/audio`,
-    /// `audio_open`) switches to its stream for every listener. Refused while internet radio is
-    /// off or if the stream can't be played (result: `NetNow`).
-    NetPlay {
+    /// Tune the receiver to an internet station instead of the rig: its audio (`GET /api/audio`,
+    /// `audio_open`) is that station's stream for every listener, fetched only while someone
+    /// listens. Refused while internet radio is off or if the stream can't be played (result:
+    /// `NetNow`).
+    NetTune {
         uuid: String,
     },
-    /// Back to the rig's audio. Tuning the rig, a scan, or turning internet radio off do it too.
+    /// Back to the rig. Tuning the rig, a scan, or turning internet radio off do it too.
     NetStop,
-    /// The internet station playing, if any (result: `NetNow | null`).
+    /// The internet station tuned, if any (result: `NetNow | null`).
     NetNow,
+    /// The internet stations kept, in memory-channel order (result: `NetFavorite[]`).
+    NetFavorites,
+    /// Keep an internet station, or relabel the one kept (result: `NetFavorite`).
+    AddNetFavorite {
+        uuid: String,
+        label: Option<String>,
+    },
+    RenameNetFavorite {
+        id: String,
+        label: String,
+    },
+    DeleteNetFavorite {
+        id: String,
+    },
+    /// Countries with internet stations, for the map while browsing the NET band (result:
+    /// `NetDot[]`).
+    NetOverview,
     /// Internet listening in a period, kept apart from the rig's Stats (result: `NetStats`).
     NetStats(StatsQuery),
 }
@@ -410,7 +428,18 @@ mod tests {
             (r#"{"cmd":"net_search","args":{}}"#, Call::NetSearch(NetQuery::default())),
             (r#"{"cmd":"set_net","args":{"enabled":true}}"#, Call::SetNet { enabled: true }),
             (r#"{"cmd":"net_countries"}"#, Call::NetCountries),
-            (r#"{"cmd":"net_play","args":{"uuid":"u1"}}"#, Call::NetPlay { uuid: "u1".into() }),
+            (r#"{"cmd":"net_tune","args":{"uuid":"u1"}}"#, Call::NetTune { uuid: "u1".into() }),
+            (r#"{"cmd":"net_favorites"}"#, Call::NetFavorites),
+            (
+                r#"{"cmd":"add_net_favorite","args":{"uuid":"u1","label":null}}"#,
+                Call::AddNetFavorite { uuid: "u1".into(), label: None },
+            ),
+            (
+                r#"{"cmd":"rename_net_favorite","args":{"id":"1-u1","label":"Mitre"}}"#,
+                Call::RenameNetFavorite { id: "1-u1".into(), label: "Mitre".into() },
+            ),
+            (r#"{"cmd":"delete_net_favorite","args":{"id":"1-u1"}}"#, Call::DeleteNetFavorite { id: "1-u1".into() }),
+            (r#"{"cmd":"net_overview"}"#, Call::NetOverview),
             (r#"{"cmd":"net_stop"}"#, Call::NetStop),
             (r#"{"cmd":"net_now"}"#, Call::NetNow),
             (

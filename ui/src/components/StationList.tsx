@@ -2,8 +2,8 @@
 // the listening history has), search, filters with counts (the listener's own stations are a source to filter by), a
 // transmitter picked on the globe or a scan to go through, and
 // pages. With internet radio on, the band filter also offers NET: internet stations from
-// radio-browser.info, searched by text and country, which open their details (and Listen) instead
-// of tuning.
+// radio-browser.info, searched by text and country; a click tunes the receiver to one (Listen, in
+// the audio panel, plays it), and its Favorites lens lists the NET favorites.
 // Signals and favorites the schedule has no row for come first; in Heard they share one
 // list with the logged stations, sorted as asked, each with its best reading and when it was
 // last heard (nothing about the schedule there). It fills its panel: the controls are fixed,
@@ -22,6 +22,7 @@ import type { HeardRow } from '../types/generated/HeardRow';
 import type { Lens } from '../types/generated/Lens';
 import type { Logged } from '../types/generated/Logged';
 import type { NetCountry } from '../types/generated/NetCountry';
+import type { NetFavorite } from '../types/generated/NetFavorite';
 import type { NetStation } from '../types/generated/NetStation';
 import type { OffSchedule } from '../types/generated/OffSchedule';
 import type { Region } from '../types/generated/Region';
@@ -30,7 +31,7 @@ import type { StationRow } from '../types/generated/StationRow';
 import { MineBadge } from './Dossier';
 import { Dropdown, type DropOpt } from './Dropdown';
 import { Flag } from './Flag';
-import { lensFilters, NET_BAND, netCountryOpts, streamLabel } from './net';
+import { favFilter, lensFilters, NET_BAND, netCountryOpts, streamLabel } from './net';
 import { userSources } from './sources';
 
 const REGIONS: Region[] = ['am', 'eu', 'af', 'me', 'as', 'oc', 'other'];
@@ -72,16 +73,17 @@ interface Props {
   onTuneHz: (hz: number) => void;
   onMore: () => void;
   searchRef: RefObject<HTMLInputElement | null>;
-  /** The NET band: offered while internet radio is on; `active` = the list shows it; `playing`:
-   *  the uuid of the station the receiver plays. */
+  /** The NET band: offered while internet radio is on; `active` = the list shows it; `tuned`: the
+   *  uuid of the station the receiver is tuned to; `favs`: the NET favorites (its Favorites lens). */
   net: {
     enabled: boolean;
     active: boolean;
     search: NetSearch;
     countries: NetCountry[];
-    playing: string | null;
-    onListen: (s: NetStation) => void;
-    onStop: () => void;
+    tuned: string | null;
+    favs: readonly NetFavorite[];
+    favUuids: ReadonlySet<string>;
+    onTune: (uuid: string) => void;
   };
 }
 
@@ -182,41 +184,32 @@ function OffItem({ o, p }: { o: OffSchedule; p: Props }) {
 
 const offKey = (o: OffSchedule) => `${o.freq_hz}-${o.favorite ?? ''}`;
 
-/** An internet station: NET where the kHz would be, and a click opens its details, where it can
- *  be listened to (it tunes nothing, so it works with the rig off too). */
-function NetItem({ s, country, open, playing, onToggle, onListen, onStop }: {
-  s: NetStation; country: string; open: boolean; playing: boolean; onToggle: () => void; onListen: () => void; onStop: () => void;
+/** An internet station: NET where the kHz would be; a click tunes the receiver to it (it tunes
+ *  nothing on the rig, so it works with the rig off too). */
+function NetItem({ name, flag, country, line, stream, tuned, fav, onTune }: {
+  name: string; flag: string | null; country: string; line: string; stream: string; tuned: boolean; fav: boolean; onTune: () => void;
 }) {
   const t = useT();
-  const line = [country, s.langs.join(', '), s.tags.slice(0, 3).join(', ')].filter(Boolean).join(' · ');
   return (
     <li>
-      <button className={'row net-row' + (s.ok ? '' : ' dead')} type="button" aria-expanded={open} aria-current={playing} onClick={onToggle}>
+      <button className="row net-row" type="button" aria-current={tuned} onClick={onTune}>
         <span className="rf net-rf" title={t.netBadgeTitle}>{t.netBadge}</span>
         <span className="rn">
           <b>
-            <Flag flag={s.flag} title={country} />{s.name}
-            {playing && <span className="net-on" title={t.netPlayingNow} aria-label={t.netPlayingNow}>♪</span>}
+            <Flag flag={flag} title={country} />{name}
+            {fav && <span className="fav" title={t.favBadge} aria-label={t.favBadge}>★</span>}
+            {tuned && <span className="net-on" title={t.netTunedNow} aria-label={t.netTunedNow}>♪</span>}
           </b>
           <em>{line}</em>
         </span>
-        <span className="sval">{streamLabel(s)}</span>
+        <span className="sval">{stream}</span>
       </button>
-      {open && (
-        <div className="net-more">
-          <p>
-            {playing
-              ? <button className="btn primary" type="button" onClick={onStop}>■ {t.stop}</button>
-              : <button className="btn" type="button" onClick={onListen}>▶ {t.listen}</button>}
-          </p>
-          {s.homepage && <p><a className="link" href={s.homepage} target="_blank" rel="noreferrer">{t.netHomepage}: {s.homepage.replace(/^https?:\/\//, '').replace(/\/$/, '')}</a></p>}
-          {s.tags.length > 3 && <p>{s.tags.join(', ')}</p>}
-          <p>{s.ok ? t.netCheckOk : t.netCheckFailed} · {t.netVotes(s.votes)}</p>
-        </div>
-      )}
     </li>
   );
 }
+
+const stationLine = (s: NetStation, country: string) =>
+  [country, s.langs.join(', '), s.tags.slice(0, 3).join(', ')].filter(Boolean).join(' · ');
 
 export function StationList(p: Props) {
   const t = useT();
@@ -237,7 +230,10 @@ export function StationList(p: Props) {
   const netCountry = useMemo(() => new Map(netCountries.map((c) => [c.value, c.label])), [netCountries]);
   const countries = net ? netCountries
     : ranked((p.meta?.countries ?? []).map((c) => ({ value: c.itu, label: names.country(c.itu), n: count(p.facets?.countries, c.itu) })));
-  const [openNet, setOpenNet] = useState<string | null>(null);
+  // the NET band's Favorites lens: the stations kept, from the store (no directory query)
+  const netFavs = net && f.lens === 'favorites';
+  const favRows = useMemo(() => (netFavs ? favFilter(p.net.favs, f.q) : []), [netFavs, p.net.favs, f.q]);
+  const countryOf = (itu: string | null) => (itu ? netCountry.get(itu) ?? names.country(itu) : '');
   const sources: DropOpt[] = (p.meta?.sources ?? []).map((s) => ({ value: s.id, label: s.kind === 'user' ? t.sourceMine : s.name, n: count(p.facets?.sources, s.id) }));
   const mineSrc = useMemo(() => userSources(p.meta), [p.meta]);
   const [showFilters, setShowFilters] = useState(false);
@@ -248,7 +244,8 @@ export function StationList(p: Props) {
   const sortId = useId();
   const lensLabel = { all: t.lensAll, heard: t.lensHeard, favorites: t.lensFav, listened: t.lensListened };
   const lensTitle = { all: t.lensAllTitle, heard: t.lensHeardTitle, favorites: t.lensFavTitle, listened: t.lensListenedTitle };
-  const empty = net && p.net.search.failed ? t.netUnreachable
+  const empty = netFavs ? (f.q ? t.noResults : t.netFavEmpty)
+    : net && p.net.search.failed ? t.netUnreachable
     : filtered ? t.noResults
     : f.lens === 'heard' ? t.heardEmpty
     : f.lens === 'favorites' ? t.favEmpty
@@ -259,8 +256,8 @@ export function StationList(p: Props) {
   const more = useRef(p.onMore);
   more.current = net ? p.net.search.loadMore : p.onMore;
   const asked = useRef(-1);
-  const loaded = net ? p.net.search.items.length : p.rows.length + p.heard.length;
-  const hasMore = net ? p.net.search.more : loaded < p.total;
+  const loaded = netFavs ? favRows.length : net ? p.net.search.items.length : p.rows.length + p.heard.length;
+  const hasMore = netFavs ? false : net ? p.net.search.more : loaded < p.total;
   // next page when the end of the list comes into view (once per length)
   useEffect(() => {
     const b = box.current, e = end.current;
@@ -331,7 +328,7 @@ export function StationList(p: Props) {
     <>
       <div className="tabs lenses" role="tablist" aria-label={t.lenses}>
         {LENSES.map((l) => (
-          <button key={l} type="button" role="tab" aria-selected={net ? l === 'all' : f.lens === l} title={lensTitle[l]} onClick={() => p.onFilters(lensFilters(f, l))}>
+          <button key={l} type="button" role="tab" aria-selected={net ? l === (netFavs ? 'favorites' : 'all') : f.lens === l} title={lensTitle[l]} onClick={() => p.onFilters(lensFilters(f, l))}>
             {l === 'favorites' && <span aria-hidden="true">★</span>}{lensLabel[l]}
           </button>
         ))}
@@ -382,18 +379,35 @@ export function StationList(p: Props) {
         </div>
       )}
       <div className="rows" ref={box} onKeyDown={onRowsKey}>
-        {net ? (
+        {netFavs ? (
+          <ul className="list">
+            {favRows.map((v) => (
+              <NetItem
+                key={v.uuid}
+                name={v.label || v.name}
+                flag={v.flag}
+                country={countryOf(v.itu)}
+                line={[countryOf(v.itu), v.label ? v.name : ''].filter(Boolean).join(' · ')}
+                stream={v.codec ?? ''}
+                tuned={p.net.tuned === v.uuid}
+                fav
+                onTune={() => p.net.onTune(v.uuid)}
+              />
+            ))}
+          </ul>
+        ) : net ? (
           <ul className="list">
             {p.net.search.items.map((s) => (
               <NetItem
                 key={s.uuid}
-                s={s}
-                country={(s.itu && netCountry.get(s.itu)) || (s.itu ? names.country(s.itu) : '')}
-                open={openNet === s.uuid}
-                playing={p.net.playing === s.uuid}
-                onToggle={() => setOpenNet((o) => (o === s.uuid ? null : s.uuid))}
-                onListen={() => p.net.onListen(s)}
-                onStop={p.net.onStop}
+                name={s.name}
+                flag={s.flag}
+                country={countryOf(s.itu)}
+                line={stationLine(s, countryOf(s.itu))}
+                stream={streamLabel(s)}
+                tuned={p.net.tuned === s.uuid}
+                fav={p.net.favUuids.has(s.uuid)}
+                onTune={() => p.net.onTune(s.uuid)}
               />
             ))}
           </ul>
@@ -419,7 +433,9 @@ export function StationList(p: Props) {
             </ul>
           </>
         )}
-        {net
+        {netFavs
+          ? favRows.length === 0 && <p className="empty-d">{empty}</p>
+          : net
           ? !p.net.search.loading && p.net.search.items.length === 0 && <p className="empty-d">{empty}</p>
           : !p.loading && p.total === 0 && p.off.length === 0 && <p className="empty-d">{empty}</p>}
         <div ref={end} />

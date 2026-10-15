@@ -38,11 +38,14 @@ import { useUpdate } from './hooks/useUpdate';
 import { useUserStations } from './hooks/useUserStations';
 import { useWelcome } from './hooks/useWelcome';
 import { useFreqHeat, useListening, useStats } from './hooks/useStats';
-import { useNetCountries, useNetSearch } from './hooks/useNetSearch';
-import { audioCell, isNet, leaveNet, NET_RATE, playingUuid } from './components/net';
+import { useNetCountries, useNetOverview, useNetSearch } from './hooks/useNetSearch';
+import { useNetFavorites } from './hooks/useNetFavorites';
+import { NetDossier } from './components/NetDossier';
+import type { NetFace } from './components/Tuner';
+import type { NetPin } from './components/stage/useStage';
+import { audioCell, dimSites, isNet, leaveNet, NET_BAND, NET_DOT_ID, NET_RATE, netCountryOpts, netSiteDots, stepChannel, streamLabel } from './components/net';
 import { useNetNow } from './hooks/useNetNow';
-import type { NetStation } from './types/generated/NetStation';
-import { fmtStamp, I18nProvider, pickMessages } from './i18n';
+import { fmtKhz, fmtStamp, I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
 import { stepIndex, type Action } from './keys/keymap';
 import { useKeys } from './keys/useKeys';
@@ -139,9 +142,17 @@ export function App() {
   const netEnabled = info?.net ?? false;
   const netActive = isNet(filters, netEnabled);
   const search = useStationSearch(netActive ? null : api, filters, lensKey);
-  const netSearch = useNetSearch(api, filters, netActive);
-  const netCountries = useNetCountries(api, netActive);
+  // the NET band's Favorites lens lists the favorites kept: no directory search then
+  const netSearch = useNetSearch(api, filters, netActive && filters.lens !== 'favorites');
+  const netCountries = useNetCountries(api, netActive || netEnabled);
+  const netOverview = useNetOverview(api, netActive);
   const { netNow, setNetNow } = useNetNow(api, netEnabled);
+  const netFavs = useNetFavorites(api, netEnabled, onError);
+  const netFavUuids = useMemo(() => new Set(netFavs.list.map((f) => f.uuid)), [netFavs.list]);
+  const netCountryName = useMemo(() => {
+    const m = new Map(netCountryOpts(netCountries, t.locale).map((c) => [c.value, c.label]));
+    return (itu: string | null) => (itu ? m.get(itu) ?? names.country(itu) : '');
+  }, [netCountries, t.locale, names]);
   // internet radio turned off while the list was on NET: back to the radio bands
   useEffect(() => {
     if (!netEnabled) setFilters((f) => leaveNet(f));
@@ -168,6 +179,19 @@ export function App() {
   }, [cands, on, wanted]);
 
   const sites = overview?.sites ?? NO_SITES;
+  // the map: the countries with internet stations while the list is on NET; the transmitter sites
+  // dimmed while an internet station is tuned
+  const netDots = useMemo(() => netSiteDots(netOverview, netCountryName), [netOverview, netCountryName]);
+  const netDotsRef = useRef(netDots);
+  netDotsRef.current = netDots;
+  const dimmed = useMemo(() => dimSites(sites), [sites]);
+  const globeSites = netActive ? netDots : netNow ? dimmed : sites;
+  const netPin = useMemo<NetPin | null>(() => {
+    const p = netNow?.place;
+    if (!netNow || !p) return null;
+    const country = netCountryName(netNow.station.itu);
+    return { key: netNow.station.uuid, lat: p.lat, lon: p.lon, name: netNow.station.name, sub: p.precise ? country : `${country} · ${t.netApproxPlace}`, flag: netNow.station.flag };
+  }, [netNow?.station.uuid, netNow?.place?.lat, netNow?.place?.lon, netCountryName, t]);
   const siteName = filters.site === null ? null : sites.find((s) => s.id === filters.site)?.name ?? null;
   const scanSel = filters.scan === null ? null : scan.scans.find((s) => s.id === filters.scan) ?? null;
   const scanName = scanSel && `${names.dialBand(bandOf(scanSel))} · ${fmtStamp(t, scanSel.started)}`;
@@ -175,10 +199,18 @@ export function App() {
   useEffect(() => {
     if (filters.scan !== null && !scan.scans.some((s) => s.id === filters.scan)) setFilters((f) => ({ ...f, scan: null }));
   }, [filters.scan, scan.scans]);
-  const siteLabel = useCallback((s: SiteDot) => ({ country: names.country(s.itu), onAir: t.siteOnAir(s.on, s.total) }), [names, t]);
-  // the globe's callbacks are stable, so it only renders again when what it shows changes
+  const siteLabel = useCallback((s: SiteDot) => (s.id >= NET_DOT_ID
+    ? { country: t.netBand, onAir: t.netDotCount(s.total) }
+    : { country: names.country(s.itu), onAir: t.siteOnAir(s.on, s.total) }), [names, t]);
+  // the globe's callbacks are stable, so it only renders again when what it shows changes; a
+  // country of the NET band narrows its list to that country
   const pickSite = useCallback((id: number) => {
-    setFilters((f) => ({ ...leaveNet(f), site: f.site === id ? null : id }));
+    if (id >= NET_DOT_ID) {
+      const dot = netDotsRef.current.find((d) => d.id === id);
+      if (dot) setFilters((f) => ({ ...f, countries: f.countries[0] === dot.itu ? [] : [dot.itu] }));
+    } else {
+      setFilters((f) => ({ ...leaveNet(f), site: f.site === id ? null : id }));
+    }
     setView('browse');
   }, []);
 
@@ -306,9 +338,10 @@ export function App() {
     if (on && v.station.freq_hz !== freqHz) tuneAs(v.station.freq_hz, v.station.mode);
     return true;
   };
+  // on the NET band, its own favorites; elsewhere the radio ones
   const toggleFavorites = () => {
     const to = filters.lens === 'favorites' ? 'all' : 'favorites';
-    setFilters((f) => ({ ...leaveNet(f), lens: to }));
+    setFilters((f) => (netActive ? { ...f, lens: to } : { ...leaveNet(f), lens: to }));
     if (phone && to === 'favorites') setView('browse');
   };
 
@@ -320,16 +353,48 @@ export function App() {
   // the keyboard (keys/keymap.ts): typing anywhere starts a new search
   const searchRef = useRef<HTMLInputElement>(null);
   const audioKeys = useRef<AudioKeys>(null);
-  // an internet station instead of the rig: the player starts inside the click (browsers ask
-  // that), shown connecting at once, and the core switches the audio over
-  const listenNet = (s: NetStation) => {
-    setNetNow({ station: { uuid: s.uuid, name: s.name, itu: s.itu, flag: s.flag, codec: s.codec, bitrate: s.bitrate }, state: { state: 'connecting' } });
-    audioKeys.current?.start();
-    api?.netPlay(s.uuid).then(setNetNow, (e) => { setNetNow(null); onError(e); });
+  // an internet station instead of the rig: tuned, as a radio station is; Listen (the audio
+  // panel) plays it, and while listening another one switches at once
+  const tuneNet = (uuid: string) => {
+    api?.netTune(uuid).then(setNetNow, onError);
   };
   const stopNet = () => {
     setNetNow(null);
     api?.netStop().catch(onError);
+  };
+  const netTuned = netNow?.station.uuid ?? null;
+  const netFav = netTuned ? netFavs.byUuid.get(netTuned) ?? null : null;
+  const netStar = netTuned && (
+    <FavStar
+      fav={netFav}
+      onAdd={() => netFavs.add(netTuned)}
+      onRename={(label) => netFav && netFavs.rename(netFav.id, label)}
+      onRemove={() => netFav && netFavs.remove(netFav.id)}
+    />
+  );
+  // the knob, the arrows and the tuning keys step the memory channels (the favorites), or the
+  // list when there are none
+  const stepNet = (dir: number) => {
+    const list: readonly { uuid: string }[] = netFavs.list.length ? netFavs.list : netSearch.items;
+    const next = stepChannel(list, netTuned, dir);
+    if (next) tuneNet(next.uuid);
+  };
+  const netFace: NetFace | null = netNow && {
+    name: netNow.station.name,
+    flag: netNow.station.flag,
+    country: netCountryName(netNow.station.itu),
+    stream: streamLabel(netNow.station),
+    bufferMs: netNow.state.state === 'playing' || netNow.state.state === 'connecting' ? netNow.buffer_ms : null,
+    channels: netFavs.list.map((f) => ({ uuid: f.uuid, label: f.label || f.name })),
+    uuid: netNow.station.uuid,
+    rig: on && freqHz !== null ? `${fmtKhz(freqHz)} kHz${rig.mode ? ` ${rig.mode}` : ''}` : '',
+    onChannel: tuneNet,
+    onStep: stepNet,
+    onBackToRig: stopNet,
+  };
+  const toNetBand = () => {
+    setFilters((f) => ({ ...f, bands: [NET_BAND], lens: 'all' }));
+    if (phone) setView('browse');
   };
   const focusSearch = (select: boolean) => {
     if (phone) setView('browse');
@@ -355,6 +420,13 @@ export function App() {
       case 'audio': return audioKeys.current?.toggle();
       case 'mute': return audioKeys.current?.mute();
       case 'volume': return audioKeys.current?.volume(a.d);
+    }
+    if (netNow) {
+      // tuned to an internet station: the tuning keys step its memory channels
+      switch (a.kind) {
+        case 'nudge': return stepNet(a.khz > 0 ? 1 : -1);
+        case 'band': return stepNet(a.dir);
+      }
     }
     if (!on) return;
     switch (a.kind) {
@@ -423,7 +495,8 @@ export function App() {
         <main className="stage" aria-label={t.globe}>
           {qth && (
             <Globe
-              sel={on ? sel : null}
+              sel={on && !netNow ? sel : null}
+              net={netPin}
               qth={qth}
               frame={frame}
               onFrame={toggleFrame}
@@ -431,8 +504,8 @@ export function App() {
               onInteract={onGlobeTouched}
               onQth={moveQth}
               failedMsg={t.globeFailed}
-              sites={sites}
-              strengthDb={on ? rig.strength_db : null}
+              sites={globeSites}
+              strengthDb={on && !netNow ? rig.strength_db : null}
               activeSite={filters.site}
               loggedSites={scan.loggedSites}
               listenedSites={listenedSites}
@@ -473,12 +546,24 @@ export function App() {
             onTuneHz={tune}
             onMore={search.more}
             searchRef={searchRef}
-            net={{ enabled: netEnabled, active: netActive, search: netSearch, countries: netCountries, playing: playingUuid(netNow), onListen: listenNet, onStop: stopNet }}
+            net={{
+              enabled: netEnabled,
+              active: netActive,
+              search: netSearch,
+              countries: netCountries,
+              tuned: netTuned,
+              favs: netFavs.list,
+              favUuids: netFavUuids,
+              onTune: tuneNet,
+            }}
           />
         </section>
 
         <section className="panel station" aria-label={t.station} aria-live="polite">
           <PanelHead own="station" onView={setView} count={shortCount} />
+          {netNow ? (
+            <NetDossier now={netNow} country={netCountryName(netNow.station.itu)} star={netStar} onBackToRig={stopNet} />
+          ) : (
           <Dossier
             on={on}
             freqHz={freqHz}
@@ -501,6 +586,7 @@ export function App() {
             onEdit={editStation}
             onDelete={deleteStation}
           />
+          )}
         </section>
 
         <footer className="dock">
@@ -526,7 +612,7 @@ export function App() {
                 onStop={scan.stop}
               />
             }
-            star={
+            star={netStar || (
               <FavStar
                 fav={tunedFav}
                 disabled={!on || freqHz === null}
@@ -534,11 +620,13 @@ export function App() {
                 onRename={(label) => tunedFav && favs.rename(tunedFav.id, label)}
                 onRemove={() => tunedFav && favs.remove(tunedFav.id)}
               />
-            }
+            )}
             expanded={dockOpen}
             onExpand={() => setDockOpen((o) => !o)}
             onTune={tune}
             onMode={setMode}
+            net={netFace}
+            onNetSpan={netEnabled ? toNetBand : null}
           />
           {/* always mounted, so audio keeps playing whatever else opens */}
           {info && api && audioCell(info.audio, netEnabled) === 'panel' ? (
@@ -553,7 +641,6 @@ export function App() {
               keys={audioKeys}
               rigAudio={info.audio}
               net={netNow}
-              onNetStop={stopNet}
               onSetUp={() => openSettings('audio')}
             />
           ) : (

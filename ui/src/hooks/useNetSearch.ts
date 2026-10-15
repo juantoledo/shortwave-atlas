@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Api } from '../api/client';
 import { netQuery } from '../components/net';
 import type { NetCountry } from '../types/generated/NetCountry';
+import type { NetDot } from '../types/generated/NetDot';
 import type { NetPage } from '../types/generated/NetPage';
 import type { NetStation } from '../types/generated/NetStation';
 import type { Filters } from './useCore';
@@ -77,6 +78,18 @@ export function useNetSearch(api: Api | null, filters: Filters, active: boolean)
   }, [api, active, key, st.loading, st.more, st.next]);
 
   return { ...st, loadMore };
+}
+
+/** Countries with internet stations, for the map, read once the list first goes to NET. */
+export function useNetOverview(api: Api | null, active: boolean): NetDot[] {
+  const [dots, setDots] = useState<NetDot[]>([]);
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!api || !active || asked.current) return;
+    asked.current = true;
+    api.netOverview().then(setDots, () => { asked.current = false; });
+  }, [api, active]);
+  return dots;
 }
 
 /** The countries NET can filter by, read once the list first goes to NET. */

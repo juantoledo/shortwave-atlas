@@ -61,7 +61,7 @@ pub struct FavoriteView {
     pub station_id: Option<u32>,
 }
 
-fn clean_label(label: &str) -> Result<String, String> {
+pub(crate) fn clean_label(label: &str) -> Result<String, String> {
     let label = label.trim();
     if label.chars().count() > MAX_LABEL {
         return Err(format!("A label has at most {MAX_LABEL} characters"));

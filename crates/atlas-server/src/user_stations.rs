@@ -82,6 +82,11 @@ impl UserStationService {
         self.views().into_iter().find(|v| v.station.id == id).ok_or_else(|| ApiError::internal("station not kept"))
     }
 
+    /// The transmitter sites known (internet stations are placed by country with them).
+    pub fn gazetteer(&self) -> &Gazetteer {
+        &self.eibi.gazetteer
+    }
+
     pub fn code_tables(&self) -> CodeTables {
         self.cell.get().code_tables(&self.eibi.vocabulary, &self.eibi.gazetteer)
     }

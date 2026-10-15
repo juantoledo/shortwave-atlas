@@ -5,6 +5,9 @@
 
 import type { Filters } from '../hooks/useCore';
 import type { NetCountry } from '../types/generated/NetCountry';
+import type { NetDot } from '../types/generated/NetDot';
+import type { NetFavorite } from '../types/generated/NetFavorite';
+import type { SiteDot } from '../types/generated/SiteDot';
 import type { NetNow } from '../types/generated/NetNow';
 import type { NetQuery } from '../types/generated/NetQuery';
 import type { NetStation } from '../types/generated/NetStation';
@@ -30,9 +33,54 @@ export function netQuery(f: Filters, offset: number, limit: number): NetQuery {
   return { q: f.q.trim(), country: f.countries[0] ?? null, offset, limit };
 }
 
-/** Filters a lens tab sets: All keeps NET, the others (about the schedule) leave it. */
+/** Filters a lens tab sets: All and Favorites keep NET (it has favorites of its own); Heard and
+ *  Listened are about the schedule and leave it. */
 export function lensFilters(f: Filters, lens: Filters['lens']): Filters {
-  return lens === 'all' ? { ...f, lens } : { ...leaveNet(f), lens };
+  return lens === 'all' || lens === 'favorites' ? { ...f, lens } : { ...leaveNet(f), lens };
+}
+
+/** The NET favorites a search shows (by name or label, any case). */
+export function favFilter(list: readonly NetFavorite[], q: string): NetFavorite[] {
+  const k = q.trim().toLocaleLowerCase();
+  return k ? list.filter((f) => `${f.label} ${f.name}`.toLocaleLowerCase().includes(k)) : [...list];
+}
+
+/** The memory channel `dir` steps from the station tuned (`uuid`), round the ends; the first or
+ *  last when nothing of `list` is tuned. `null` for an empty list. */
+export function stepChannel<T extends { uuid: string }>(list: readonly T[], uuid: string | null, dir: number): T | null {
+  if (!list.length || dir === 0) return null;
+  const i = uuid === null ? -1 : list.findIndex((x) => x.uuid === uuid);
+  if (i < 0) return dir > 0 ? list[0] : list[list.length - 1];
+  const n = list.length;
+  return list[(((i + dir) % n) + n) % n];
+}
+
+/** Segments lit on the buffer meter (`segs` of them for 0..5 s held). */
+export function bufferSegs(ms: number, segs: number): number {
+  return Math.round(Math.min(segs, Math.max(0, (ms / 5000) * segs)));
+}
+
+/** Countries with internet stations as globe dots (ids apart from the transmitter sites'); a
+ *  tower's height follows the count, roughly by its order of magnitude. */
+export const NET_DOT_ID = 1_000_000;
+export function netSiteDots(dots: readonly NetDot[], names: (itu: string) => string): SiteDot[] {
+  return dots.map((d, i) => ({
+    id: NET_DOT_ID + i,
+    lat: d.lat,
+    lon: d.lon,
+    name: names(d.itu),
+    itu: d.itu,
+    flag: d.flag,
+    precise: false,
+    on: Math.min(15, Math.ceil(Math.log10(d.stations + 1) * 4)),
+    total: d.stations,
+    mine: 0,
+  }));
+}
+
+/** The transmitter sites shown dim while an internet station is tuned (flat, as off the air). */
+export function dimSites(sites: readonly SiteDot[]): SiteDot[] {
+  return sites.map((s) => (s.on ? { ...s, on: 0 } : s));
 }
 
 /** `MP3 128k`, `AAC+`, `HLS`, or '' when the directory doesn't say. */

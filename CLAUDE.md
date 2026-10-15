@@ -27,8 +27,10 @@ See README.md for layout and commands.
   never from the schedule `Catalog`; nothing in it tunes the rig. Streams play through `AudioHub`
   (`net_audio.rs`, symphonia) and are relayed live, never saved. The server opens only URLs the
   directory gives for a uuid (`stream_url_ok`). NET listening goes to `net-listening.jsonl`
-  (`atlas_core::net_listening`), never `listening.jsonl`: rig sessions pause while a stream plays,
-  and DX stats never see it. Use the directory's data (public domain), never its server code (AGPL).
+  (`atlas_core::net_listening`), never `listening.jsonl`: rig sessions pause while a stream is
+  tuned, and DX stats never see it. NET favorites (its memory channels) live in
+  `net-favorites.json` (`atlas_core::net_favorites`), apart from the radio favorites. Use the
+  directory's data (public domain), never its server code (AGPL).
 - Shared types are generated: `cargo test` writes `ui/src/types/generated/` (ts-rs). Commit them
   and never edit them by hand.
 - Logic that doesn't touch IO goes in `atlas-core`, with unit tests. The UI only keeps animation

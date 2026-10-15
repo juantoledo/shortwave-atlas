@@ -3,4 +3,4 @@
 /**
  * How the stream being played is doing.
  */
-export type NetState = { "state": "connecting" } | { "state": "playing" } | { "state": "failed", message: string, };
+export type NetState = { "state": "tuned" } | { "state": "connecting" } | { "state": "playing" } | { "state": "failed", message: string, };

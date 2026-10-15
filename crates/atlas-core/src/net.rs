@@ -16,11 +16,15 @@ use serde_json::Value;
 use ts_rs::TS;
 
 use crate::country::{flag, iso_of_itu, itu_of_iso, COUNTRIES};
+use crate::geo::{dist_bearing, sun_at, LatLon, Route, SunAt};
+use crate::source::Gazetteer;
 
 /// `SourceDesc::id` of the internet stations.
 pub const NET_SOURCE: &str = "radiobrowser";
 /// The band id the station list uses for them.
 pub const NET_BAND: &str = "net";
+/// Countries with how many stations the directory lists in each.
+pub const COUNTRIES_PATH: &str = "/json/countries";
 /// Answers the directory's server list from any of its servers.
 pub const SERVERS_URL: &str = "https://all.api.radio-browser.info/json/servers";
 /// Rows per page when the query does not say.
@@ -83,6 +87,76 @@ pub struct NetStation {
     pub votes: u32,
     /// Its format can be decoded here (not HLS; MP3, AAC, Ogg Vorbis, FLAC, or not said).
     pub playable: bool,
+    /// Where the directory says it is, if it does (most stations: only the country).
+    pub pos: Option<LatLon>,
+}
+
+/// Where an internet station is shown on the map: its own position, or (`precise: false`) a known
+/// site in its country, as for schedule stations whose site is unknown.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NetPlace {
+    pub lat: f64,
+    pub lon: f64,
+    pub precise: bool,
+}
+
+/// Where to show `st`; `None` for a country without a known site.
+pub fn place(st: &NetStation, gaz: &Gazetteer) -> Option<NetPlace> {
+    if let Some(p) = st.pos {
+        return Some(NetPlace { lat: p.lat, lon: p.lon, precise: true });
+    }
+    country_spot(st.itu.as_deref()?, gaz).map(|p| NetPlace { lat: p.lat, lon: p.lon, precise: false })
+}
+
+/// A known site in a country: the one the schedule puts its unknown sites at, else its first.
+pub fn country_spot(itu: &str, gaz: &Gazetteer) -> Option<LatLon> {
+    if let Some(s) = gaz.sites.iter().find(|s| s.itu == itu && !s.precise) {
+        return Some(LatLon { lat: s.lat, lon: s.lon });
+    }
+    gaz.first_site.get(itu).map(|&(lat, lon)| LatLon { lat, lon })
+}
+
+/// A country on the map while browsing the NET band.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NetDot {
+    /// EiBi code.
+    pub itu: String,
+    pub flag: Option<String>,
+    pub lat: f64,
+    pub lon: f64,
+    /// Stations the directory lists there (all of them, also those that can't play here).
+    pub stations: u32,
+}
+
+/// Result of `Call::NetOverview`: one dot per country the directory has stations in and that can
+/// be placed, most stations first.
+pub fn parse_countries(json: &str, gaz: &Gazetteer) -> Result<Vec<NetDot>, String> {
+    let v: Value = serde_json::from_str(json).map_err(|e| format!("country list: {e}"))?;
+    let rows = v.as_array().ok_or("country list: not a list")?;
+    let mut by: Vec<NetDot> = Vec::new();
+    for r in rows {
+        let (Some(iso), Some(n)) = (text(r, "iso_3166_1"), number(r, "stationcount")) else { continue };
+        let Some(itu) = itu_of_iso(&iso) else { continue };
+        let Some(p) = country_spot(itu, gaz) else { continue };
+        if n == 0 {
+            continue;
+        }
+        // the directory may list a country twice (spellings): add them up
+        match by.iter_mut().find(|d| d.itu == itu) {
+            Some(d) => d.stations += n,
+            None => by.push(NetDot {
+                itu: itu.into(),
+                flag: flag(itu).map(Into::into),
+                lat: p.lat,
+                lon: p.lon,
+                stations: n,
+            }),
+        }
+    }
+    by.sort_by(|a, b| b.stations.cmp(&a.stations).then_with(|| a.itu.cmp(&b.itu)));
+    Ok(by)
 }
 
 /// A station being played: what the dock and the history show of it.
@@ -97,10 +171,23 @@ pub struct NetPlaying {
     pub bitrate: Option<u32>,
 }
 
-/// A station to play: as above, and where its stream is.
+impl NetPlaying {
+    pub fn of(st: &NetStation) -> Self {
+        NetPlaying {
+            uuid: st.uuid.clone(),
+            name: st.name.clone(),
+            itu: st.itu.clone(),
+            flag: st.flag.clone(),
+            codec: st.codec.clone(),
+            bitrate: st.bitrate,
+        }
+    }
+}
+
+/// A station to play, and where its stream is.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NetStream {
-    pub station: NetPlaying,
+    pub station: NetStation,
     pub url: String,
 }
 
@@ -109,17 +196,40 @@ pub struct NetStream {
 #[serde(tag = "state", rename_all = "snake_case")]
 #[ts(export)]
 pub enum NetState {
+    /// Tuned, and nobody is listening: nothing is fetched.
+    Tuned,
     Connecting,
     Playing,
-    Failed { message: String },
+    Failed {
+        message: String,
+    },
 }
 
-/// Result of `Call::NetNow`: the internet station the receiver plays instead of the rig.
+/// Result of `Call::NetNow`: the internet station the receiver is tuned to instead of the rig.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct NetNow {
-    pub station: NetPlaying,
+    pub station: NetStation,
     pub state: NetState,
+    /// Stream audio held ahead (the jitter buffer), in milliseconds.
+    pub buffer_ms: u32,
+    /// Where it is shown on the map.
+    pub place: Option<NetPlace>,
+    /// From the listener, as the crow flies (there is no radio path).
+    pub route: Option<Route>,
+    /// The Sun where it is: day or night there.
+    pub sun: Option<SunAt>,
+    /// The listener's time with it in the last 30 days (the NET history).
+    pub listened_secs: u32,
+}
+
+/// Fill in where `now`'s station is: on the map, from the listener at `qth`, and the Sun there at
+/// `unix`.
+pub fn locate(now: &mut NetNow, gaz: &Gazetteer, qth: LatLon, unix: i64) {
+    now.place = place(&now.station, gaz);
+    let pos = now.place.map(|p| LatLon { lat: p.lat, lon: p.lon });
+    now.route = pos.map(|p| dist_bearing(qth, p));
+    now.sun = pos.map(|p| sun_at(p, unix));
 }
 
 /// Whether a stream in this format can be decoded here. HLS is a playlist of segments, not one
@@ -194,9 +304,14 @@ pub fn parse_stream(json: &str) -> Result<NetStream, String> {
         return Err("this stream's format can't be played yet".into());
     }
     let url = text(r, "url_resolved").or_else(|| text(r, "url")).ok_or("the station has no stream")?;
-    let station =
-        NetPlaying { uuid: st.uuid, name: st.name, itu: st.itu, flag: st.flag, codec: st.codec, bitrate: st.bitrate };
-    Ok(NetStream { station, url })
+    Ok(NetStream { station: st, url })
+}
+
+/// A station's details from a `station_path` answer, whatever its format.
+pub fn parse_details(json: &str) -> Result<NetStation, String> {
+    let v: Value = serde_json::from_str(json).map_err(|e| format!("station: {e}"))?;
+    let r = v.as_array().and_then(|a| a.first()).ok_or("the directory does not know that station")?;
+    station(r).ok_or_else(|| "the directory's answer has no station".into())
 }
 
 /// The stream URL in a `click_path` answer, if it gives one.
@@ -255,6 +370,11 @@ impl JitterBuffer {
     /// Audio held, in bytes.
     pub fn held(&self) -> usize {
         self.buf.len()
+    }
+
+    /// Audio held, in milliseconds (16-bit mono at `NET_RATE`).
+    pub fn held_ms(&self) -> u32 {
+        (self.buf.len() as u64 * 1000 / (u64::from(NET_RATE) * 2)) as u32
     }
 
     /// Handing blocks out (not filling up).
@@ -394,11 +514,19 @@ fn station(r: &Value) -> Option<NetStation> {
             || r.get("lastcheckok").and_then(Value::as_bool) == Some(true),
         votes: number(r, "votes").unwrap_or(0),
         playable: false,
+        pos: position(r),
     })
     .map(|mut s| {
         s.playable = playable(s.codec.as_deref(), s.hls);
         s
     })
+}
+
+/// The directory's coordinates, when it gives real ones (0, 0 is "not set").
+fn position(r: &Value) -> Option<LatLon> {
+    let (lat, lon) = (r.get("geo_lat")?.as_f64()?, r.get("geo_long")?.as_f64()?);
+    let real = (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon) && (lat, lon) != (0.0, 0.0);
+    real.then_some(LatLon { lat, lon })
 }
 
 /// A string field, trimmed and with its runs of whitespace made one space; `None` if empty.
@@ -588,7 +716,7 @@ mod tests {
         let s = parse_stream(json).unwrap();
         assert_eq!(s.url, "http://stream2.srr.ro:8052/;");
         assert_eq!(
-            s.station,
+            NetPlaying::of(&s.station),
             NetPlaying {
                 uuid: rri.into(),
                 name: "Radio Romania International".into(),
@@ -598,6 +726,9 @@ mod tests {
                 bitrate: Some(128),
             }
         );
+        assert_eq!(parse_details(json).unwrap(), s.station);
+        let hls = r#"[{"stationuuid":"u","name":"n","codec":"MP3","hls":1,"url":"http://a.b/"}]"#;
+        assert!(!parse_details(hls).unwrap().playable, "details whatever the format");
         assert!(parse_stream("[]").is_err());
         assert!(parse_stream(r#"[{"stationuuid":"u","name":"n","codec":"MP3","hls":1,"url":"http://a.b/"}]"#).is_err());
         assert!(parse_stream(r#"[{"stationuuid":"u","name":"n","codec":"MP3"}]"#).is_err(), "no stream");
@@ -630,6 +761,84 @@ mod tests {
         jb.push(&[4; 12_000]);
         assert_eq!(jb.held(), 10_000);
         assert_eq!(jb.pop().unwrap()[0], 4);
+        let mut jb = JitterBuffer::new(NET_RATE, 20);
+        jb.push(&vec![0; NET_RATE as usize]);
+        assert_eq!(jb.held_ms(), 500);
+    }
+
+    fn gaz() -> Gazetteer {
+        use crate::eibi::SiteRec;
+        let site = |itu: &str, name: &str, lat, lon, precise| SiteRec {
+            itu: itu.into(),
+            code: None,
+            name: name.into(),
+            lat,
+            lon,
+            precise,
+        };
+        Gazetteer {
+            sites: vec![site("ARG", "General Pacheco", -34.4, -58.6, true), site("ROU", "Romania", 44.4, 26.1, false)],
+            first_site: [("ARG".to_string(), (-34.4, -58.6)), ("ROU".to_string(), (45.0, 25.0))].into(),
+        }
+    }
+
+    #[test]
+    fn where_stations_are_shown() {
+        let (st, _) = parse_stations(ANSWER).unwrap();
+        let g = gaz();
+        // RRI gives no coordinates: Romania's spot for unknown sites, approximate
+        assert_eq!(st[0].pos, None);
+        assert_eq!(place(&st[0], &g), Some(NetPlace { lat: 44.4, lon: 26.1, precise: false }));
+        let own = NetStation { pos: Some(LatLon { lat: -34.6, lon: -58.4 }), ..st[0].clone() };
+        assert_eq!(place(&own, &g), Some(NetPlace { lat: -34.6, lon: -58.4, precise: true }));
+        assert_eq!(place(&st[2], &g), None, "China: no known site in this gazetteer");
+        assert_eq!(country_spot("ARG", &g), Some(LatLon { lat: -34.4, lon: -58.6 }));
+        let at = |lat: f64, lon: f64| {
+            let json = format!(r#"[{{"stationuuid":"u","name":"n","geo_lat":{lat},"geo_long":{lon}}}]"#);
+            parse_stations(&json).unwrap().0[0].pos
+        };
+        assert_eq!(at(-34.6, -58.4), Some(LatLon { lat: -34.6, lon: -58.4 }));
+        assert_eq!(at(0.0, 0.0), None);
+        assert_eq!(at(95.0, 10.0), None);
+    }
+
+    #[test]
+    fn a_tuned_station_is_located() {
+        let (st, _) = parse_stations(ANSWER).unwrap();
+        let mut now = NetNow {
+            station: st[0].clone(),
+            state: NetState::Tuned,
+            buffer_ms: 0,
+            place: None,
+            route: None,
+            sun: None,
+            listened_secs: 0,
+        };
+        locate(&mut now, &gaz(), LatLon { lat: -33.45, lon: -70.67 }, 1_781_049_600);
+        assert_eq!(now.place.map(|p| p.precise), Some(false));
+        let km = now.route.map(|r| r.km).unwrap();
+        assert!((12_000.0..13_500.0).contains(&km), "Santiago to Bucharest: {km}");
+        assert!(now.sun.is_some());
+        let mut far = NetNow { station: st[2].clone(), ..now };
+        locate(&mut far, &gaz(), LatLon { lat: 0.0, lon: 0.0 }, 0);
+        assert_eq!((far.place, far.route, far.sun), (None, None, None), "nowhere to put it");
+    }
+
+    #[test]
+    fn countries_on_the_map() {
+        let json = r#"[{"name":"Argentina","iso_3166_1":"AR","stationcount":1240},
+            {"name":"Romania","iso_3166_1":"RO","stationcount":300},
+            {"name":"Romania ","iso_3166_1":"RO","stationcount":5},
+            {"name":"China","iso_3166_1":"CN","stationcount":900},
+            {"name":"Nowhere","iso_3166_1":"ZZ","stationcount":3},
+            {"name":"Empty","iso_3166_1":"AR","stationcount":0}]"#;
+        let dots = parse_countries(json, &gaz()).unwrap();
+        assert_eq!(
+            dots.iter().map(|d| (d.itu.as_str(), d.stations)).collect::<Vec<_>>(),
+            [("ARG", 1240), ("ROU", 305)]
+        );
+        assert_eq!((dots[1].lat, dots[1].lon, dots[1].flag.as_deref()), (44.4, 26.1, Some("ro")));
+        assert!(parse_countries("{}", &gaz()).is_err());
     }
 
     #[test]

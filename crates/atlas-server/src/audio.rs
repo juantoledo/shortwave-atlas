@@ -22,7 +22,7 @@ use atlas_core::audio::{
     cards_from_names, find_device, parse_asound, pick_capture_format, rate_drift, AudioChoice, AudioStatus,
     AudioTuning, CaptureFailure, CaptureFormat, CaptureOffer, Converter, SampleKind, SoundCard,
 };
-use atlas_core::net::{NetNow, NetPlaying, NetState, NetStream, NET_RATE};
+use atlas_core::net::{JitterBuffer, NetNow, NetPlaying, NetState, NetStream, NET_RATE};
 use atlas_core::platform::Os;
 use bytes::Bytes;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -48,6 +48,8 @@ pub(crate) struct Capture {
     pub(crate) stop: Arc<AtomicBool>,
     pub(crate) thread: JoinHandle<()>,
     pub(crate) tasks: Vec<tokio::task::AbortHandle>,
+    /// An internet stream's audio held ahead.
+    pub(crate) jitter: Option<Arc<Mutex<JitterBuffer>>>,
 }
 
 struct Inner {
@@ -193,7 +195,7 @@ impl AudioHub {
                         .name("audio-capture".into())
                         .spawn(move || run_capture(hub, generation, choice, flag))
                         .map_err(OpenError::Spawn)?;
-                    inner.capture = Some(Capture { stop, thread, tasks: vec![] });
+                    inner.capture = Some(Capture { stop, thread, tasks: vec![], jitter: None });
                     inner.last_error = None;
                     inner.failure = None;
                     inner.log.clear();
@@ -208,8 +210,9 @@ impl AudioHub {
         Ok(Subscription { rate, rx, id, hub: Arc::downgrade(self) })
     }
 
-    /// Play an internet station instead of the rig, for every listener.
-    pub fn play_net(&self, stream: NetStream) {
+    /// Tune to an internet station instead of the rig, for every listener. Its stream is fetched
+    /// only while someone listens.
+    pub fn tune_net(&self, stream: NetStream) {
         self.inner.lock().expect("audio lock").switch(Some(stream));
     }
 
@@ -228,23 +231,38 @@ impl AudioHub {
         self.inner.lock().expect("audio lock").net.is_some()
     }
 
-    /// The internet station chosen and how its stream is doing.
+    /// The internet station tuned and how its stream is doing (where it is, is the caller's to
+    /// fill: `atlas_core::net::locate`).
     pub fn net_now(&self) -> Option<NetNow> {
         let inner = self.inner.lock().expect("audio lock");
         let stream = inner.net.as_ref()?;
-        let state = match (&inner.net_failed, inner.running) {
-            (Some((_, why)), _) => NetState::Failed { message: why.clone() },
-            (None, true) => NetState::Playing,
-            (None, false) => NetState::Connecting,
+        let state = match (&inner.net_failed, inner.running, &inner.capture) {
+            (Some((_, why)), _, _) => NetState::Failed { message: why.clone() },
+            (None, true, _) => NetState::Playing,
+            (None, false, Some(_)) => NetState::Connecting,
+            (None, false, None) => NetState::Tuned,
         };
-        Some(NetNow { station: stream.station.clone(), state })
+        let buffer_ms = inner
+            .capture
+            .as_ref()
+            .and_then(|c| c.jitter.as_ref())
+            .map_or(0, |j| j.lock().expect("jitter buffer").held_ms());
+        Some(NetNow {
+            station: stream.station.clone(),
+            state,
+            buffer_ms,
+            place: None,
+            route: None,
+            sun: None,
+            listened_secs: 0,
+        })
     }
 
     /// The internet station whose audio is going out now (for the NET listening history).
     pub fn net_playing(&self) -> Option<NetPlaying> {
         let inner = self.inner.lock().expect("audio lock");
         let playing = inner.running && inner.net_failed.is_none();
-        inner.net.as_ref().filter(|_| playing).map(|s| s.station.clone())
+        inner.net.as_ref().filter(|_| playing).map(|s| NetPlaying::of(&s.station))
     }
 
     /// The internet stream stopped on its own: say why, end every stream, and refuse listeners
@@ -598,23 +616,43 @@ mod tests {
 
     fn station(uuid: &str, url: &str) -> NetStream {
         NetStream {
-            station: NetPlaying {
+            station: atlas_core::net::NetStation {
                 uuid: uuid.into(),
                 name: format!("Radio {uuid}"),
                 itu: None,
                 flag: None,
+                langs: vec![],
+                tags: vec![],
                 codec: Some("MP3".into()),
                 bitrate: None,
+                hls: false,
+                homepage: None,
+                ok: true,
+                votes: 0,
+                playable: true,
+                pos: None,
             },
             url: url.into(),
         }
     }
 
     #[tokio::test]
+    async fn tuned_fetches_nothing_until_someone_listens() {
+        let hub = AudioHub::new(AudioChoice { enabled: false, ..codec(16_000) });
+        hub.tune_net(station("a", "http://127.0.0.1:9/"));
+        let now = hub.net_now().unwrap();
+        assert_eq!((now.state, now.buffer_ms, hub.status().listeners), (NetState::Tuned, 0, 0));
+        let sub = hub.subscribe().unwrap();
+        assert!(matches!(hub.net_now().unwrap().state, NetState::Connecting | NetState::Failed { .. }));
+        drop(sub);
+        hub.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn an_internet_station_plays_without_rig_audio_and_waits_after_failing() {
         let hub = AudioHub::new(AudioChoice { enabled: false, ..codec(16_000) });
         // nothing listens there: the stream fails at once
-        hub.play_net(station("a", "http://127.0.0.1:9/"));
+        hub.tune_net(station("a", "http://127.0.0.1:9/"));
         let mut sub = hub.subscribe().unwrap();
         assert_eq!(sub.rate, NET_RATE);
         assert_eq!(hub.net_now().map(|n| n.state), Some(NetState::Connecting));
@@ -639,9 +677,9 @@ mod tests {
     #[tokio::test]
     async fn another_station_ends_every_stream() {
         let hub = AudioHub::new(AudioChoice { enabled: false, ..codec(16_000) });
-        hub.play_net(station("a", "http://127.0.0.1:9/"));
+        hub.tune_net(station("a", "http://127.0.0.1:9/"));
         let mut sub = hub.subscribe().unwrap();
-        hub.play_net(station("b", "http://127.0.0.1:9/"));
+        hub.tune_net(station("b", "http://127.0.0.1:9/"));
         assert_eq!(hub.status().listeners, 0);
         assert!(sub.next_block().await.is_none());
         assert_eq!(hub.net_now().map(|n| n.station.uuid), Some("b".into()));

@@ -10,6 +10,7 @@ pub mod http;
 pub mod listening;
 pub mod net;
 pub mod net_audio;
+pub mod net_favorites;
 pub mod net_listening;
 pub mod scan;
 pub mod server;
