@@ -99,6 +99,17 @@ export function route(site: LatLon, qth: LatLon): Pick<Fx, 'arcs' | 'path'> {
   };
 }
 
+/** An internet station's place: one slow ring while it is only tuned; while it plays, a beat of
+ *  quick wide rings with a tighter one inside, its audio going out. */
+export function netRings(p: LatLon, playing: boolean): Ring[] {
+  const at = { lat: p.lat, lng: p.lon, rgb: NET_RGB };
+  if (!playing) return [{ ...at, maxR: 4, speed: 1.5, period: 2600, alpha: 0.6 }];
+  return [
+    { ...at, maxR: 9, speed: 6, period: 1100 },
+    { ...at, maxR: 4, speed: 3, period: 550, alpha: 0.8 },
+  ];
+}
+
 export const qthRing = (q: LatLon): Ring => ({ lat: q.lat, lng: q.lon, maxR: 4.5, speed: 2, period: 2200, rgb: COOL, live: true });
 export const sonarRing = (q: LatLon): Ring => ({ lat: q.lat, lng: q.lon, maxR: 25, speed: 6, period: 2500, rgb: COOL, alpha: 0.6 });
 

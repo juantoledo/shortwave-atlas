@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NO_FILTERS, type Filters } from '../hooks/useCore';
 import type { NetNow } from '../types/generated/NetNow';
-import { siteColor } from './stage/fx';
+import { netRings, siteColor } from './stage/fx';
 import { audioCell, bufferSegs, canListen, dimSites, favFilter, isNet, lensFilters, leaveNet, NET_BAND, NET_DOT_ID, netCountryOpts, netQuery, netSiteDots, playingUuid, stepChannel, streamLabel } from './net';
 
 const radio: Filters = { ...NO_FILTERS, q: 'radio', langs: ['S'], regions: ['am'], countries: ['ARG'], sources: ['eibi'], site: 7, scan: 's1', lens: 'all' };
@@ -95,6 +95,16 @@ describe('NET band', () => {
     expect(siteColor(dots[1], false, false)).toBe('rgba(255,122,196,0.8)');
     expect(siteColor(dots[0], true, false)).toBe('#ffffff');
     expect(siteColor(sites[0], false, false)).not.toContain('255,122,196');
+  });
+
+  it('beats while the internet station plays, rests while only tuned', () => {
+    const at = { lat: -34.6, lon: -58.4 };
+    const tuned = netRings(at, false), playing = netRings(at, true);
+    expect(tuned).toHaveLength(1);
+    expect(playing).toHaveLength(2);
+    expect(Math.max(...playing.map((r) => r.maxR))).toBeGreaterThan(tuned[0].maxR);
+    expect(Math.min(...playing.map((r) => r.period))).toBeLessThan(tuned[0].period);
+    expect([...tuned, ...playing].every((r) => r.rgb === '255,122,196' && r.lat === at.lat && r.lng === at.lon)).toBe(true);
   });
 
   it('offers countries by name in the UI language', () => {

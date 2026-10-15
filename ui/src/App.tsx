@@ -190,8 +190,9 @@ export function App() {
     const p = netNow?.place;
     if (!netNow || !p) return null;
     const country = netCountryName(netNow.station.itu);
-    return { key: netNow.station.uuid, lat: p.lat, lon: p.lon, name: netNow.station.name, sub: p.precise ? country : `${country} · ${t.netApproxPlace}`, flag: netNow.station.flag };
-  }, [netNow?.station.uuid, netNow?.place?.lat, netNow?.place?.lon, netCountryName, t]);
+    const playing = netNow.state.state === 'playing';
+    return { key: netNow.station.uuid, lat: p.lat, lon: p.lon, name: netNow.station.name, sub: p.precise ? country : `${country} · ${t.netApproxPlace}`, flag: netNow.station.flag, playing };
+  }, [netNow?.station.uuid, netNow?.place?.lat, netNow?.place?.lon, netNow?.state.state, netCountryName, t]);
   const siteName = filters.site === null ? null : sites.find((s) => s.id === filters.site)?.name ?? null;
   const scanSel = filters.scan === null ? null : scan.scans.find((s) => s.id === filters.scan) ?? null;
   const scanName = scanSel && `${names.dialBand(bandOf(scanSel))} · ${fmtStamp(t, scanSel.started)}`;
