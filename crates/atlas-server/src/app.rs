@@ -4,7 +4,7 @@
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use atlas_core::api::{
     ApiError, AudioDiagnostics, AudioSettings, Call, ErrorKind, Info, Qth, RigSettings, UpdatePrefs,
@@ -413,8 +413,21 @@ impl Atlas {
         Ok(())
     }
 
-    /// Run one UI call, from the desktop app or a browser (WebSocket).
+    /// Run one UI call, from the desktop app or a browser (WebSocket). `RUST_LOG=atlas::timing=debug`
+    /// logs how long each took.
     pub async fn call(&self, call: Call) -> Result<Value, ApiError> {
+        if !tracing::enabled!(target: "atlas::timing", tracing::Level::DEBUG) {
+            return self.dispatch(call).await;
+        }
+        let cmd = serde_json::to_value(&call).ok().and_then(|v| v["cmd"].as_str().map(str::to_owned));
+        let t = Instant::now();
+        let r = self.dispatch(call).await;
+        let ms = t.elapsed().as_secs_f64() * 1e3;
+        tracing::debug!(target: "atlas::timing", cmd = cmd.as_deref().unwrap_or("?"), ms, ok = r.is_ok());
+        r
+    }
+
+    async fn dispatch(&self, call: Call) -> Result<Value, ApiError> {
         let now = now_secs();
         let json = |v: Result<Value, serde_json::Error>| v.map_err(|e| ApiError::internal(e.to_string()));
         match call {
@@ -433,26 +446,29 @@ impl Atlas {
                 let c = self.stations.get().lookup(freq_hz, now, self.qth().pos(), LOOKUP_TOLERANCE_HZ);
                 json(serde_json::to_value(c))
             }
-            Call::Search(q) => {
-                let cat = self.stations.get();
-                let (logbook, signals, favorites) =
-                    (self.scan.logbook_for(&cat), self.scan.signals(), self.favorites.list());
-                let scan = q.scan.as_deref().and_then(|id| self.scan.summary(id));
-                // only the Listened lens needs the history
-                let listened = if q.lens == Lens::Listened {
-                    self.listening.with(now, |l, open| listened_ids(l.iter().chain(open), &cat))
-                } else {
-                    Default::default()
-                };
-                let known = Known {
-                    logbook: &logbook,
-                    signals: &signals,
-                    favorites: &favorites,
-                    listened: &listened,
-                    scan: scan.as_ref(),
-                };
-                json(serde_json::to_value(lens::search(&cat, &q, now, &known)))
-            }
+            Call::Search(q) => json(
+                self.cpu(move |a| {
+                    let cat = a.stations.get();
+                    let (logbook, signals, favorites) =
+                        (a.scan.logbook_for(&cat), a.scan.signals(), a.favorites.list());
+                    let scan = q.scan.as_deref().and_then(|id| a.scan.summary(id));
+                    // only the Listened lens needs the history
+                    let listened = if q.lens == Lens::Listened {
+                        a.listening.with(now, |l, open| listened_ids(l.iter().chain(open), &cat))
+                    } else {
+                        Default::default()
+                    };
+                    let known = Known {
+                        logbook: &logbook,
+                        signals: &signals,
+                        favorites: &favorites,
+                        listened: &listened,
+                        scan: scan.as_ref(),
+                    };
+                    serde_json::to_value(lens::search(&cat, &q, now, &known))
+                })
+                .await?,
+            ),
             Call::Overview => json(serde_json::to_value(self.stations.get().overview(now))),
             Call::StationsMeta => json(serde_json::to_value(self.stations.get().meta(now))),
             Call::SetQth(q) => {
@@ -541,27 +557,43 @@ impl Atlas {
             Call::ImportUserStations { json: text, replace } => {
                 json(serde_json::to_value(self.mine(move |s| s.import(&text, replace, now)).await?))
             }
-            Call::Stats(q) => {
-                let cat = self.stations.get();
-                json(serde_json::to_value(self.listening.with(now, |l, open| stats(l, open, &q, now, &cat))))
+            Call::Stats(q) => json(
+                self.cpu(move |a| {
+                    let cat = a.stations.get();
+                    serde_json::to_value(a.listening.with(now, |l, open| stats(l, open, &q, now, &cat)))
+                })
+                .await?,
+            ),
+            Call::Listening => {
+                json(self.cpu(move |a| serde_json::to_value(a.listening_now(&a.stations.get(), now))).await?)
             }
-            Call::Listening => json(serde_json::to_value(self.listening_now(&self.stations.get(), now))),
             Call::Hunt => {
-                let cat = self.stations.get();
-                let (logbook, coverage, qth) =
-                    (self.scan.logbook_for(&cat), self.rig.coverage().await, self.qth().pos());
-                json(serde_json::to_value(self.listening.with(now, |l, open| {
-                    let all: Vec<_> = l.iter().chain(open).collect();
-                    hunt(&cat, &all, &logbook, now, qth, &coverage)
-                })))
+                let coverage = self.rig.coverage().await;
+                json(
+                    self.cpu(move |a| {
+                        let cat = a.stations.get();
+                        let (logbook, qth) = (a.scan.logbook_for(&cat), a.qth().pos());
+                        serde_json::to_value(a.listening.with(now, |l, open| {
+                            let all: Vec<_> = l.iter().chain(open).collect();
+                            hunt(&cat, &all, &logbook, now, qth, &coverage)
+                        }))
+                    })
+                    .await?,
+                )
             }
-            Call::StationTrend(key) => {
-                let cat = self.stations.get();
-                json(serde_json::to_value(self.listening.with(now, |l, _| trend_for(l, &cat, &key, now))))
-            }
-            Call::ListenedFreqs => {
-                json(serde_json::to_value(self.listening.with(now, |l, open| freq_heat(l.iter().chain(open)))))
-            }
+            Call::StationTrend(key) => json(
+                self.cpu(move |a| {
+                    let cat = a.stations.get();
+                    serde_json::to_value(a.listening.with(now, |l, _| trend_for(l, &cat, &key, now)))
+                })
+                .await?,
+            ),
+            Call::ListenedFreqs => json(
+                self.cpu(move |a| {
+                    serde_json::to_value(a.listening.with(now, |l, open| freq_heat(l.iter().chain(open))))
+                })
+                .await?,
+            ),
             Call::HearingStation(key) => {
                 let cat = self.stations.get();
                 self.listening.hint(key, &Ctx { cat: &cat, qth: self.qth().pos() }, now);
@@ -613,6 +645,13 @@ impl Atlas {
                 json(serde_json::to_value(self.net_listening.with(|l, open| net_stats(l, open, &q, now))))
             }
         }
+    }
+
+    /// Run a pass over the catalog or the listening history on the blocking pool: over a long
+    /// history it takes tens of ms, which the async threads owe the WebSocket, the rig and the audio.
+    async fn cpu<T: Send + 'static>(&self, f: impl FnOnce(&Atlas) -> T + Send + 'static) -> Result<T, ApiError> {
+        let me = self.me.upgrade().ok_or_else(|| ApiError::internal("shutting down"))?;
+        tokio::task::spawn_blocking(move || f(&me)).await.map_err(|e| ApiError::internal(e.to_string()))
     }
 
     /// Change the listener's stations off the async threads: it builds the catalog again.
