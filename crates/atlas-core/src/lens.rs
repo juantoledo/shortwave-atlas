@@ -1,7 +1,8 @@
 //! The station list's lenses: the whole schedule, what the band scans heard, or the favorites,
 //! optionally narrowed to one saved scan. A lens keeps catalog rows by station id, and adds the
 //! rows the schedule has none for: signals no station explained and favorites off the schedule.
-//! Heard is one list of both, across bands, in the order asked for.
+//! Heard is one list of both, across bands, in the order asked for. Favorites is every favorite,
+//! one row each, whatever the filters but the text.
 
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
@@ -10,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::eibi::names::band_of;
-use crate::favorites::{resolve, Favorite};
+use crate::favorites::{off_schedule, Favorite};
 use crate::rig::Mode;
 use crate::scan::{scan_marks, unidentified, Logged, ScanSummary, Signal, StationRef};
 use crate::stations::{page_limit, Catalog, Lens, Sort, StationPage, StationQuery, StationRow, LOOKUP_TOLERANCE_HZ};
@@ -61,6 +62,26 @@ impl HeardRow {
     }
 }
 
+/// A row of the Favorites lens: one per favorite, so two of one station are two rows.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+#[ts(export)]
+pub enum FavoriteRow {
+    /// A favorite whose station the schedule has; `row` is that station now.
+    Station { row: Box<StationRow>, favorite: Favorite },
+    /// Saved without a station, or with one the schedule no longer has.
+    Off { row: OffSchedule },
+}
+
+impl FavoriteRow {
+    fn freq_hz(&self) -> u32 {
+        match self {
+            Self::Station { favorite, .. } => favorite.freq_hz,
+            Self::Off { row } => row.freq_hz,
+        }
+    }
+}
+
 /// What the lenses draw on besides the catalog.
 pub struct Known<'a> {
     /// The stations the scans logged.
@@ -81,13 +102,16 @@ fn near(a: u32, b: u32) -> bool {
 /// The station list for `q`: catalog rows the lens and scan filter keep, and the rows off the
 /// schedule that pass the filters; for Heard (without a scan filter), both in one list.
 pub fn search(cat: &Catalog, q: &StationQuery, unix: i64, k: &Known) -> StationPage {
-    let favs = resolve(k.favorites, cat);
+    if q.lens == Lens::Favorites {
+        return favorites(cat, q, unix, k);
+    }
+    let off_favs = off_schedule(k.favorites, cat);
     let marks = k.scan.map(|s| scan_marks(cat, s));
     let logged: HashSet<u32> = k.logbook.iter().map(|l| l.station_id).collect();
     let lens: Option<HashSet<u32>> = match q.lens {
-        Lens::All => None,
+        // Favorites returned above
+        Lens::All | Lens::Favorites => None,
         Lens::Heard => Some(logged),
-        Lens::Favorites => Some(favs.by_station.keys().copied().collect()),
         Lens::Listened => Some(k.listened.clone()),
     };
     let only = match (lens, &marks) {
@@ -106,7 +130,7 @@ pub fn search(cat: &Catalog, q: &StationQuery, unix: i64, k: &Known) -> StationP
     if q.scan.is_some() && k.scan.is_none() {
         return page;
     }
-    let fav_at = |hz: u32| favs.off.iter().find(|f| near(f.freq_hz, hz));
+    let fav_at = |hz: u32| off_favs.iter().find(|f| near(f.freq_hz, hz));
     let from_signal = |s: &Signal| {
         let f = fav_at(s.freq_hz);
         OffSchedule {
@@ -117,14 +141,6 @@ pub fn search(cat: &Catalog, q: &StationQuery, unix: i64, k: &Known) -> StationP
             station: f.and_then(|f| f.station.clone()),
             heard: Some(s.clone()),
         }
-    };
-    let from_fav = |f: &Favorite| OffSchedule {
-        freq_hz: f.freq_hz,
-        mode: Some(f.mode),
-        label: f.label.clone(),
-        favorite: Some(f.id.clone()),
-        station: f.station.clone(),
-        heard: k.signals.iter().find(|s| near(s.freq_hz, f.freq_hz)).cloned(),
     };
     if heard_list {
         let logs: HashMap<u32, &Logged> = k.logbook.iter().map(|l| (l.station_id, l)).collect();
@@ -143,15 +159,9 @@ pub fn search(cat: &Catalog, q: &StationQuery, unix: i64, k: &Known) -> StationP
         page.heard = rows.into_iter().skip(q.offset as usize).take(page_limit(q) as usize).collect();
         return page;
     }
-    let rows: Vec<OffSchedule> = match (k.scan, q.lens) {
-        (Some(s), lens) => unidentified([s])
-            .iter()
-            .map(from_signal)
-            .filter(|r| lens != Lens::Favorites || r.favorite.is_some())
-            .collect(),
-        (None, Lens::Favorites) => favs.off.iter().map(|f| from_fav(f)).collect(),
-        // Heard returned above
-        (None, Lens::All | Lens::Heard | Lens::Listened) => vec![],
+    let rows: Vec<OffSchedule> = match k.scan {
+        Some(s) => unidentified([s]).iter().map(from_signal).collect(),
+        None => vec![],
     };
     page.off_schedule = filter_off(rows, q);
     page
@@ -168,21 +178,83 @@ fn filter_off(mut rows: Vec<OffSchedule>, q: &StationQuery) -> Vec<OffSchedule> 
     {
         return vec![];
     }
-    let text = fold(q.q.trim());
-    let terms: Vec<&str> = text.split_whitespace().collect();
-    let khz_prefix = !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit() || b == b'.');
+    let text = text_filter(&q.q);
     rows.retain(|r| {
         let band_ok = q.bands.is_empty() || q.bands.iter().any(|b| b == band_of(r.freq_hz));
-        let text_ok = if khz_prefix {
-            format!("{}", r.freq_hz as f64 / 1000.0).starts_with(&text)
-        } else {
-            let hay = fold(&format!("{} {}", r.label, r.station.as_ref().map_or("", |s| s.name.as_str())));
-            terms.iter().all(|t| hay.contains(t))
-        };
-        band_ok && text_ok
+        band_ok && text(r.freq_hz, &saved_text(&r.label, r.station.as_ref()))
     });
     rows.sort_by_key(|r| r.freq_hz);
     rows
+}
+
+/// The Favorites lens: every favorite, one row each, by frequency. Only the text narrows it; the
+/// other filters (band, language, country, region, source, site, scan) are about the schedule.
+fn favorites(cat: &Catalog, q: &StationQuery, unix: i64, k: &Known) -> StationPage {
+    let found: Vec<Option<u32>> =
+        k.favorites.iter().map(|f| f.station.as_ref().and_then(|s| s.find(cat)).map(|st| st.id)).collect();
+    let ids: HashSet<u32> = found.iter().flatten().copied().collect();
+    let all = StationQuery { lens: Lens::Favorites, ..Default::default() };
+    let mut page = cat.matching(&StationQuery { facets: q.facets, ..all.clone() }, unix, Some(&ids));
+    let stations: HashMap<u32, StationRow> = std::mem::take(&mut page.items).into_iter().map(|r| (r.id, r)).collect();
+    // the stations the query names by what the schedule says of them (country, language, target)
+    let named: HashSet<u32> = if q.q.trim().is_empty() {
+        ids
+    } else {
+        cat.matching(&StationQuery { q: q.q.clone(), ..all }, unix, Some(&ids)).items.iter().map(|r| r.id).collect()
+    };
+    let text = text_filter(&q.q);
+    let mut rows: Vec<(FavoriteRow, i64)> = k
+        .favorites
+        .iter()
+        .zip(found)
+        .filter(|(f, id)| {
+            text(f.freq_hz, &saved_text(&f.label, f.station.as_ref())) || id.is_some_and(|id| named.contains(&id))
+        })
+        .map(|(f, id)| {
+            let row = match id.and_then(|id| stations.get(&id)) {
+                Some(row) => FavoriteRow::Station { row: Box::new(row.clone()), favorite: f.clone() },
+                None => FavoriteRow::Off { row: off_favorite(f, k.signals) },
+            };
+            (row, f.added)
+        })
+        .collect();
+    rows.sort_by_key(|(r, added)| (r.freq_hz(), *added));
+    page.total = rows.len() as u32;
+    page.on_air = rows.iter().filter(|(r, _)| matches!(r, FavoriteRow::Station { row, .. } if row.on)).count() as u32;
+    page.favorites = rows.into_iter().map(|(r, _)| r).skip(q.offset as usize).take(page_limit(q) as usize).collect();
+    page
+}
+
+/// A favorite the schedule has no row for, with the unidentified signal heard there, if any.
+fn off_favorite(f: &Favorite, signals: &[Signal]) -> OffSchedule {
+    OffSchedule {
+        freq_hz: f.freq_hz,
+        mode: Some(f.mode),
+        label: f.label.clone(),
+        favorite: Some(f.id.clone()),
+        station: f.station.clone(),
+        heard: signals.iter().find(|s| near(s.freq_hz, f.freq_hz)).cloned(),
+    }
+}
+
+/// What the text filter reads of a row without a catalog row: its label and saved station name.
+fn saved_text(label: &str, station: Option<&StationRef>) -> String {
+    format!("{label} {}", station.map_or("", |s| s.name.as_str()))
+}
+
+/// The text filter on rows without a catalog row: digits are a kHz prefix of the frequency,
+/// otherwise every word must be in the row's text.
+fn text_filter(q: &str) -> impl Fn(u32, &str) -> bool {
+    let text = fold(q.trim());
+    let khz_prefix = !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit() || b == b'.');
+    move |freq_hz, hay| {
+        if khz_prefix {
+            format!("{}", freq_hz as f64 / 1000.0).starts_with(&text)
+        } else {
+            let hay = fold(hay);
+            text.split_whitespace().all(|t| hay.contains(t))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -347,18 +419,100 @@ mod tests {
         assert!(langs.heard.iter().all(|r| matches!(r, HeardRow::Station { .. })));
     }
 
+    /// The Favorites list as (kHz, a station row?, label).
+    fn favs(p: &StationPage) -> Vec<(u32, bool, &str)> {
+        p.favorites
+            .iter()
+            .map(|r| match r {
+                FavoriteRow::Station { favorite, .. } => (favorite.freq_hz / 1000, true, favorite.label.as_str()),
+                FavoriteRow::Off { row } => (row.freq_hz / 1000, false, row.label.as_str()),
+            })
+            .collect()
+    }
+
     #[test]
-    fn favorites_are_rows_and_the_rest_off_the_schedule() {
+    fn favorites_are_one_list_by_frequency() {
         let w = World::new();
+        let (a, c) = (w.cat.station(0).unwrap(), w.cat.station(5).unwrap());
         let p = w.search(&StationQuery { lens: Lens::Favorites, ..Default::default() });
-        assert_eq!(ids(&p), [0, 5]);
-        assert_eq!(off(&p), [(6200, "Mystery carrier", true, true), (14230, "SSTV", true, false)]);
-        // filters: a kHz prefix, the label, a band; any schedule-only filter drops them
+        assert!(p.items.is_empty() && p.off_schedule.is_empty());
+        let mut want = vec![
+            (a.freq_hz / 1000, true, a.name.as_str()),
+            (c.freq_hz / 1000, true, c.name.as_str()),
+            (6200, false, "Mystery carrier"),
+            (14230, false, "SSTV"),
+        ];
+        want.sort_by_key(|r| r.0);
+        assert_eq!((p.total, favs(&p)), (4, want.clone()));
+        match p.favorites.iter().find(|r| matches!(r, FavoriteRow::Off { .. })) {
+            Some(FavoriteRow::Off { row }) => assert!(row.favorite.is_some()),
+            other => panic!("{other:?}"),
+        }
+        // the signal heard at the favorite's frequency goes with it
+        let mystery = p.favorites.iter().find_map(|r| match r {
+            FavoriteRow::Off { row } if row.freq_hz == 6_200_000 => Some(row),
+            _ => None,
+        });
+        assert_eq!(mystery.and_then(|r| r.heard.as_ref()).map(|h| h.best_db), Some(-10));
+
+        // pages
+        let p = w.search(&StationQuery { lens: Lens::Favorites, offset: 1, limit: 2, ..Default::default() });
+        assert_eq!((p.total, favs(&p)), (4, want[1..3].to_vec()));
+    }
+
+    #[test]
+    fn favorites_ignore_every_filter_but_the_text() {
+        let w = World::new();
         let q = |f: StationQuery| w.search(&StationQuery { lens: Lens::Favorites, ..f });
-        assert_eq!(off(&q(StationQuery { q: "142".into(), ..Default::default() })).len(), 1);
-        assert_eq!(off(&q(StationQuery { q: "mystery".into(), ..Default::default() }))[0].0, 6200);
-        assert_eq!(off(&q(StationQuery { bands: vec!["49m".into()], ..Default::default() }))[0].0, 6200);
-        assert!(q(StationQuery { langs: vec!["E".into()], ..Default::default() }).off_schedule.is_empty());
+        let every = StationQuery {
+            bands: vec!["13m".into()],
+            langs: vec!["E".into()],
+            countries: vec!["XYZ".into()],
+            regions: vec![crate::country::Region::Oc],
+            sources: vec!["mine".into()],
+            site: Some(u32::MAX),
+            ..Default::default()
+        };
+        assert_eq!(q(every).total, 4);
+        assert_eq!(q(StationQuery { scan: Some("s2".into()), ..Default::default() }).total, 4);
+        assert_eq!(q(StationQuery { scan: Some("gone".into()), ..Default::default() }).total, 4);
+        // the text: a kHz prefix, a label, a station's name
+        assert_eq!(favs(&q(StationQuery { q: "142".into(), ..Default::default() })), [(14230, false, "SSTV")]);
+        assert_eq!(
+            favs(&q(StationQuery { q: "CARRIER".into(), ..Default::default() })),
+            [(6200, false, "Mystery carrier")]
+        );
+        let a = w.cat.station(0).unwrap();
+        let named = q(StationQuery { q: a.name.clone(), ..Default::default() });
+        assert!(favs(&named).contains(&(a.freq_hz / 1000, true, a.name.as_str())));
+        assert!(q(StationQuery { q: "nothing like it".into(), ..Default::default() }).favorites.is_empty());
+    }
+
+    #[test]
+    fn two_favorites_of_one_station_are_two_rows() {
+        let mut w = World::new();
+        let a = w.cat.station(0).unwrap();
+        let req = FavoriteRequest {
+            freq_hz: a.freq_hz,
+            mode: Mode::USB,
+            label: Some("Evening".into()),
+            station: Some(a.station_key()),
+        };
+        add(&mut w.favorites, &req, &w.cat, 2).unwrap();
+        let p = w.search(&StationQuery { lens: Lens::Favorites, ..Default::default() });
+        let of_a: Vec<(&str, Mode, u32)> = p
+            .favorites
+            .iter()
+            .filter_map(|r| match r {
+                FavoriteRow::Station { row, favorite } if row.id == a.id => {
+                    Some((favorite.id.as_str(), favorite.mode, row.id))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(of_a.len(), 2);
+        assert_ne!(of_a[0].0, of_a[1].0);
+        assert_eq!((of_a[0].1, of_a[1].1), (Mode::AM, Mode::USB), "by frequency, then when added");
     }
 
     #[test]
@@ -370,10 +524,10 @@ mod tests {
         assert_eq!(p.scan_db.iter().map(|(&k, &v)| (k, v)).collect::<Vec<_>>(), [(0, -12)], "3 was missed");
         assert_eq!(off(&p), [(5905, "", false, true)]);
         // with a lens: the intersection
-        let p = w.search(&StationQuery { scan: s1.clone(), lens: Lens::Favorites, ..Default::default() });
-        assert_eq!(ids(&p), [0]);
-        assert!(p.off_schedule.is_empty());
-        let p = w.search(&StationQuery { scan: Some("s2".into()), lens: Lens::Favorites, ..Default::default() });
+        let p = w.search(&StationQuery { scan: s1.clone(), lens: Lens::Listened, ..Default::default() });
+        assert_eq!((ids(&p), off(&p)), (vec![3], vec![(5905, "", false, true)]));
+        // the favorite heard by s2 marks its signal
+        let p = w.search(&StationQuery { scan: Some("s2".into()), ..Default::default() });
         assert_eq!(off(&p), [(6200, "Mystery carrier", true, true)]);
         // a deleted scan keeps nothing
         let p = w.search(&StationQuery { scan: Some("gone".into()), ..Default::default() });

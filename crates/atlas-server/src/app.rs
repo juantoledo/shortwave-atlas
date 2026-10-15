@@ -858,11 +858,19 @@ pub(crate) mod tests {
         let fav_id = fav["id"].as_str().unwrap().to_string();
         atlas.call(Call::RenameFavorite { id: fav_id.clone(), label: "Mine".into() }).await.unwrap();
 
-        // the favorites lens: the station's row, and the free frequency off the schedule
-        let favs = StationQuery { lens: Lens::Favorites, ..Default::default() };
+        // the favorites lens: the station's row, and the free frequency off the schedule, whatever
+        // the other filters say
+        let favs = StationQuery { lens: Lens::Favorites, bands: vec!["13m".into()], ..Default::default() };
         let page = atlas.call(Call::Search(favs.clone())).await.unwrap();
-        assert_eq!((page["total"].as_u64(), page["items"][0]["id"].as_u64()), (Some(1), Some(u64::from(id))));
-        assert_eq!(page["off_schedule"][0]["label"], "SSTV");
+        let rows = page["favorites"].as_array().unwrap();
+        assert_eq!(page["total"].as_u64(), Some(2));
+        let station = rows.iter().find(|r| r["kind"] == "station").unwrap();
+        assert_eq!(
+            (station["row"]["id"].as_u64(), station["favorite"]["label"].as_str()),
+            (Some(u64::from(id)), Some("Mine"))
+        );
+        let off = rows.iter().find(|r| r["kind"] == "off").unwrap();
+        assert_eq!(off["row"]["label"], "SSTV");
         // nothing heard yet: the Heard list is empty, in any order
         let q = StationQuery { lens: Lens::Heard, sort: Sort::Strongest, ..Default::default() };
         let heard = atlas.call(Call::Search(q)).await.unwrap();
@@ -882,7 +890,7 @@ pub(crate) mod tests {
         let e = again.call(Call::DeleteFavorite { id: "nope".into() }).await.unwrap_err();
         assert_eq!(e.kind, ErrorKind::Invalid);
         let page = again.call(Call::Search(favs)).await.unwrap();
-        assert!(page["off_schedule"].as_array().unwrap().is_empty());
+        assert!(page["favorites"].as_array().unwrap().iter().all(|r| r["kind"] == "station"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -940,14 +948,14 @@ pub(crate) mod tests {
         assert_eq!(favs[0]["station_id"], v["station_id"]);
         let page =
             atlas.call(Call::Search(StationQuery { lens: Lens::Favorites, ..Default::default() })).await.unwrap();
-        assert_eq!(page["items"][0]["name"], "Radio Local AM");
+        assert_eq!(page["favorites"][0]["row"]["name"], "Radio Local AM");
 
         // export, then into a fresh instance; deleting leaves the favorite off the schedule
         let exported = atlas.call(Call::ExportUserStations).await.unwrap();
         atlas.call(Call::DeleteUserStation { id: id.clone() }).await.unwrap();
         let page =
             atlas.call(Call::Search(StationQuery { lens: Lens::Favorites, ..Default::default() })).await.unwrap();
-        assert_eq!((page["total"].as_u64(), page["off_schedule"].as_array().unwrap().len()), (Some(0), 1));
+        assert_eq!((page["total"].as_u64(), page["favorites"][0]["kind"].as_str()), (Some(1), Some("off")));
         assert_eq!(atlas.call(Call::DeleteUserStation { id }).await.unwrap_err().kind, ErrorKind::Invalid);
         let fresh = Atlas::start(AppConfig::default(), None, None, no_updates()).unwrap();
         let json = exported.as_str().unwrap().to_string();

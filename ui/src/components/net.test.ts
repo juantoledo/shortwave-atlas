@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { NO_FILTERS, type Filters } from '../hooks/useCore';
 import type { NetNow } from '../types/generated/NetNow';
 import { netRings, route, siteColor, siteRings } from './stage/fx';
-import { audioCell, bufferSegs, canListen, dimSites, favFilter, isNet, lensFilters, leaveNet, NET_BAND, NET_DOT_ID, netCountryOpts, netQuery, netSiteDots, playingUuid, stepChannel, streamLabel } from './net';
+import { audioCell, bufferSegs, canListen, dimSites, favFilter, isNet, lensFilters, leaveNet, mixesNet, NET_BAND, NET_DOT_ID, netCountryOpts, netQuery, netSiteDots, playingUuid, stepChannel, streamLabel } from './net';
 
 const radio: Filters = { ...NO_FILTERS, q: 'radio', langs: ['S'], regions: ['am'], countries: ['ARG'], sources: ['eibi'], site: 7, scan: 's1', lens: 'all' };
 const onNet: Filters = { ...radio, bands: [NET_BAND] };
@@ -33,6 +33,19 @@ describe('NET band', () => {
     expect(lensFilters(radio, 'favorites')).toEqual({ ...radio, lens: 'favorites' });
     expect(lensFilters(onNet, 'heard').bands).toEqual([]);
     expect(lensFilters(radio, 'listened')).toEqual({ ...radio, lens: 'listened' });
+  });
+
+  it('mixes internet stations into a radio search of words, unfiltered by the schedule', () => {
+    const words: Filters = { ...NO_FILTERS, q: ' bbc ', countries: ['G'] };
+    expect(mixesNet(words)).toBe(true);
+    expect(mixesNet(NO_FILTERS)).toBe(false);
+    expect(mixesNet({ ...words, q: '9410' })).toBe(false);
+    expect(mixesNet({ ...words, lens: 'favorites' })).toBe(false);
+    expect(mixesNet({ ...words, bands: ['31m'] })).toBe(false);
+    expect(mixesNet({ ...words, langs: ['E'] })).toBe(false);
+    expect(mixesNet({ ...words, sources: ['mine'] })).toBe(false);
+    expect(mixesNet({ ...words, site: 3 })).toBe(false);
+    expect(mixesNet({ ...words, scan: 's1' })).toBe(false);
   });
 
   it('words the stream', () => {

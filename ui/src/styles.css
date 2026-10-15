@@ -733,13 +733,22 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 .chip.scan-filter { color: var(--band-ham-text); border-color: rgba(79, 200, 164, 0.45); }
 .dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #5b6c7f; }
 .dot.on { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 8px rgba(255, 179, 63, 0.7); }
+/* an internet station: always on the air, in the NET pink; the tuned one glows */
+.dot.net { background: var(--net); border-color: var(--net); }
+.net-row[aria-current="true"] .dot.net { box-shadow: 0 0 8px rgba(255, 122, 196, 0.7); }
+/* what kind of row: a mast for the dial, a globe for internet radio */
+.kind-ic { width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linecap: round; opacity: 0.55; }
+.net-row .kind-ic { color: var(--net); opacity: 1; }
+.fav-note { color: var(--amber); }
+.fav-nofilters { margin: 0 0 6px; }
 .btn.more { width: 100%; margin: 10px 0 4px; }
 /* the NET band: internet stations, not on the rig's dial; a click opens their details */
-.net-row { grid-template-columns: 60px minmax(0, 1fr) auto; }
+.net-row { grid-template-columns: 60px minmax(0, 1fr) auto 12px; }
 .net-rf { justify-self: start; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 4px; font: 500 10.5px var(--font-mono); letter-spacing: 0.12em; color: var(--dim); }
 .net-row.dead .rn { opacity: 0.6; }
 .net-row[aria-expanded="true"] { background: rgba(140, 185, 230, 0.06); }
 .net-more { padding: 0 6px 10px 78px; }
+.link.net-all { display: block; margin: 2px 6px 10px 78px; color: var(--net-text); }
 .net-more p { margin: 4px 0 0; font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
 .net-foot { margin: 12px 0 6px; }
 .rn b .net-on { margin-left: 6px; font-size: 12px; color: var(--amber); }

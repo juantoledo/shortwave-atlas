@@ -13,7 +13,7 @@ use crate::country::{country, Region, COUNTRIES};
 use crate::eibi::names::{band_of, bands, lang_name, target, target_region, Band, LANGS, TARGETS};
 use crate::eibi::{Parsed, SiteKey, SiteRec};
 use crate::geo::{dist_bearing, sun_at, LatLon, Route, SunAt};
-use crate::lens::{HeardRow, OffSchedule};
+use crate::lens::{FavoriteRow, HeardRow, OffSchedule};
 use crate::rig::Mode;
 use crate::schedule::{air_status_at, any_on, slot_on, today_parts, AirStatus, Slot, Window};
 use crate::source::{
@@ -172,6 +172,7 @@ pub struct StationQuery {
     /// Source ids (`eibi`).
     pub sources: Vec<String>,
     pub site: Option<u32>,
+    /// `Favorites` lists every favorite: of the filters only `q` applies to it.
     pub lens: Lens,
     /// Only the stations this saved scan heard or missed.
     pub scan: Option<String>,
@@ -212,6 +213,9 @@ pub struct StationPage {
     /// The Heard lens instead of `items` and `off_schedule`: logged stations and unidentified
     /// signals in one list, in `StationQuery::sort` order, paged (`total` counts both).
     pub heard: Vec<HeardRow>,
+    /// The Favorites lens instead of `items` and `off_schedule`: one row per favorite, by
+    /// frequency, paged (`total` counts them).
+    pub favorites: Vec<FavoriteRow>,
 }
 
 /// A transmitter site on the globe.
@@ -762,6 +766,7 @@ impl Catalog {
             scan_db: BTreeMap::new(),
             off_schedule: vec![],
             heard: vec![],
+            favorites: vec![],
         }
     }
 

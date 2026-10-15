@@ -31,7 +31,11 @@ regions: Array<Region>,
 /**
  * Source ids (`eibi`).
  */
-sources: Array<string>, site: number | null, lens: Lens, 
+sources: Array<string>, site: number | null, 
+/**
+ * `Favorites` lists every favorite: of the filters only `q` applies to it.
+ */
+lens: Lens, 
 /**
  * Only the stations this saved scan heard or missed.
  */

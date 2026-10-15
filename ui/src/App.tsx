@@ -40,7 +40,7 @@ import { useNetFavorites } from './hooks/useNetFavorites';
 import { NetDossier } from './components/NetDossier';
 import type { NetFace } from './components/Tuner';
 import type { NetPin } from './components/stage/useStage';
-import { audioCell, dimSites, isNet, leaveNet, NET_BAND, NET_DOT_ID, NET_RATE, netCountryOpts, netSiteDots, stepChannel, streamLabel } from './components/net';
+import { audioCell, dimSites, favFilter, isNet, leaveNet, mixesNet, NET_BAND, NET_DOT_ID, NET_RATE, netCountryOpts, netSiteDots, stepChannel, streamLabel } from './components/net';
 import { useNetNow } from './hooks/useNetNow';
 import { fmtKhz, fmtStamp, I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
@@ -148,9 +148,12 @@ export function App() {
   // the NET band (internet stations) has its own search; the schedule's doesn't run meanwhile
   const netEnabled = info?.net ?? false;
   const netActive = isNet(filters, netEnabled);
-  const search = useStationSearch(netActive ? null : api, filters, lensKey);
-  // the NET band's Favorites lens lists the favorites kept: no directory search then
-  const netSearch = useNetSearch(api, filters, netActive && filters.lens !== 'favorites');
+  // Favorites lists every favorite on any band, NET included
+  const search = useStationSearch(netActive && filters.lens !== 'favorites' ? null : api, filters, lensKey);
+  // the directory: the NET band's list (its Favorites lens lists the favorites kept instead), or
+  // the internet stations shown among a radio search's results
+  const netMixed = netEnabled && !netActive && mixesNet(filters);
+  const netSearch = useNetSearch(api, filters, (netActive && filters.lens !== 'favorites') || netMixed);
   const netCountries = useNetCountries(api, netActive || netEnabled);
   const netOverview = useNetOverview(api, netActive);
   const { netNow, setNetNow } = useNetNow(api, netEnabled);
@@ -372,10 +375,10 @@ export function App() {
     if (on && v.station.freq_hz !== freqHz) tuneAs(v.station.freq_hz, v.station.mode);
     return true;
   };
-  // on the NET band, its own favorites; elsewhere the radio ones
+  // every favorite, radio and NET; the band and the other filters stay for the list it goes back to
   const toggleFavorites = () => {
     const to = filters.lens === 'favorites' ? 'all' : 'favorites';
-    setFilters((f) => (netActive ? { ...f, lens: to } : { ...leaveNet(f), lens: to }));
+    setFilters((f) => ({ ...f, lens: to }));
     if (phone && to === 'favorites') setView('browse');
   };
 
@@ -495,10 +498,15 @@ export function App() {
     : '';
   // Heard is what the scans heard: no schedule count there
   const heardList = filters.lens === 'heard' && filters.scan === null;
-  const counting = search.loading && !search.rows.length && !search.heard.length;
+  const favList = filters.lens === 'favorites';
+  const counting = search.loading && !search.rows.length && !search.heard.length && !search.favorites.length;
   const netCount = netSearch.loading && !netSearch.items.length ? '…' : t.netCount(netSearch.items.length, netSearch.more);
-  const count = netActive ? netCount : counting ? '…' : heardList ? t.heardCount(search.total) : t.resultCount(search.total, search.onAir);
-  const shortCount = netActive ? `${netSearch.items.length}${netSearch.more ? '+' : ''}` : counting ? '' : search.total.toLocaleString(t.locale);
+  // Favorites counts both kinds the text keeps: radio and NET
+  const favTotal = search.total + (netEnabled ? favFilter(netFavs.list, filters.q).length : 0);
+  const count = favList ? (counting ? '…' : t.favCount(favTotal))
+    : netActive ? netCount : counting ? '…' : heardList ? t.heardCount(search.total) : t.resultCount(search.total, search.onAir);
+  const shortCount = favList ? (counting ? '' : favTotal.toLocaleString(t.locale))
+    : netActive ? `${netSearch.items.length}${netSearch.more ? '+' : ''}` : counting ? '' : search.total.toLocaleString(t.locale);
 
   return (
     <I18nProvider value={t}>
@@ -576,6 +584,7 @@ export function App() {
             favs={favs.byStation}
             off={search.off}
             heard={search.heard}
+            favorites={search.favorites}
             scanDb={search.scanDb}
             onPick={pick}
             onPickOff={pickOff}
@@ -586,6 +595,7 @@ export function App() {
             net={{
               enabled: netEnabled,
               active: netActive,
+              mixed: netMixed,
               search: netSearch,
               countries: netCountries,
               tuned: netTuned,

@@ -33,8 +33,21 @@ export function netQuery(f: Filters, offset: number, limit: number): NetQuery {
   return { q: f.q.trim(), country: f.countries[0] ?? null, offset, limit };
 }
 
-/** Filters a lens tab sets: All and Favorites keep NET (it has favorites of its own); Heard and
- *  Listened are about the schedule and leave it. */
+/** The radio list's search also asks the internet directory: words typed on the All lens, with no
+ *  filter NET can't follow (a band, language, region, source, transmitter site or scan). A kHz
+ *  query is about the dial. The country applies to both. */
+export function mixesNet(f: Filters): boolean {
+  const q = f.q.trim();
+  return f.lens === 'all' && q !== '' && !/^[\d.]+$/.test(q)
+    && !f.bands.length && !f.langs.length && !f.regions.length && !f.sources.length
+    && f.site === null && f.scan === null;
+}
+
+/** Internet stations shown among the radio search's results; the rest are on the NET band. */
+export const NET_MIX = 5;
+
+/** Filters a lens tab sets: All and Favorites keep NET (Favorites lists both kinds on any band, and
+ *  All goes back to the band it was on); Heard and Listened are about the schedule and leave it. */
 export function lensFilters(f: Filters, lens: Filters['lens']): Filters {
   return lens === 'all' || lens === 'favorites' ? { ...f, lens } : { ...leaveNet(f), lens };
 }
