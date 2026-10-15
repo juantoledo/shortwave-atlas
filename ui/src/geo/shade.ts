@@ -44,3 +44,23 @@ export function nightLayer(night: number, twilight: number, dusk: boolean): { rg
   const rgb = [0, 1, 2].map((i) => (NIGHT_RGB[i] * a1 * (1 - a2) + tint[i] * a2) / a) as Vec3;
   return { rgb, a };
 }
+
+/** `shadeAt` then `nightLayer` for the point `x, y, z`, written as pixels at byte `o`: the night
+ *  layer's RGBA into `shade`, how lit it is into `mask`'s alpha. The same arithmetic, in the same
+ *  order, without allocating: the flat map does it for each of its grid's 259 200 cells. */
+export function nightPixel(x: number, y: number, z: number, sun: Vec3, shade: Uint8ClampedArray, mask: Uint8ClampedArray, o: number): void {
+  const cz = x * sun[0] + y * sun[1] + z * sun[2];
+  const night = 1 - smoothstep(NIGHT_EDGES[0], NIGHT_EDGES[1], cz);
+  mask[o + 3] = (1 - smoothstep(LIT_EDGES[0], LIT_EDGES[1], cz)) * 255;
+  const a1 = night * NIGHT_ALPHA, a2 = TWILIGHT * Math.exp(-(cz * cz) / (TWILIGHT_W * TWILIGHT_W));
+  const tint = -y * sun[0] + x * sun[1] < 0 ? DUSK : DAWN;
+  const a = 1 - (1 - a1) * (1 - a2);
+  if (a <= 0) {
+    shade[o] = shade[o + 1] = shade[o + 2] = shade[o + 3] = 0;
+    return;
+  }
+  shade[o] = ((NIGHT_RGB[0] * a1 * (1 - a2) + tint[0] * a2) / a) * 255;
+  shade[o + 1] = ((NIGHT_RGB[1] * a1 * (1 - a2) + tint[1] * a2) / a) * 255;
+  shade[o + 2] = ((NIGHT_RGB[2] * a1 * (1 - a2) + tint[2] * a2) / a) * 255;
+  shade[o + 3] = a * 255;
+}

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, type PointerEvent } from 'reac
 import { angleDeg, clamp, greatCircle, sunVec, type LatLon } from '../geo/geo';
 import { altFor, clampLat, copies, lerpFlat, project, pxPerDeg, unwrap, wrapLon, type FlatView as View } from '../geo/flat';
 import { FlatTexture } from '../geo/flatTexture';
-import { GlobeTexture, makeStars } from '../geo/texture';
+import { GlobeTexture, makeStars, textureWidth } from '../geo/texture';
 import { Controls } from './stage/Controls';
 import { ARC_IN_MS, MAX_ALT, MIN_ALT, REDUCE, ringColor, ringNow, siteColor, siteRadius, siteTip, START_ALT, TOWER_MS, type Arc, type Ring } from './stage/fx';
 import { useStage, type Camera, type Pov, type ViewProps } from './stage/useStage';
@@ -19,8 +19,8 @@ import type { SiteDot } from '../types/generated/SiteDot';
 
 /** How often day and night are painted again (the sun moves a pixel of the map in ~30 s). */
 const SUN_MS = 20_000;
-/** The map's width (the globe's texture). */
-const TEXTURE_WIDTH = 4096;
+/** The map's width (the globe's texture, smaller on phones). */
+const TEXTURE_WIDTH = textureWidth();
 /** The deepest zoom, in px per degree: the map's own pixels at most 3× on screen. */
 const MAX_PPD = (3 * TEXTURE_WIDTH) / 360;
 /** A drag starts this far (px) from where the pointer went down; anything less is a click. */
@@ -30,6 +30,8 @@ const WHEEL_K = 0.0015;
 /** The turn (`SPIN` is 0.45): OrbitControls' 6° a second per unit of speed, westward. */
 const TURN_DEG_PER_S = 6;
 const OCEAN = '#0b1d31';
+/** The canvas's pixels per CSS px at most (as the globe's renderer). */
+const MAX_DPR = 2;
 
 /** A site's dot in px for its radius in degrees at `ppd`: about as large as on the globe, not
  *  vanishing far out nor swelling close in. */
@@ -70,6 +72,11 @@ export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boole
   const tip = useRef<HTMLDivElement>(null);
   const stars = useMemo(() => makeStars(), []);
   const tex = useRef<FlatTexture | null>(null);
+  /** Bumped each time the map is painted again (the sun moved). */
+  const texGen = useRef(0);
+  /** The map as last scaled onto the canvas, and for which view: while the camera rests and only
+   *  rings and arcs move (a station tuned), a frame copies it instead of scaling the map again. */
+  const base = useRef<{ c: HTMLCanvasElement; key: string } | null>(null);
   const cam = useRef<Pov>({ lat: qth.lat, lon: qth.lon, alt: START_ALT });
   const off = useRef(offset);
   off.current = offset;
@@ -139,7 +146,7 @@ export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boole
     const c = canvas.current;
     if (!c) return;
     const sc = scene.current, s = shape.current;
-    const w = s.canvasW, h = s.canvasH, dpr = window.devicePixelRatio || 1;
+    const w = s.canvasW, h = s.canvasH, dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
     const pw = Math.round(w * dpr), ph = Math.round(h * dpr);
     if (c.width !== pw || c.height !== ph) {
       c.width = pw;
@@ -172,14 +179,30 @@ export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boole
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
 
-    // the map, as many copies as cover the canvas
+    // the map, as many copies as cover the canvas: scaled once for this view, then copied
     const mx = v.cx + (-180 - v.lon) * ppd, my = v.cy - (90 - v.lat) * ppd;
-    g.imageSmoothingEnabled = true;
-    g.imageSmoothingQuality = 'high';
-    for (const dx of copies(mx, mx + worldW, worldW, w)) {
-      if (tex.current) g.drawImage(tex.current.canvas, mx + dx, my, worldW, worldH);
-      else { g.fillStyle = OCEAN; g.fillRect(mx + dx, my, worldW, worldH); }
+    const key = `${pw}x${ph}@${dpr} ${mx} ${my} ${worldW} ${texGen.current}`;
+    let b = base.current;
+    if (!b || b.key !== key) {
+      const bc = b?.c ?? document.createElement('canvas');
+      if (bc.width !== pw || bc.height !== ph) {
+        bc.width = pw;
+        bc.height = ph;
+      }
+      const bg = bc.getContext('2d')!;
+      bg.setTransform(dpr, 0, 0, dpr, 0, 0);
+      bg.clearRect(0, 0, w, h);
+      bg.imageSmoothingEnabled = true;
+      bg.imageSmoothingQuality = 'high';
+      for (const dx of copies(mx, mx + worldW, worldW, w)) {
+        if (tex.current) bg.drawImage(tex.current.canvas, mx + dx, my, worldW, worldH);
+        else { bg.fillStyle = OCEAN; bg.fillRect(mx + dx, my, worldW, worldH); }
+      }
+      base.current = b = { c: bc, key };
     }
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.drawImage(b.c, 0, 0);
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     // rings: each sends a circle out every period, growing to its size and fading
     g.lineWidth = 1.5;
@@ -297,18 +320,20 @@ export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boole
       const ft = new FlatTexture(gt);
       ft.update(sunVec(new Date()));
       tex.current = ft;
+      texGen.current++;
       dirty.current = true;
     }).catch((e) => console.warn('flat map texture:', e));
     return () => { live = false; };
   }, []);
   useEffect(() => {
     if (paused) return;
-    tex.current?.update(sunVec(new Date()));
-    dirty.current = true;
-    const id = setInterval(() => {
+    const paint = () => {
       tex.current?.update(sunVec(new Date()));
+      texGen.current++;
       dirty.current = true;
-    }, SUN_MS);
+    };
+    paint();
+    const id = setInterval(paint, SUN_MS);
     return () => clearInterval(id);
   }, [paused]);
 
