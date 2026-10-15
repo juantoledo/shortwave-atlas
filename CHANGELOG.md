@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.1](https://github.com/juantoledo/shortwave-atlas/compare/v0.12.0...v0.12.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **ui:** @types/node in the ui's own devDependencies ([0b9c6dc](https://github.com/juantoledo/shortwave-atlas/commit/0b9c6dc35960c6da12ab26efda9ad2bc781f0c7b))
+* **ui:** @types/node in the ui's own devDependencies ([6d771df](https://github.com/juantoledo/shortwave-atlas/commit/6d771df891aad50b8359a186b265c567f02f4e4c))
+
 ## [0.12.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.11.0...v0.12.0) (2026-10-15)
 
 
