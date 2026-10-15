@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.12.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.11.0...v0.12.0) (2026-10-15)
+
+
+### Features
+
+* **favorites:** every favorite in one list, internet results in radio search ([47ac6df](https://github.com/juantoledo/shortwave-atlas/commit/47ac6dff0e252e4f8125b35734452e6211ca1bec))
+* listen to NET band stations, with their own listening history ([7c61a75](https://github.com/juantoledo/shortwave-atlas/commit/7c61a753a7f4e02309691d24b9bac9031002a002))
+* **map:** on-air stations send a skywave home, hopping off the ionosphere ([b03a0d3](https://github.com/juantoledo/shortwave-atlas/commit/b03a0d35b5758ee524aba776d667a667e7f66240))
+* **map:** shortwave stations beat while listened to; NET stations get the route home ([d27826b](https://github.com/juantoledo/shortwave-atlas/commit/d27826bccbb1136db3b326157779a1e160ca25f1))
+* NET band, internet stations from radio-browser.info in the station list ([ef94b10](https://github.com/juantoledo/shortwave-atlas/commit/ef94b109e63de2a390560d83ebc8e362c070666d))
+* NET notice before turning it on, view state kept per device, one instance per data dir ([ebc1f23](https://github.com/juantoledo/shortwave-atlas/commit/ebc1f2373b814bc9274e9216c2cf94ad7006a1af))
+* **net:** list only stations that can be listened to ([d98e8f3](https://github.com/juantoledo/shortwave-atlas/commit/d98e8f35190031c0b996070e0cc04a737c60d092))
+* **net:** NET countries on the map in the NET pink ([2979b16](https://github.com/juantoledo/shortwave-atlas/commit/2979b16448d5d73b40bfa6cd6f49402af1e53fd2))
+* **net:** the tuned station's point beats on the map while it plays ([35caed5](https://github.com/juantoledo/shortwave-atlas/commit/35caed599f63be5f1cdd792db5e777de2cd11e4b))
+* **net:** tune NET stations like a radio, with a station panel, favorites and a NET faceplate ([93de535](https://github.com/juantoledo/shortwave-atlas/commit/93de535fc65991cd5a98aa718d50f325a24ad13d))
+* **ui:** legal notice for the NET band, in its notice and in Help › About ([0100aea](https://github.com/juantoledo/shortwave-atlas/commit/0100aead0f554ef1edd43532cfda8de7b4a77715))
+
+
+### Bug Fixes
+
+* **server:** as_chunks in the NET audio tests, for clippy 1.99 ([338aef4](https://github.com/juantoledo/shortwave-atlas/commit/338aef433cb9c0720597ac38085aa6c2b64092c4))
+
+
+### Performance Improvements
+
+* **audio:** reuse capture buffers on the real-time thread, one copy less to the window ([4a38a76](https://github.com/juantoledo/shortwave-atlas/commit/4a38a76cc5bc8239222d93288ede349a60337130))
+* **globe:** pre-render the base layer, bundle the fonts, smaller textures on phones ([a1de7cc](https://github.com/juantoledo/shortwave-atlas/commit/a1de7cc95556e2d56a571b516b0ff2348ceffd7b))
+* **map:** cached flat map, allocation-free night grid, DPR cap ([154e00a](https://github.com/juantoledo/shortwave-atlas/commit/154e00a2adb07f76e29a105fdd808fc6106d0a7a))
+* **rig:** don't ask a rig that is down for its coverage ([b4c1803](https://github.com/juantoledo/shortwave-atlas/commit/b4c18033c905c5647f7beb89d6e8c367a98471bf))
+* **server:** history passes off the async threads and outside the listening lock ([f4f1155](https://github.com/juantoledo/shortwave-atlas/commit/f4f11550ba4f15d370c3cfd69712f8a2d21a1402))
+* **ui:** the S-meter alone follows the rig, memoized rows, append-only paging ([ae49a16](https://github.com/juantoledo/shortwave-atlas/commit/ae49a1632e779be0c624618e4a6d01f1e7a928cd))
+
 ## [0.11.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.10.0...v0.11.0) (2026-10-15)
 
 
