@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.10.0...v0.11.0) (2026-10-15)
+
+
+### Features
+
+* **ui:** heat strip of the channels listened to, under the band dial ([c11a84a](https://github.com/juantoledo/shortwave-atlas/commit/c11a84a0baa16de4f13f829798cae6a8d501693a))
+* **ui:** heat strip of the channels listened to, under the band dial ([103c9ad](https://github.com/juantoledo/shortwave-atlas/commit/103c9add3846f9d41c7a45fa04850f90068fdc13))
+
 ## [0.10.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.9.0...v0.10.0) (2026-10-12)
 
 
