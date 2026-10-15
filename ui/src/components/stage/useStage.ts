@@ -3,7 +3,8 @@
 //  1. once the choice settles, zoom out and swing to the transmitter (slerp + ease, duration by
 //     distance; a flight that takes over a moving camera carries on its speed, `hermiteEase`)
 //  2. land, show the label and pulsing rings
-//  3. after 450 ms the arc, and the great-circle path drawing itself from the transmitter home
+//  3. after 450 ms the great-circle path drawing itself from the transmitter home, the signal
+//     hopping over it off the ionosphere, pulses running home (an internet station: an arc)
 //  4. when the path lands, a blue "received" ring at the QTH, sized and paced by the S-meter
 //  5. optionally reframe the whole route
 // Off-air stations get the flight and the label only. With nothing tuned the camera goes back
@@ -19,9 +20,9 @@
 // radii; each view turns it into its own (`Camera`).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { altitudeAt, angleDeg, clamp, easeInOut, frameAltitude, frameWithHome, fromVec, hermiteEase, initialSlope, midpoint, pingAlpha, pingRadius, slerp, toVec, type LatLon, type Vec3 } from '../../geo/geo';
+import { altitudeAt, angleDeg, clamp, easeInOut, frameAltitude, frameWithHome, fromVec, hermiteEase, initialSlope, midpoint, pingAlpha, pingRadius, skyTier, slerp, toVec, type LatLon, type Vec3 } from '../../geo/geo';
 import { SIGNAL_DB } from '../scan';
-import { ARC_MS, COOL, HOME_ALT, LOCK_ALT, mkPin, mkPulse, netQthRing, netRings, NO_FX, NO_SCAN_FX, siteRings, PING_MS, PING_PX_PER_DEG, qthRing, REDUCE, ROUTE_MS, route, sonarRing, SPIN, START_ALT, type Arc, type Fx, type Path, type Pin, type Ring, type ScanFx } from './fx';
+import { ARC_MS, COOL, HOME_ALT, LOCK_ALT, mkPin, mkPulse, netQthRing, netRings, NO_FX, NO_SCAN_FX, siteRings, PING_MS, PING_PX_PER_DEG, qthRing, REDUCE, ROUTE_MS, route, skyLook, skyRoute, skyStrands, splashRings, sonarRing, SPIN, START_ALT, type Arc, type Fx, type Path, type Pin, type Ring, type ScanFx, type SkyPath } from './fx';
 import type { Meter } from '../../hooks/meter';
 import type { MapMode } from '../../hooks/useDisplay';
 import { keep, loadKept, readPov } from '../../hooks/usePersisted';
@@ -134,6 +135,8 @@ export interface Stage {
   fx: Fx;
   rings: Ring[];
   arcs: Arc[];
+  /** The skywave's strands while a transmitter's route shows (its pulse follows the S-meter). */
+  sky: SkyPath[];
   /** The QTH's pin, the station's and the scan's pulses. */
   pins: Pin[];
   /** The S-meter as the received ring shows it: smoothed, null without a reading. */
@@ -340,7 +343,7 @@ export function useStage({ sel, net, listening, qth, frame: framing, paused, onI
         setFx({ ...NO_FX, station, rings: netRings(site, live) });
         // then the route home, as for a transmitter, in the station's pink
         await sleep(450); if (my !== seq.current) return;
-        setFx((f) => ({ ...f, ...route(site, qthRef.current, true) }));
+        setFx((f) => ({ ...f, ...route(site, qthRef.current) }));
         await sleep(ROUTE_MS); if (my !== seq.current) return;
         const playing = !!netRef.current?.playing;
         setFx((f) => ({ ...f, rings: [...netRings(site, playing), ...(playing ? [netQthRing(qthRef.current)] : [])] }));
@@ -381,7 +384,7 @@ export function useStage({ sel, net, listening, qth, frame: framing, paused, onI
       setFx({ ...NO_FX, station, rings: on ? siteRings(site, beat) : [] });
       if (!on) return;
       await sleep(450); if (my !== seq.current) return;
-      setFx((f) => ({ ...f, ...route(site, qthRef.current) }));
+      setFx((f) => ({ ...f, ...skyRoute(site, qthRef.current) }));
       // received when the path lands
       await sleep(ROUTE_MS); if (my !== seq.current) return;
       setFx((f) => ({ ...f, rings: [...f.rings, qthRing(qthRef.current)] }));
@@ -579,21 +582,53 @@ export function useStage({ sel, net, listening, qth, frame: framing, paused, onI
   }, [ready, paused]);
 
   const sonar = useMemo(() => sonarRing(qth), [qth]);
-  const rings = useMemo(() => (scanning && !REDUCE ? [...fx.rings, sonar] : fx.rings), [fx.rings, scanning, sonar]);
   const arcs = useMemo(() => [...fx.arcs, ...scanFx.arcs], [fx.arcs, scanFx.arcs]);
 
-  // Moving the QTH redraws the route in place.
+  // Moving the QTH redraws the route in place (the same path: redrawn at once, not drawn on again).
   useEffect(() => {
     setFx((f) => {
-      if (!sel || !f.arcs.length) return f;
-      return {
-        ...f,
-        ...route({ lat: sel.site.lat, lon: sel.site.lon }, qth),
-        path: f.path, // the same path: redrawn at once, not drawn on again
-        rings: f.rings.filter((r) => r.rgb !== COOL).concat([qthRing(qth)]),
-      };
+      if (!f.path) return f;
+      const n = netRef.current, rings = f.rings.filter((r) => r.rgb !== COOL);
+      if (n) return { ...f, ...route({ lat: n.lat, lon: n.lon }, qth), path: f.path, rings: n.playing ? [...rings, netQthRing(qth)] : rings };
+      if (!sel) return f;
+      return { ...f, ...skyRoute({ lat: sel.site.lat, lon: sel.site.lon }, qth), path: f.path, rings: [...rings, qthRing(qth)] };
     });
   }, [qth.lat, qth.lon]);
+
+  // The skywave's pulse follows the S-meter, a step at a time.
+  const [tier, setTier] = useState(0);
+  const skyOn = fx.sky !== null;
+  useEffect(() => {
+    if (!skyOn || REDUCE) return;
+    const id = setInterval(() => setTier((t) => skyTier(level.current, t)), 500);
+    return () => clearInterval(id);
+  }, [skyOn]);
+  // The same strands while the route stays (the QTH moved, the look changed), changed in place:
+  // the globe knows a strand by the object, and a new one grows in from the transmitter again.
+  const strands = useRef<{ path: Path; sky: SkyPath[] } | null>(null);
+  const sky = useMemo(() => {
+    if (!fx.sky || !fx.path) {
+      strands.current = null;
+      return [];
+    }
+    if (strands.current?.path !== fx.path) strands.current = { path: fx.path, sky: skyStrands() };
+    skyLook(strands.current.sky, fx.sky, tier);
+    return [...strands.current.sky];
+  }, [fx.sky, fx.path, tier]);
+  // A splash where it bounces off the ground as each pulse touches down: the views send a ring as
+  // it is added and each period after, so each bounce's is added as the first pulse gets there
+  // (once the strands have grown in, when they are new). The pulses restart with each new look.
+  const [splashes, setSplashes] = useState<Ring[]>([]);
+  const splashed = useRef<SkyPath[] | null>(null);
+  useEffect(() => {
+    setSplashes([]);
+    const st = strands.current?.sky ?? null, s = fx.sky;
+    const fresh = splashed.current !== st;
+    splashed.current = st;
+    if (!st || !s || st.length < 2) return;
+    const ids = splashRings(s, tier, fresh && !REDUCE ? ROUTE_MS : 0).map(({ ring, at }) => setTimeout(() => setSplashes((l) => [...l, ring]), at));
+    return () => ids.forEach(clearTimeout);
+  }, [sky]);
 
   /** Hold the turn while the pointer is on a site, or the dot slides out from under it and the
    *  tooltip blinks. */
@@ -604,8 +639,9 @@ export function useStage({ sel, net, listening, qth, frame: framing, paused, onI
     else if (idle()) spin.current = SPIN;
   }, [idle]);
 
+  const rings = useMemo(() => [...fx.rings, ...splashes, ...(scanning && !REDUCE ? [sonar] : [])], [fx.rings, splashes, scanning, sonar]);
   const qthPin = useMemo<Pin>(() => ({ lat: qth.lat, lng: qth.lon, el: mkPin('qth', 'QTH', qth.name) }), [qth]);
   const pins = useMemo(() => [qthPin, ...(fx.station ? [fx.station] : []), ...scanFx.marks], [qthPin, fx.station, scanFx.marks]);
 
-  return { ready, attach, fx, rings, arcs, pins, level, routeProgress, zoom, goHome, userStart, hover };
+  return { ready, attach, fx, rings, arcs, sky, pins, level, routeProgress, zoom, goHome, userStart, hover };
 }

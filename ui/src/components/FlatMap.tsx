@@ -2,17 +2,17 @@
 // canvas. It plays the globe's choreography (stage/useStage.ts) with the same camera, a centre and
 // an altitude, turned into a scale (geo/flat.ts), so a flight, a framed route or a zoom shows
 // about as much as on the globe. Day and night are painted on the map as the sun moves
-// (geo/flatTexture.ts); each frame draws the map, the rings, the route, the sites and the arcs,
-// and moves the pins (the globe's DOM pins, so the same CSS).
+// (geo/flatTexture.ts); each frame draws the map, the rings, the route, the sites, the arcs and a
+// transmitter's skywave, and moves the pins (the globe's DOM pins, so the same CSS).
 // Drag to pan, wheel or pinch to zoom; a click picks a site or moves the QTH.
 
 import { useCallback, useEffect, useMemo, useRef, type PointerEvent } from 'react';
-import { angleDeg, clamp, greatCircle, sunVec, type LatLon } from '../geo/geo';
+import { angleDeg, clamp, greatCircle, RAD, sunVec, type LatLon } from '../geo/geo';
 import { altFor, clampLat, copies, lerpFlat, project, pxPerDeg, unwrap, wrapLon, type FlatView as View } from '../geo/flat';
 import { FlatTexture } from '../geo/flatTexture';
 import { GlobeTexture, makeStars, textureWidth } from '../geo/texture';
 import { Controls } from './stage/Controls';
-import { ARC_IN_MS, MAX_ALT, MIN_ALT, REDUCE, ringColor, ringNow, siteColor, siteRadius, siteTip, START_ALT, TOWER_MS, type Arc, type Ring } from './stage/fx';
+import { ARC_IN_MS, MAX_ALT, MIN_ALT, REDUCE, ringColor, ringNow, siteColor, siteRadius, siteTip, START_ALT, TOWER_MS, type Arc, type Ring, type SkyPath } from './stage/fx';
 import { useStage, type Camera, type Pov, type ViewProps } from './stage/useStage';
 import { useStageShape } from './stage/useStageShape';
 import type { SiteDot } from '../types/generated/SiteDot';
@@ -32,6 +32,8 @@ const TURN_DEG_PER_S = 6;
 const OCEAN = '#0b1d31';
 /** The canvas's pixels per CSS px at most (as the globe's renderer). */
 const MAX_DPR = 2;
+/** The skywave's hops stand this much taller than on the globe, at most this share of the view. */
+const SKY_LIFT = 1.5, SKY_MAX_LIFT = 0.15;
 
 /** A site's dot in px for its radius in degrees at `ppd`: about as large as on the globe, not
  *  vanishing far out nor swelling close in. */
@@ -44,6 +46,21 @@ function arcPx(v: View, a: LatLon, b: LatLon, lift: number): [number, number][] 
   const [x0] = project(v, pts[0]);
   const n = pts.length - 1;
   return pts.map((p, i) => [x0 + (p.lon - pts[0].lon) * v.ppd, v.cy - (p.lat - v.lat) * v.ppd - lift * Math.sin((Math.PI * i) / n)]);
+}
+
+/** How many px a skywave rises per globe radius: more than on the globe (a hop is flat seen from
+ *  above), but its tops (`pts`' highest) never past `maxLift` px. */
+function skyLift(v: View, pts: readonly [number, number, number][], maxLift: number): number {
+  let top = 0;
+  for (const p of pts) top = Math.max(top, p[2]);
+  return Math.min((SKY_LIFT * v.ppd) / RAD, top > 0 ? maxLift / top : 0);
+}
+
+/** A skywave's hops as canvas px, each point lifted `k` px per globe radius of its altitude. */
+function skyPx(v: View, pts: readonly [number, number, number][], k: number): [number, number][] {
+  const ll = unwrap(pts.map(([lat, lon]) => ({ lat, lon })));
+  const [x0] = project(v, ll[0]);
+  return ll.map((p, i) => [x0 + (p.lon - ll[0].lon) * v.ppd, v.cy - (p.lat - v.lat) * v.ppd - pts[i][2] * k]);
 }
 
 /** Stroke `pts` up to `upTo` (0..1 of its points) on every copy of the world that shows. */
@@ -61,6 +78,26 @@ function strokeCopies(g: CanvasRenderingContext2D, pts: [number, number][], upTo
 }
 
 const pathLength = (pts: [number, number][]) => pts.reduce((s, p, i) => (i ? s + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : 0), 0);
+
+/** Stroke `pts` up to `upTo` in a gradient (or one colour), its dashes running towards the end
+ *  (`dash`, `gap`: shares of its length; `anim`: ms to run it), as arcs and the skywave are. */
+function strokeRunning(g: CanvasRenderingContext2D, pts: [number, number][], colors: string | readonly string[], width: number, dash: number, gap: number, anim: number, upTo: number, now: number, worldW: number, w: number) {
+  if (typeof colors === 'string') g.strokeStyle = colors;
+  else {
+    const grad = g.createLinearGradient(pts[0][0], pts[0][1], pts[pts.length - 1][0], pts[pts.length - 1][1]);
+    grad.addColorStop(0, colors[0]);
+    grad.addColorStop(1, colors[1] ?? colors[0]);
+    g.strokeStyle = grad;
+  }
+  g.lineWidth = width;
+  if (gap > 0) {
+    const len = pathLength(pts), cycle = (dash + gap) * len;
+    g.setLineDash([dash * len, gap * len]);
+    g.lineDashOffset = anim && !REDUCE ? -(((now / anim) * len) % cycle) : 0;
+  }
+  strokeCopies(g, pts, upTo, worldW, w);
+  g.setLineDash([]);
+}
 
 export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boolean }) {
   const { qth, frame: framing, onFrame, paused, sites, activeSite, loggedSites, listenedSites, mode, onMode, noGlobe, failedMsg } = props;
@@ -87,8 +124,8 @@ export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boole
   /** When each ring and arc first showed (rings pulse from then, arcs draw on). */
   const born = useRef(new WeakMap<object, number>());
   /** What the frame loop draws: the latest props and choreography. */
-  const scene = useRef({ sites, activeSite, loggedSites, listenedSites, rings: stage.rings, arcs: stage.arcs, pins: stage.pins, path: stage.fx.path, qth });
-  scene.current = { sites, activeSite, loggedSites, listenedSites, rings: stage.rings, arcs: stage.arcs, pins: stage.pins, path: stage.fx.path, qth };
+  const scene = useRef({ sites, activeSite, loggedSites, listenedSites, rings: stage.rings, arcs: stage.arcs, sky: stage.sky, pins: stage.pins, path: stage.fx.path, qth });
+  scene.current = { sites, activeSite, loggedSites, listenedSites, rings: stage.rings, arcs: stage.arcs, sky: stage.sky, pins: stage.pins, path: stage.fx.path, qth };
   const handlers = useRef({ onQth: props.onQth, onSite: props.onSite, siteLabel: props.siteLabel, onInteract: props.onInteract });
   handlers.current = { onQth: props.onQth, onSite: props.onSite, siteLabel: props.siteLabel, onInteract: props.onInteract };
   useEffect(() => {
@@ -155,6 +192,7 @@ export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boole
     }
     const v = viewOf(cam.current), ppd = v.ppd, worldW = 360 * ppd, worldH = 180 * ppd;
     const progress = routeProgress(now);
+    const lift = sc.sky.length ? skyLift(v, sc.sky[0].pts, SKY_MAX_LIFT * h) : 0;
 
     // the sites' dots ease to their size
     let easing = false;
@@ -171,7 +209,7 @@ export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boole
     }
     if (dots.current.size > seen.size) for (const id of dots.current.keys()) if (!seen.has(id)) dots.current.delete(id);
 
-    const moving = sc.rings.length > 0 || sc.arcs.length > 0 || (sc.path !== null && progress < 1) || easing;
+    const moving = sc.rings.length > 0 || sc.arcs.length > 0 || sc.sky.length > 0 || (sc.path !== null && progress < 1) || easing;
     if (!dirty.current && !moving) return;
     dirty.current = false;
 
@@ -210,7 +248,8 @@ export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boole
       if (!born.current.has(ring)) born.current.set(ring, now);
       const t0 = born.current.get(ring)!, rn = ringNow(ring as Ring, level.current);
       const life = (rn.maxR / rn.speed) * 1000;
-      const [x, y] = project(v, { lat: ring.lat, lon: ring.lng });
+      const [x, y0] = project(v, { lat: ring.lat, lon: ring.lng });
+      const y = y0 - (ring.alt ?? 0) * lift; // where a skywave turns at the ionosphere
       const stretch = 1 / Math.max(0.2, Math.cos((ring.lat * Math.PI) / 180));
       for (let n = Math.floor((now - t0) / rn.period); n >= 0; n--) {
         const age = now - (t0 + n * rn.period);
@@ -265,20 +304,14 @@ export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boole
       if (!born.current.has(arc)) born.current.set(arc, now);
       const a = { lat: arc.sLat, lon: arc.sLng }, b = { lat: arc.eLat, lon: arc.eLng };
       const pts = arcPx(v, a, b, Math.min(0.2 * angleDeg(a, b) * ppd, 0.3 * h));
-      const len = pathLength(pts);
       const grow = REDUCE ? 1 : clamp((now - born.current.get(arc)!) / ARC_IN_MS, 0, 1);
-      const grad = g.createLinearGradient(pts[0][0], pts[0][1], pts[pts.length - 1][0], pts[pts.length - 1][1]);
-      grad.addColorStop(0, arc.colors[0]);
-      grad.addColorStop(1, arc.colors[1] ?? arc.colors[0]);
-      g.strokeStyle = grad;
-      g.lineWidth = Math.max(1, arc.stroke * 5);
-      if (arc.gap > 0) {
-        const cycle = (arc.dash + arc.gap) * len;
-        g.setLineDash([arc.dash * len, arc.gap * len]);
-        g.lineDashOffset = arc.anim && !REDUCE ? -(((now / arc.anim) * len) % cycle) : 0;
-      }
-      strokeCopies(g, pts, grow, worldW, w);
-      g.setLineDash([]);
+      strokeRunning(g, pts, arc.colors, Math.max(1, arc.stroke * 5), arc.dash, arc.gap, arc.anim, grow, now, worldW, w);
+    }
+
+    // the skywave: hopping home over the route as it draws on, its pulses running home
+    for (const strand of sc.sky as SkyPath[]) {
+      const pts = skyPx(v, strand.pts, lift);
+      strokeRunning(g, pts, strand.colors, strand.stroke ?? 1, strand.dash, strand.gap, strand.anim, progress, now, worldW, w);
     }
 
     // the pins, on the copy nearest the centre

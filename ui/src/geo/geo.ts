@@ -136,6 +136,46 @@ export function receivedRing(db: number | null): { maxR: number; speed: number; 
   return { maxR, speed: maxR / (period / 1000), period, alpha: pingAlpha(db) };
 }
 
+/** A skywave hop's reach in degrees (~3500 km, one F2 hop), and how many a path may take. */
+const HOP_DEG = 31, MAX_HOPS = 8;
+
+/** How many hops a skywave takes over `deg` degrees. */
+export const skyHops = (deg: number) => clamp(Math.ceil(deg / HOP_DEG), 1, MAX_HOPS);
+
+/** A hop's height in globe radii: its length's share, far above the real ionosphere so it reads. */
+export const hopHeight = (hopDeg: number) => clamp(0.004 * hopDeg, 0.03, 0.12);
+
+/** Where a skywave turns: off the ionosphere at a hop's top, off the ground between hops; `alt`
+ *  in globe radii, `along` its share of the way home. */
+export interface Bounce { lat: number; lon: number; alt: number; along: number }
+
+/** A skywave from `a` to `b`: hops between the ground and the ionosphere along the great circle,
+ *  as `[lat, lon, alt]` points (alt in globe radii; 0 at `a`, at `b` and at each bounce), and
+ *  where it bounces on the way, in order. */
+export function skywave(a: LatLon, b: LatLon): { hops: number; pts: [number, number, number][]; bounces: Bounce[] } {
+  const deg = angleDeg(a, b), hops = skyHops(deg), h = hopHeight(deg / hops);
+  const per = 2 * Math.max(4, Math.ceil(deg / hops)); // even: a point at each hop's top
+  const n = per * hops;
+  const pts = greatCircle(a, b, n).map((p, i): [number, number, number] => [p.lat, p.lon, h * Math.sin((Math.PI * (i % per)) / per)]);
+  const bounces = Array.from({ length: 2 * hops - 1 }, (_, k) => {
+    const i = ((k + 1) * per) / 2;
+    return { lat: pts[i][0], lon: pts[i][1], alt: pts[i][2], along: i / n };
+  });
+  return { hops, pts, bounces };
+}
+
+/** S-units where the skywave's look changes, and how far past one the S-meter must go to cross
+ *  back (so a reading on the edge doesn't flicker). */
+const SKY_EDGES = [5, 9], SKY_HYST = 0.5;
+
+/** The skywave's look for an S-meter reading: 0 with no reading, then 1 weak (under S5), 2 fair
+ *  (to S9), 3 strong; leaving `prev` only once past an edge by `SKY_HYST`. */
+export function skyTier(db: number | null, prev: number): number {
+  if (db === null) return 0;
+  const s = sUnits(db);
+  return 1 + SKY_EDGES.filter((e, i) => s >= (prev === 0 ? e : prev > i + 1 ? e - SKY_HYST : e + SKY_HYST)).length;
+}
+
 /** The middle of some points (their mean direction) and how far the farthest is from it, in
  *  degrees, for framing them all. Points spread all round (no mean direction) frame from the first. */
 export function frame(points: readonly LatLon[]): { center: LatLon; spreadDeg: number } {

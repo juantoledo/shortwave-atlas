@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NO_FILTERS, type Filters } from '../hooks/useCore';
 import type { NetNow } from '../types/generated/NetNow';
-import { netRings, route, siteColor, siteRings } from './stage/fx';
+import { netRings, route, siteColor, siteRings, skyLook, skyRoute, skyStrands, splashRings } from './stage/fx';
 import { audioCell, bufferSegs, canListen, dimSites, favFilter, isNet, lensFilters, leaveNet, mixesNet, NET_BAND, NET_DOT_ID, netCountryOpts, netQuery, netSiteDots, playingUuid, stepChannel, streamLabel } from './net';
 
 const radio: Filters = { ...NO_FILTERS, q: 'radio', langs: ['S'], regions: ['am'], countries: ['ARG'], sources: ['eibi'], site: 7, scan: 's1', lens: 'all' };
@@ -120,15 +120,60 @@ describe('NET band', () => {
     expect([...tuned, ...playing].every((r) => r.rgb === '255,122,196' && r.lat === at.lat && r.lng === at.lon)).toBe(true);
   });
 
-  it('routes an internet station home in its pink, and beats a transmitter in amber', () => {
+  it('routes an internet station home on a pink arc, a transmitter as a skywave, and beats it in amber', () => {
     const site = { lat: -34.6, lon: -58.4 }, qth = { lat: -33.45, lon: -70.67 };
-    const net = route(site, qth, true), sw = route(site, qth);
+    const net = route(site, qth), sw = skyRoute(site, qth);
     expect(net.path).toEqual({ site, rgb: '255,122,196' });
     expect(net.arcs[0].colors[0]).toContain('255,122,196');
+    expect(net.sky).toBeNull();
     expect(sw.path).toEqual({ site });
-    expect(sw.arcs[0].colors[0]).toContain('255,179,63');
+    expect(sw.arcs).toEqual([]);
+    expect(sw.sky!.hops).toBe(1);
     expect(siteRings(site, false)).toHaveLength(1);
     expect(siteRings(site, true).map((r) => r.rgb)).toEqual(['255,179,63', '255,179,63']);
+  });
+
+  it("lays the skywave's strands over its hops, the pulse brighter and quicker with the signal", () => {
+    const sky = skyRoute({ lat: 52.5, lon: 13.4 }, { lat: -33.45, lon: -70.67 }).sky!;
+    const strands = skyStrands();
+    expect(strands).toHaveLength(2);
+    skyLook(strands, sky, 1);
+    const [base, pulse] = strands;
+    expect(base.pts).toBe(sky.pts);
+    expect(base.colors[0]).toContain('255,179,63');
+    expect(base.gap).toBe(0);
+    const weak = { ...pulse };
+    skyLook(strands, sky, 3);
+    expect(strands[1]).toBe(pulse); // in place: the globe knows a strand by the object
+    expect(pulse.anim).toBeLessThan(weak.anim);
+    expect(pulse.stroke!).toBeGreaterThan(weak.stroke!);
+    // a pulse a third of a hop long, one every two hops
+    expect(pulse.dash * sky.hops).toBeCloseTo(0.3, 9);
+    expect((pulse.dash + pulse.gap) * sky.hops).toBeCloseTo(2, 9);
+  });
+
+  it('splashes where the skywave bounces, each as a pulse gets there', () => {
+    const sky = skyRoute({ lat: 52.5, lon: 13.4 }, { lat: -33.45, lon: -70.67 }).sky!;
+    const strands = skyStrands();
+    skyLook(strands, sky, 2);
+    const pulse = strands[1], cycle = pulse.dash + pulse.gap, period = cycle * pulse.anim;
+    const now = splashRings(sky, 2, 0), later = splashRings(sky, 2, 1300);
+    expect(now).toHaveLength(2 * sky.hops - 1);
+    now.forEach(({ ring, at }, i) => {
+      const b = sky.bounces[i];
+      expect([ring.lat, ring.lng, ring.alt]).toEqual([b.lat, b.lon, b.alt]);
+      expect(ring.period).toBeCloseTo(period, 9);
+      expect(at).toBeGreaterThanOrEqual(0);
+      expect(at).toBeLessThan(period);
+      // a pulse's head (at `dash` when the strand showed) is at the bounce then
+      const head = pulse.dash + at / pulse.anim;
+      expect((((head - b.along) % cycle) + cycle + 1e-9) % cycle).toBeLessThan(1e-6);
+      // not before the strand has grown in, and still in step
+      expect(later[i].at).toBeGreaterThanOrEqual(1300);
+      expect(Math.abs(((later[i].at - at) / period) - Math.round((later[i].at - at) / period))).toBeLessThan(1e-9);
+    });
+    // off the ionosphere smaller than off the ground
+    expect(now[0].ring.maxR).toBeLessThan(now[1].ring.maxR);
   });
 
   it('offers countries by name in the UI language', () => {
