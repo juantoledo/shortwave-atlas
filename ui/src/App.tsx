@@ -4,20 +4,17 @@
 // The globe may also be drawn behind the whole window (`data-globe`, Settings → Display).
 // Stats (`data-page="stats"`) takes the middle of the window; the top bar and faceplate stay.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AudioOff, AudioPanel, type AudioKeys } from './components/AudioPanel';
 import { Dossier } from './components/Dossier';
 import { FavStar } from './components/FavStar';
 import { asMode, favAt } from './components/favorites';
 import { Globe } from './components/Globe';
-import { Help } from './components/Help';
 import { Hud } from './components/Hud';
 import { ScanBar } from './components/ScanBar';
-import { Scans } from './components/Scans';
-import { StatsView, type StatsTab } from './components/stats/StatsView';
+import type { StatsTab } from './components/stats/StatsView';
 import { PanelHead, ViewTabs, type View } from './components/NavBar';
-import { Settings, type SettingsTab } from './components/settings/Settings';
-import { StationForm } from './components/StationForm';
+import type { SettingsTab } from './components/settings/Settings';
 import { draftFrom, draftFromOff, draftHere, draftOf } from './components/stationDraft';
 import { StationList } from './components/StationList';
 import { TopBar } from './components/TopBar';
@@ -27,18 +24,25 @@ import { bandOf, noiseFloor } from './components/scan';
 import { keyOf, MINE } from './components/sources';
 import { UpdateBanner } from './components/UpdateBanner';
 import { chromeFor } from './api/window';
-import { Welcome } from './components/Welcome';
 import { makeNames, NamesProvider } from './catalog/names';
 import { NO_FILTERS, useCandidates, useCore, useDial, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
 import { PHONE, useMedia } from './hooks/useMedia';
 import { useFavorites } from './hooks/useFavorites';
+import { findSite, oneOf, readFilters, readSiteRef, readString, usePersisted, type SiteRef } from './hooks/usePersisted';
 import { useDisplay } from './hooks/useDisplay';
 import { useBandScans, useScan } from './hooks/useScan';
 import { useUpdate } from './hooks/useUpdate';
 import { useUserStations } from './hooks/useUserStations';
 import { useWelcome } from './hooks/useWelcome';
 import { useFreqHeat, useListening, useStats } from './hooks/useStats';
-import { fmtStamp, I18nProvider, pickMessages } from './i18n';
+import { useNetCountries, useNetOverview, useNetSearch } from './hooks/useNetSearch';
+import { useNetFavorites } from './hooks/useNetFavorites';
+import { NetDossier } from './components/NetDossier';
+import type { NetFace } from './components/Tuner';
+import type { NetPin } from './components/stage/useStage';
+import { audioCell, dimSites, favFilter, isNet, leaveNet, mixesNet, NET_BAND, NET_DOT_ID, NET_RATE, netCountryOpts, netSiteDots, stepChannel, streamLabel } from './components/net';
+import { useNetNow } from './hooks/useNetNow';
+import { fmtKhz, fmtStamp, I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
 import { stepIndex, type Action } from './keys/keymap';
 import { useKeys } from './keys/useKeys';
@@ -52,6 +56,14 @@ import type { ScanSpeed } from './types/generated/ScanSpeed';
 import type { SiteDot } from './types/generated/SiteDot';
 import type { StationRow } from './types/generated/StationRow';
 import type { UserStationDraft } from './types/generated/UserStationDraft';
+
+// What opens on demand loads then (its own chunk), not with the app.
+const Help = lazy(() => import('./components/Help').then((m) => ({ default: m.Help })));
+const Scans = lazy(() => import('./components/Scans').then((m) => ({ default: m.Scans })));
+const Settings = lazy(() => import('./components/settings/Settings').then((m) => ({ default: m.Settings })));
+const StationForm = lazy(() => import('./components/StationForm').then((m) => ({ default: m.StationForm })));
+const StatsView = lazy(() => import('./components/stats/StatsView').then((m) => ({ default: m.StatsView })));
+const Welcome = lazy(() => import('./components/Welcome').then((m) => ({ default: m.Welcome })));
 
 const MSG_MS = 6000;
 /** How long the rows a finished scan heard stay lit. */
@@ -70,16 +82,18 @@ type SheetState =
   | null;
 
 export function App() {
-  const { api, info, reloadInfo, rig, status } = useCore();
+  const { api, info, reloadInfo, rig, meter, status } = useCore();
   const update = useUpdate(api);
   const display = useDisplay();
   const welcome = useWelcome();
   const [sheet, setSheet] = useState<SheetState>(null);
-  const [view, setViewRaw] = useState<View>('globe');
+  // the view, the list's filters, the station picked and the camera come back on this device
+  // (usePersisted)
+  const [view, setViewRaw] = usePersisted<View>('swatlas.view', 'globe', oneOf('globe', 'station', 'browse'));
   // Stats over the middle of the window, its tab and period
-  const [page, setPage] = useState<'main' | 'stats'>('main');
-  const [statsTab, setStatsTab] = useState<StatsTab>('overview');
-  const [statsPeriod, setStatsPeriod] = useState<Period>('week');
+  const [page, setPage] = usePersisted<'main' | 'stats'>('swatlas.page', 'main', oneOf('main', 'stats'));
+  const [statsTab, setStatsTab] = usePersisted<StatsTab>('swatlas.statsTab', 'overview', oneOf('overview', 'collection', 'propagation', 'hunt'));
+  const [statsPeriod, setStatsPeriod] = usePersisted<Period>('swatlas.statsPeriod', 'week', oneOf('day', 'week', 'month', 'year', 'all'));
   /** Another view (the phone's bottom tabs, a list action) leaves Stats. */
   const setView = useCallback((v: View) => { setPage('main'); setViewRaw(v); }, []);
   const [dockOpen, setDockOpen] = useState(false);
@@ -123,7 +137,7 @@ export function App() {
   const mine = useUserStations(api, onError, generation, reloadOverview);
   const bandScans = useBandScans(scan, win.w.band?.id ?? null);
   const { listening, reload: reloadListening } = useListening(api);
-  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [filters, setFilters] = usePersisted<Filters>('swatlas.filters', NO_FILTERS, readFilters);
   // the lenses change with the logbook, the favorites and the listening history (a session
   // starting or ending), and every list with the catalog
   const sessionKey = filters.lens === 'listened' ? listening?.now?.session.id ?? null : null;
@@ -131,22 +145,49 @@ export function App() {
   // the history can be cleared)
   const heat = useFreqHeat(api, `${listening?.now?.session.id ?? ''}|${page}`);
   const lensKey = useMemo(() => ({}), [scan.logged, favs.views, generation, sessionKey]);
-  const search = useStationSearch(api, filters, lensKey);
+  // the NET band (internet stations) has its own search; the schedule's doesn't run meanwhile
+  const netEnabled = info?.net ?? false;
+  const netActive = isNet(filters, netEnabled);
+  // Favorites lists every favorite on any band, NET included
+  const search = useStationSearch(netActive && filters.lens !== 'favorites' ? null : api, filters, lensKey);
+  // the directory: the NET band's list (its Favorites lens lists the favorites kept instead), or
+  // the internet stations shown among a radio search's results
+  const netMixed = netEnabled && !netActive && mixesNet(filters);
+  const netSearch = useNetSearch(api, filters, (netActive && filters.lens !== 'favorites') || netMixed);
+  const netCountries = useNetCountries(api, netActive || netEnabled);
+  const netOverview = useNetOverview(api, netActive);
+  const { netNow, setNetNow } = useNetNow(api, netEnabled);
+  const netFavs = useNetFavorites(api, netEnabled, onError);
+  const netFavUuids = useMemo(() => new Set(netFavs.list.map((f) => f.uuid)), [netFavs.list]);
+  const netCountryName = useMemo(() => {
+    const m = new Map(netCountryOpts(netCountries, t.locale).map((c) => [c.value, c.label]));
+    return (itu: string | null) => (itu ? m.get(itu) ?? names.country(itu) : '');
+  }, [netCountries, t.locale, names]);
+  // internet radio turned off while the list was on NET: back to the radio bands
+  // (known once `info` is: a NET list kept from the last run waits for it)
+  useEffect(() => {
+    if (info && !netEnabled) setFilters((f) => leaveNet(f));
+  }, [info, netEnabled]);
   const cands = useCandidates(api, on ? freqHz : null, `${qth?.lat},${qth?.lon},${now.getTime()},${generation}`);
 
   // Keep the chosen station while it is still a candidate; otherwise take the best one. It is
   // kept by source and key (`keyOf`), which hold when the catalog changes and the ids do not.
   const [sel, setSel] = useState<Candidate | null>(null);
-  const [wanted, setWanted] = useState<string | null>(null);
+  const [wanted, setWanted] = usePersisted<string | null>('swatlas.station', null, readString);
   // the globe's listened sites, while the list is on Listened
   const lensListened = filters.lens === 'listened' && page === 'main';
   const { stats: allTime } = useStats(api, 'all', lensListened);
+  // in steps of 2 %, and the same map while they hold: a new one rebuilds the globe's towers
+  const listenedPrev = useRef(new Map<number, number>());
   const listenedSites = useMemo(() => {
     const m = new Map<number, number>();
-    if (!lensListened || !allTime) return m;
-    const max = Math.max(1, ...allTime.sites.map((x) => x.seconds));
-    for (const x of allTime.sites) m.set(x.site, x.seconds / max);
-    return m;
+    if (lensListened && allTime) {
+      const max = Math.max(1, ...allTime.sites.map((x) => x.seconds));
+      for (const x of allTime.sites) m.set(x.site, Math.round((x.seconds / max) * 50) / 50);
+    }
+    const prev = listenedPrev.current;
+    if (prev.size === m.size && [...m].every(([k, v]) => prev.get(k) === v)) return prev;
+    return (listenedPrev.current = m);
   }, [lensListened, allTime]);
   useEffect(() => {
     if (!on || !cands.length) setSel(null);
@@ -154,17 +195,59 @@ export function App() {
   }, [cands, on, wanted]);
 
   const sites = overview?.sites ?? NO_SITES;
+  // the map: the countries with internet stations while the list is on NET; the transmitter sites
+  // dimmed while an internet station is tuned
+  const netDots = useMemo(() => netSiteDots(netOverview, netCountryName), [netOverview, netCountryName]);
+  const netDotsRef = useRef(netDots);
+  netDotsRef.current = netDots;
+  const dimmed = useMemo(() => dimSites(sites), [sites]);
+  const globeSites = netActive ? netDots : netNow ? dimmed : sites;
+  const netPin = useMemo<NetPin | null>(() => {
+    const p = netNow?.place;
+    if (!netNow || !p) return null;
+    const country = netCountryName(netNow.station.itu);
+    const playing = netNow.state.state === 'playing';
+    return { key: netNow.station.uuid, lat: p.lat, lon: p.lon, name: netNow.station.name, sub: p.precise ? country : `${country} · ${t.netApproxPlace}`, flag: netNow.station.flag, playing };
+  }, [netNow?.station.uuid, netNow?.place?.lat, netNow?.place?.lon, netNow?.state.state, netCountryName, t]);
   const siteName = filters.site === null ? null : sites.find((s) => s.id === filters.site)?.name ?? null;
   const scanSel = filters.scan === null ? null : scan.scans.find((s) => s.id === filters.scan) ?? null;
   const scanName = scanSel && `${names.dialBand(bandOf(scanSel))} · ${fmtStamp(t, scanSel.started)}`;
-  // the scan the list was narrowed to was deleted
+  // the scan the list was narrowed to was deleted (or, kept from the last run, is gone)
   useEffect(() => {
-    if (filters.scan !== null && !scan.scans.some((s) => s.id === filters.scan)) setFilters((f) => ({ ...f, scan: null }));
-  }, [filters.scan, scan.scans]);
-  const siteLabel = useCallback((s: SiteDot) => ({ country: names.country(s.itu), onAir: t.siteOnAir(s.on, s.total) }), [names, t]);
-  // the globe's callbacks are stable, so it only renders again when what it shows changes
+    if (scan.loaded && filters.scan !== null && !scan.scans.some((s) => s.id === filters.scan)) setFilters((f) => ({ ...f, scan: null }));
+  }, [filters.scan, scan.scans, scan.loaded]);
+  // The transmitter site the list is narrowed to, kept by what it is (its id changes with the
+  // catalog): found again whenever the sites come in, and the list unnarrowed if it isn't there.
+  const [siteRef, setSiteRef] = usePersisted<SiteRef | null>('swatlas.site', null, readSiteRef);
+  const siteRefNow = useRef(siteRef);
+  siteRefNow.current = siteRef;
+  const sitesIn = useRef(false);
+  useEffect(() => {
+    if (!overview) return;
+    const ref = siteRefNow.current;
+    const id = ref ? findSite(sites, ref)?.id ?? null : null;
+    if (ref && id === null) setSiteRef(null);
+    setFilters((f) => (f.site === id ? f : { ...f, site: id }));
+    sitesIn.current = true;
+  }, [sites]);
+  // the list narrowed to another site, or to none
+  useEffect(() => {
+    if (!sitesIn.current) return;
+    const s = filters.site === null ? null : sites.find((x) => x.id === filters.site);
+    setSiteRef(s ? { name: s.name, lat: s.lat, lon: s.lon } : null);
+  }, [filters.site]);
+  const siteLabel = useCallback((s: SiteDot) => (s.id >= NET_DOT_ID
+    ? { country: t.netBand, onAir: t.netDotCount(s.total) }
+    : { country: names.country(s.itu), onAir: t.siteOnAir(s.on, s.total) }), [names, t]);
+  // the globe's callbacks are stable, so it only renders again when what it shows changes; a
+  // country of the NET band narrows its list to that country
   const pickSite = useCallback((id: number) => {
-    setFilters((f) => ({ ...f, site: f.site === id ? null : id }));
+    if (id >= NET_DOT_ID) {
+      const dot = netDotsRef.current.find((d) => d.id === id);
+      if (dot) setFilters((f) => ({ ...f, countries: f.countries[0] === dot.itu ? [] : [dot.itu] }));
+    } else {
+      setFilters((f) => ({ ...leaveNet(f), site: f.site === id ? null : id }));
+    }
     setView('browse');
   }, []);
 
@@ -194,11 +277,11 @@ export function App() {
   // Stats: open and close; leave it for the list on a country, or for the globe's Listened sites
   const toggleStats = () => setPage((p) => (p === 'stats' ? 'main' : 'stats'));
   const statsCountry = (itu: string) => {
-    setFilters((f) => ({ ...f, countries: [itu], lens: 'all', scan: null, site: null }));
+    setFilters((f) => ({ ...leaveNet(f), countries: [itu], lens: 'all', scan: null, site: null }));
     setView(phone ? 'browse' : view);
   };
   const statsGlobe = () => {
-    setFilters((f) => ({ ...f, lens: 'listened', scan: null }));
+    setFilters((f) => ({ ...leaveNet(f), lens: 'listened', scan: null }));
     setView('globe');
   };
   useEffect(() => {
@@ -269,7 +352,7 @@ export function App() {
   // the station list narrowed to a scan, or showing the favorites
   const showScan = (id: string) => {
     setSheet(null);
-    setFilters((f) => ({ ...f, scan: id, lens: 'all' }));
+    setFilters((f) => ({ ...leaveNet(f), scan: id, lens: 'all' }));
     if (phone) setView('browse');
   };
   // the listener's own stations: the form, and where it opens from
@@ -292,6 +375,7 @@ export function App() {
     if (on && v.station.freq_hz !== freqHz) tuneAs(v.station.freq_hz, v.station.mode);
     return true;
   };
+  // every favorite, radio and NET; the band and the other filters stay for the list it goes back to
   const toggleFavorites = () => {
     const to = filters.lens === 'favorites' ? 'all' : 'favorites';
     setFilters((f) => ({ ...f, lens: to }));
@@ -306,6 +390,51 @@ export function App() {
   // the keyboard (keys/keymap.ts): typing anywhere starts a new search
   const searchRef = useRef<HTMLInputElement>(null);
   const audioKeys = useRef<AudioKeys>(null);
+  // the audio panel plays: the map's tuned point beats
+  const [audioOn, setAudioOn] = useState(false);
+  // an internet station instead of the rig: tuned, as a radio station is; Listen (the audio
+  // panel) plays it, and while listening another one switches at once
+  const tuneNet = (uuid: string) => {
+    api?.netTune(uuid).then(setNetNow, onError);
+  };
+  const stopNet = () => {
+    setNetNow(null);
+    api?.netStop().catch(onError);
+  };
+  const netTuned = netNow?.station.uuid ?? null;
+  const netFav = netTuned ? netFavs.byUuid.get(netTuned) ?? null : null;
+  const netStar = netTuned && (
+    <FavStar
+      fav={netFav}
+      onAdd={() => netFavs.add(netTuned)}
+      onRename={(label) => netFav && netFavs.rename(netFav.id, label)}
+      onRemove={() => netFav && netFavs.remove(netFav.id)}
+    />
+  );
+  // the knob, the arrows and the tuning keys step the memory channels (the favorites), or the
+  // list when there are none
+  const stepNet = (dir: number) => {
+    const list: readonly { uuid: string }[] = netFavs.list.length ? netFavs.list : netSearch.items;
+    const next = stepChannel(list, netTuned, dir);
+    if (next) tuneNet(next.uuid);
+  };
+  const netFace: NetFace | null = netNow && {
+    name: netNow.station.name,
+    flag: netNow.station.flag,
+    country: netCountryName(netNow.station.itu),
+    stream: streamLabel(netNow.station),
+    bufferMs: netNow.state.state === 'playing' || netNow.state.state === 'connecting' ? netNow.buffer_ms : null,
+    channels: netFavs.list.map((f) => ({ uuid: f.uuid, label: f.label || f.name })),
+    uuid: netNow.station.uuid,
+    rig: on && freqHz !== null ? `${fmtKhz(freqHz)} kHz${rig.mode ? ` ${rig.mode}` : ''}` : '',
+    onChannel: tuneNet,
+    onStep: stepNet,
+    onBackToRig: stopNet,
+  };
+  const toNetBand = () => {
+    setFilters((f) => ({ ...f, bands: [NET_BAND], lens: 'all' }));
+    if (phone) setView('browse');
+  };
   const focusSearch = (select: boolean) => {
     if (phone) setView('browse');
     const go = () => {
@@ -330,6 +459,13 @@ export function App() {
       case 'audio': return audioKeys.current?.toggle();
       case 'mute': return audioKeys.current?.mute();
       case 'volume': return audioKeys.current?.volume(a.d);
+    }
+    if (netNow) {
+      // tuned to an internet station: the tuning keys step its memory channels
+      switch (a.kind) {
+        case 'nudge': return stepNet(a.khz > 0 ? 1 : -1);
+        case 'band': return stepNet(a.dir);
+      }
     }
     if (!on) return;
     switch (a.kind) {
@@ -362,9 +498,15 @@ export function App() {
     : '';
   // Heard is what the scans heard: no schedule count there
   const heardList = filters.lens === 'heard' && filters.scan === null;
-  const counting = search.loading && !search.rows.length && !search.heard.length;
-  const count = counting ? '…' : heardList ? t.heardCount(search.total) : t.resultCount(search.total, search.onAir);
-  const shortCount = counting ? '' : search.total.toLocaleString(t.locale);
+  const favList = filters.lens === 'favorites';
+  const counting = search.loading && !search.rows.length && !search.heard.length && !search.favorites.length;
+  const netCount = netSearch.loading && !netSearch.items.length ? '…' : t.netCount(netSearch.items.length, netSearch.more);
+  // Favorites counts both kinds the text keeps: radio and NET
+  const favTotal = search.total + (netEnabled ? favFilter(netFavs.list, filters.q).length : 0);
+  const count = favList ? (counting ? '…' : t.favCount(favTotal))
+    : netActive ? netCount : counting ? '…' : heardList ? t.heardCount(search.total) : t.resultCount(search.total, search.onAir);
+  const shortCount = favList ? (counting ? '' : favTotal.toLocaleString(t.locale))
+    : netActive ? `${netSearch.items.length}${netSearch.more ? '+' : ''}` : counting ? '' : search.total.toLocaleString(t.locale);
 
   return (
     <I18nProvider value={t}>
@@ -397,7 +539,9 @@ export function App() {
         <main className="stage" aria-label={t.globe}>
           {qth && (
             <Globe
-              sel={on ? sel : null}
+              sel={on && !netNow ? sel : null}
+              net={netPin}
+              listening={audioOn}
               qth={qth}
               frame={frame}
               onFrame={toggleFrame}
@@ -405,9 +549,9 @@ export function App() {
               onInteract={onGlobeTouched}
               onQth={moveQth}
               failedMsg={t.globeFailed}
-              sites={sites}
-              strengthDb={on ? rig.strength_db : null}
-              activeSite={filters.site}
+              sites={globeSites}
+              meter={on && !netNow ? meter : null}
+              activeSite={netActive ? netDots.find((d) => d.itu === filters.countries[0])?.id ?? null : filters.site}
               loggedSites={scan.loggedSites}
               listenedSites={listenedSites}
               scan={globeScan}
@@ -440,6 +584,7 @@ export function App() {
             favs={favs.byStation}
             off={search.off}
             heard={search.heard}
+            favorites={search.favorites}
             scanDb={search.scanDb}
             onPick={pick}
             onPickOff={pickOff}
@@ -447,11 +592,25 @@ export function App() {
             onTuneHz={tune}
             onMore={search.more}
             searchRef={searchRef}
+            net={{
+              enabled: netEnabled,
+              active: netActive,
+              mixed: netMixed,
+              search: netSearch,
+              countries: netCountries,
+              tuned: netTuned,
+              favs: netFavs.list,
+              favUuids: netFavUuids,
+              onTune: tuneNet,
+            }}
           />
         </section>
 
         <section className="panel station" aria-label={t.station} aria-live="polite">
           <PanelHead own="station" onView={setView} count={shortCount} />
+          {netNow ? (
+            <NetDossier now={netNow} country={netCountryName(netNow.station.itu)} star={netStar} onBackToRig={stopNet} />
+          ) : (
           <Dossier
             on={on}
             freqHz={freqHz}
@@ -474,6 +633,7 @@ export function App() {
             onEdit={editStation}
             onDelete={deleteStation}
           />
+          )}
         </section>
 
         <footer className="dock">
@@ -481,7 +641,7 @@ export function App() {
             on={on}
             freqHz={freqHz}
             mode={rig.mode}
-            strengthDb={rig.strength_db}
+            meter={meter}
             freqsHz={meta?.freqs_hz ?? NO_HZ}
             onAirHz={overview?.on_hz ?? NO_HZ}
             bands={dialBands}
@@ -499,7 +659,7 @@ export function App() {
                 onStop={scan.stop}
               />
             }
-            star={
+            star={netStar || (
               <FavStar
                 fav={tunedFav}
                 disabled={!on || freqHz === null}
@@ -507,20 +667,36 @@ export function App() {
                 onRename={(label) => tunedFav && favs.rename(tunedFav.id, label)}
                 onRemove={() => tunedFav && favs.remove(tunedFav.id)}
               />
-            }
+            )}
             expanded={dockOpen}
             onExpand={() => setDockOpen((o) => !o)}
             onTune={tune}
             onMode={setMode}
+            net={netFace}
+            onNetSpan={netEnabled ? toNetBand : null}
           />
           {/* always mounted, so audio keeps playing whatever else opens */}
-          {info?.audio && api ? (
-            <AudioPanel openAudio={api.transport.openAudio.bind(api.transport)} rate={info.audio_rate} buffer={{ cushionMs: info.audio_cushion_ms, maxAheadMs: info.audio_max_ahead_ms }} mode={rig.mode} cwPitch={rig.cw_pitch_hz} freqHz={freqHz} onTune={tune} keys={audioKeys} />
+          {info && api && audioCell(info.audio, netEnabled) === 'panel' ? (
+            <AudioPanel
+              openAudio={api.transport.openAudio.bind(api.transport)}
+              rate={netNow ? NET_RATE : info.audio_rate}
+              buffer={{ cushionMs: info.audio_cushion_ms, maxAheadMs: info.audio_max_ahead_ms }}
+              mode={rig.mode}
+              cwPitch={rig.cw_pitch_hz}
+              freqHz={freqHz}
+              onTune={tune}
+              keys={audioKeys}
+              rigAudio={info.audio}
+              net={netNow}
+              onSetUp={() => openSettings('audio')}
+              onListening={setAudioOn}
+            />
           ) : (
             info && <AudioOff onSetUp={() => openSettings('audio')} />
           )}
         </footer>
 
+        <Suspense fallback={null}>
         {page === 'stats' && (
           <StatsView
             api={api}
@@ -544,11 +720,13 @@ export function App() {
             onError={onError}
           />
         )}
+        </Suspense>
 
         <ViewTabs className="nav" views={['globe', 'station', 'browse']} current={view} onView={setView} count={shortCount} />
 
         <p className="toast" role="alert">{msg && t.error(msg)}</p>
 
+        <Suspense fallback={null}>
         {sheet?.kind === 'settings' && api && (
           <Settings
             api={api}
@@ -563,6 +741,8 @@ export function App() {
             onClose={() => setSheet(null)}
             onError={onError}
             onApplied={reloadInfo}
+            net={netEnabled}
+            onNetOn={toNetBand}
           />
         )}
         {sheet?.kind === 'scans' && (
@@ -596,6 +776,7 @@ export function App() {
           />
         )}
         {welcome.open && <Welcome onClose={welcome.close} />}
+        </Suspense>
       </div>
       </NamesProvider>
     </I18nProvider>

@@ -6,12 +6,19 @@
 // the band's last scan (or the one running) with the scan before it as a ghost, and under it a
 // heat strip of the channels listened to with a valid signal. `rx-x` parts fold away on small
 // screens until expanded.
+// Tuned to an internet station (the NET band), the same faceplate becomes an internet receiver:
+// the station's name in the readout, its stream where the modes were, the NET favorites as
+// memory channels on the band dial (the arrows and the knob step through them), a buffer meter
+// for the S-meter, and a line for the rig waiting to come back.
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNames } from '../catalog/names';
+import { useMeter, type Meter } from '../hooks/meter';
 import { sLabel, useT } from '../i18n';
 import { altName, isMac } from '../keys/keymap';
 import type { Band } from '../types/generated/Band';
+import { Flag } from './Flag';
+import { bufferSegs } from './net';
 import type { FreqHeat } from '../types/generated/FreqHeat';
 import type { Mode } from '../types/generated/Mode';
 import type { RxRange } from '../types/generated/RxRange';
@@ -35,6 +42,22 @@ const IDLE_KHZ = 9500;
 const LABEL_CHAR_PX = 7.4;
 /** A heat cell's width where the dial's window is no band (kHz). */
 const HEAT_STEP_KHZ = 5;
+
+/** The signal meter: the one part of the faceplate that follows every reading. */
+function SMeter({ on, meter }: { on: boolean; meter: Meter }) {
+  const t = useT();
+  const db = useMeter(meter);
+  const lit = meterSegments(on ? db : null);
+  return (
+    <div className="sm" aria-label={t.signalMeter}>
+      <span className="lab">{t.signal}</span>
+      <div className="segs">
+        {Array.from({ length: METER_SEGS }, (_, i) => <i key={i} className={i < lit ? 'on' : ''} />)}
+      </div>
+      <span className="sval">{on ? sLabel(db) : '--'}</span>
+    </div>
+  );
+}
 
 /** dB relative to S9 -> lit segments (9 up to S9, one per 10 dB over). */
 export function meterSegments(db: number | null): number {
@@ -109,6 +132,26 @@ function useWidth<T extends HTMLElement>() {
   return [ref, width] as const;
 }
 
+/** The faceplate tuned to an internet station. */
+export interface NetFace {
+  name: string;
+  flag: string | null;
+  country: string;
+  /** `MP3 128k`. */
+  stream: string;
+  /** Audio held ahead; `null` while nobody listens. */
+  bufferMs: number | null;
+  /** The NET favorites, in channel order. */
+  channels: { uuid: string; label: string }[];
+  /** The station tuned. */
+  uuid: string;
+  /** The rig, waiting: `9 610 kHz AM`, or '' when it is off. */
+  rig: string;
+  onChannel: (uuid: string) => void;
+  onStep: (dir: number) => void;
+  onBackToRig: () => void;
+}
+
 /** A frequency in kHz with its unit, for screen readers. */
 const spoken = (khz: number) => (khz >= 1000 ? `${khz / 1000} MHz` : `${khz} kHz`);
 
@@ -116,7 +159,8 @@ interface Props {
   on: boolean;
   freqHz: number | null;
   mode: string | null;
-  strengthDb: number | null;
+  /** The S-meter; only the meter re-renders with it. */
+  meter: Meter;
   /** Every frequency in the schedule, and those on the air now. */
   freqsHz: readonly number[];
   onAirHz: readonly number[];
@@ -138,9 +182,13 @@ interface Props {
   onExpand: () => void;
   onTune: (hz: number) => void;
   onMode: (m: Mode) => void;
+  /** Tuned to an internet station: the NET faceplate instead. */
+  net: NetFace | null;
+  /** The span switch's NET: to the internet stations (while internet radio is on). */
+  onNetSpan: (() => void) | null;
 }
 
-export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, spans, coverage, win, profiles, heat, scanBar, star, expanded, onExpand, onTune, onMode }: Props) {
+export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans, coverage, win, profiles, heat, scanBar, star, expanded, onExpand, onTune, onMode, net, onNetSpan }: Props) {
   const t = useT();
   const names = useNames();
   const shown = freqHz === null ? '' : fmtReadout(freqHz);
@@ -158,7 +206,6 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
   };
   const nudge = (khz: number) => { if (on && freqHz !== null) onTune(freqHz + khz * 1000); };
 
-  const lit = meterSegments(on ? strengthDb : null);
   const { w, khz } = win;
   const dialKhz = Math.round(khz);
 
@@ -205,6 +252,95 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
   };
   const lens = !away && w.hi > span.lo_khz && w.lo < span.hi_khz;
   const pct = (k: number) => dialPct(k, span);
+  const netSpan = onNetSpan && (
+    <button type="button" role="radio" aria-checked={!!net} className={net ? 'here' : undefined} onClick={net ? undefined : onNetSpan}>{t.netBand}</button>
+  );
+
+  if (net) {
+    const segs = bufferSegs(net.bufferMs ?? 0, METER_SEGS);
+    const n = net.channels.length;
+    return (
+      <section className="rx net" aria-label={t.receiver}>
+        <div className="rx-main">
+          <div className="rx-top">
+            <div className="readout">
+              <span className="freq net-name" title={net.name}>{net.name}</span>
+              <span className="unit">{t.netBand}</span>
+              {star}
+            </div>
+            <div className="net-chips" aria-label={t.netStream}>
+              {net.stream && <span className="chip">{net.stream}</span>}
+              <span className="chip"><Flag flag={net.flag} title={net.country} />{net.country}</span>
+            </div>
+            <button
+              className="icon-btn dock-more"
+              type="button"
+              aria-expanded={expanded}
+              aria-label={expanded ? t.lessControls : t.moreControls}
+              title={expanded ? t.lessControls : t.moreControls}
+              onClick={onExpand}
+            >
+              {expanded ? '⌄' : '⌃'}
+            </button>
+          </div>
+
+          <div className="bdial">
+            <div className="bdial-head">
+              <button className="icon-btn" type="button" disabled={n === 0} aria-label={t.netPrevChannel} title={t.keyHint(t.netPrevChannel, t.keyPgDn)} onClick={() => net.onStep(-1)}>‹</button>
+              <span className="sr" id={bandId}>{t.bandPick}</span>
+              <Dropdown labelledBy={bandId} className="bdial-pick in net" value="" none={t.netBand} opts={bandOpts} onChange={pickBand} />
+              <button className="icon-btn" type="button" disabled={n === 0} aria-label={t.netNextChannel} title={t.keyHint(t.netNextChannel, t.keyPgUp)} onClick={() => net.onStep(1)}>›</button>
+            </div>
+            <div className="bdial-scale net-channels" role="radiogroup" aria-label={t.netChannels}>
+              {n === 0 ? <p className="net-ch-hint">{t.netChannelsHint}</p> : net.channels.map((c, i) => (
+                <button
+                  key={c.uuid}
+                  type="button"
+                  role="radio"
+                  aria-checked={c.uuid === net.uuid}
+                  className="net-ch"
+                  style={{ left: ((i + 0.5) / n) * 100 + '%' }}
+                  title={c.label}
+                  onClick={() => net.onChannel(c.uuid)}
+                >
+                  {i + 1}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="dial-row rx-x">
+            <div className="dial-side">
+              <div className="sm" aria-label={t.netBufferMeter}>
+                <span className="lab">{t.netBuffer}</span>
+                <div className="segs">
+                  {Array.from({ length: METER_SEGS }, (_, i) => <i key={i} className={i < segs ? 'on' : ''} />)}
+                </div>
+                <span className="sval">{net.bufferMs === null ? '--' : `${(net.bufferMs / 1000).toFixed(1)} s`}</span>
+              </div>
+              {spans.length > 1 && (
+                <div className="seg spans" role="radiogroup" aria-label={t.spansLabel}>
+                  {spans.map((s) => (
+                    <button key={s.id} type="button" role="radio" aria-checked={false} onClick={net.onBackToRig}>
+                      {t.spans[s.id as keyof typeof t.spans] ?? s.id.toUpperCase()}
+                    </button>
+                  ))}
+                  {netSpan}
+                </div>
+              )}
+            </div>
+            <div className="dial net-wait">
+              <p>
+                {net.rig ? t.netRigWaiting(net.rig) : t.netRigIdle}
+                <button className="link" type="button" onClick={net.onBackToRig}>⟲ {t.netBackToRig}</button>
+              </p>
+            </div>
+          </div>
+        </div>
+        <Knob disabled={n === 0} hz={null} coverage={coverage} onTune={() => {}} onStep={(clicks) => net.onStep(clicks)} />
+      </section>
+    );
+  }
 
   return (
     <section className={'rx' + (on ? '' : ' off')} aria-label={t.receiver}>
@@ -303,13 +439,7 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
 
         <div className="dial-row rx-x">
           <div className="dial-side">
-            <div className="sm" aria-label={t.signalMeter}>
-              <span className="lab">{t.signal}</span>
-              <div className="segs">
-                {Array.from({ length: METER_SEGS }, (_, i) => <i key={i} className={i < lit ? 'on' : ''} />)}
-              </div>
-              <span className="sval">{on ? sLabel(strengthDb) : '--'}</span>
-            </div>
+            <SMeter on={on} meter={meter} />
             {spans.length > 1 && (
               <div className="seg spans" role="radiogroup" aria-label={t.spansLabel}>
                 {spans.map((s) => (
@@ -317,6 +447,7 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
                     {t.spans[s.id as keyof typeof t.spans] ?? s.id.toUpperCase()}
                   </button>
                 ))}
+                {netSpan}
               </div>
             )}
           </div>

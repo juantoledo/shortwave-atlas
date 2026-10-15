@@ -4,19 +4,20 @@
 //
 // The globe: night falls in its shader (geo/night.ts), the terminator moving as it does, and
 // towers rise and sink as their sites come on and go off the air (`stableSites`). The great-circle
-// path home is a line of our own in its scene, drawn on as the route lands.
+// path home is a line of our own in its scene, drawn on as the route lands; a transmitter's
+// signal hops over it as three-globe paths (a fat line for the pulse), growing in with it.
 // The canvas may cover the whole window, behind the panels (styles.css, `data-globe="full"`):
 // the globe is then centred on the stage (`globeOffset`) and sized for it, the rest is overflow.
 
 import { Component, memo, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import GlobeGL, { type GlobeMethods } from 'react-globe.gl';
-import { BufferAttribute, BufferGeometry, CanvasTexture, Line, LineBasicMaterial, MeshPhongMaterial, SRGBColorSpace } from 'three';
+import { BufferAttribute, BufferGeometry, CanvasTexture, Line, LineBasicMaterial, MeshPhongMaterial, SRGBColorSpace, Texture } from 'three';
 import { angleDeg, fitAltitude, greatCircle, sunVec, type LatLon } from '../geo/geo';
 import { applyNight, type Night } from '../geo/night';
-import { GlobeTexture, makeStars } from '../geo/texture';
+import { GlobeTexture, makeStars, textureWidth } from '../geo/texture';
 import { FlatView } from './FlatMap';
 import { Controls } from './stage/Controls';
-import { MAX_ALT, MIN_ALT, REDUCE, ringColor, ringNow, siteAltitude, siteColor, siteRadius, siteTip, TOWER_MS, ARC_IN_MS, type Pin, type Ring } from './stage/fx';
+import { MAX_ALT, MIN_ALT, REDUCE, ringColor, ringNow, siteAltitude, siteColor, siteRadius, siteTip, TOWER_MS, ARC_IN_MS, ROUTE_MS, type Pin, type Ring } from './stage/fx';
 import { useStage, type Camera, type ViewProps } from './stage/useStage';
 import { useStageShape } from './stage/useStageShape';
 import { stableSites } from './stableSites';
@@ -24,8 +25,6 @@ import type { SiteDot } from '../types/generated/SiteDot';
 
 /** How often the sun moves (a uniform: this costs nothing). */
 const SUN_MS = 1000;
-/** Texture width; capped by the GPU's limit. */
-const TEXTURE_WIDTH = 4096;
 
 /** A 1×1 ocean-coloured image: three-globe only reports "ready" after loading an image. */
 function placeholder(): string {
@@ -39,7 +38,7 @@ function placeholder(): string {
 
 /** The great-circle path from `site` to `qth` as a line just above the ground (`coords`: the
  *  globe's), a vertex per degree, to be drawn on with its draw range. */
-function routeLine(site: LatLon, qth: LatLon, coords: GlobeMethods['getCoords']): Line {
+function routeLine(site: LatLon, qth: LatLon, coords: GlobeMethods['getCoords'], rgb = '255,200,130'): Line {
   const pts = greatCircle(site, qth, Math.max(16, Math.round(angleDeg(site, qth))));
   const pos = new Float32Array(pts.length * 3);
   pts.forEach((p, i) => {
@@ -48,13 +47,16 @@ function routeLine(site: LatLon, qth: LatLon, coords: GlobeMethods['getCoords'])
   });
   const geom = new BufferGeometry();
   geom.setAttribute('position', new BufferAttribute(pos, 3));
-  return new Line(geom, new LineBasicMaterial({ color: 0xffc882, transparent: true, opacity: 0.4, depthWrite: false }));
+  const [r, g, b] = rgb.split(',').map(Number);
+  return new Line(geom, new LineBasicMaterial({ color: (r << 16) | (g << 8) | b, transparent: true, opacity: 0.4, depthWrite: false }));
 }
 
 // Accessors live out here (or in useCallback) so each render hands the globe the same functions:
 // a new `htmlElement` makes three-globe rebuild every pin, which replays their fade-in (a blink),
 // and any other new accessor re-applies its whole layer.
 const pinEl = (d: object) => (d as Pin).el;
+/** A skywave point's altitude (three-globe's own default is a constant, flat on the ground). */
+const hopAlt = (p: object) => (p as [number, number, number])[2];
 
 function GlobeView(props: ViewProps) {
   const { qth, frame: framing, onFrame, paused, sites, activeSite, loggedSites, listenedSites, mode, onMode } = props;
@@ -65,7 +67,7 @@ function GlobeView(props: ViewProps) {
   const placeholderUrl = useMemo(placeholder, []);
   // our own material (three-globe's default), so the drawn texture can be swapped in
   const material = useMemo(() => new MeshPhongMaterial({ color: 0x000000 }), []);
-  const texture = useRef<{ tex: CanvasTexture; night: Night } | null>(null);
+  const texture = useRef<{ tex: Texture; night: Night } | null>(null);
   /** The route's line, drawn on as `routeProgress` goes. */
   const routing = useRef<Line | null>(null);
   const handlers = useRef({ onQth: props.onQth, onSite: props.onSite, siteLabel: props.siteLabel });
@@ -94,9 +96,11 @@ function GlobeView(props: ViewProps) {
   /** Swap the placeholder for the drawn texture, shaded for day and night by the sun. */
   const loadTexture = useCallback(async (g: GlobeMethods) => {
     const caps = g.renderer().capabilities;
-    const gt = await GlobeTexture.shared(Math.min(TEXTURE_WIDTH, caps.maxTextureSize));
+    const gt = await GlobeTexture.shared(Math.min(textureWidth(), caps.maxTextureSize));
     if (texture.current || !globe.current) return;
-    const tex = new CanvasTexture(gt.base);
+    // the base layer is the loaded image itself (or a canvas, scaled down for a small GPU)
+    const tex = new Texture(gt.base);
+    tex.needsUpdate = true;
     tex.colorSpace = SRGBColorSpace;
     tex.anisotropy = caps.getMaxAnisotropy();
     const lights = new CanvasTexture(gt.lights);
@@ -146,7 +150,7 @@ function GlobeView(props: ViewProps) {
   useEffect(() => {
     const g = globe.current;
     if (!stage.ready || !g || !path) return;
-    const line = routeLine(path.site, qth, g.getCoords);
+    const line = routeLine(path.site, qth, g.getCoords, path.rgb);
     line.geometry.setDrawRange(0, Math.ceil(routeProgress(performance.now()) * line.geometry.getAttribute('position').count));
     g.scene().add(line);
     routing.current = line;
@@ -162,6 +166,7 @@ function GlobeView(props: ViewProps) {
   const ringMaxR = useCallback((d: object) => ringNow(d as Ring, level.current).maxR, [level]);
   const ringSpeed = useCallback((d: object) => ringNow(d as Ring, level.current).speed, [level]);
   const ringPeriod = useCallback((d: object) => ringNow(d as Ring, level.current).period, [level]);
+  const ringAlt = useCallback((d: object) => 0.003 + ((d as Ring).alt ?? 0), []);
   const ringColorFn = useCallback((d: object) => {
     const r = d as Ring;
     return (t: number) => ringColor(r, t, ringNow(r, level.current).alpha);
@@ -230,7 +235,7 @@ function GlobeView(props: ViewProps) {
             ringsData={stage.rings}
             ringLat="lat"
             ringLng="lng"
-            ringAltitude={0.003}
+            ringAltitude={ringAlt}
             ringColor={ringColorFn}
             ringMaxRadius={ringMaxR}
             ringPropagationSpeed={ringSpeed}
@@ -247,6 +252,15 @@ function GlobeView(props: ViewProps) {
             arcDashAnimateTime="anim"
             arcAltitudeAutoScale={0.42}
             arcsTransitionDuration={ARC_IN_MS}
+            pathsData={stage.sky}
+            pathPoints="pts"
+            pathPointAlt={hopAlt}
+            pathColor="colors"
+            pathStroke="stroke"
+            pathDashLength="dash"
+            pathDashGap="gap"
+            pathDashAnimateTime="anim"
+            pathTransitionDuration={REDUCE ? 0 : ROUTE_MS}
           />
         )}
       </div>

@@ -42,3 +42,6 @@ rate = 16000                  # 16-bit mono PCM: 16 kHz = 256 kbit/s per listene
 [update]                      # "Update available": one small file from GitHub Pages, nothing about you is sent
 check = true                  # at start and every 6 hours; or Settings → Updates (SWATLAS_UPDATE_CHECK=0)
 channel = "stable"            # "beta" also offers release candidates
+
+[net]                         # the NET band: internet radio from radio-browser.info (public-domain directory)
+enabled = false               # off until you turn it on; or Settings → Sources. Searches go to radio-browser.info

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { altitudeAt, angleDeg, fitAltitude, frame, frameAltitude, frameWithHome, fromVec, greatCircle, hermiteEase, initialSlope, midpoint, pingAlpha, pingRadius, receivedRing, slerp, sunPos, sunVec, toVec } from './geo';
+import { altitudeAt, angleDeg, fitAltitude, frame, frameAltitude, frameWithHome, fromVec, greatCircle, hermiteEase, initialSlope, midpoint, pingAlpha, pingRadius, receivedRing, skyHops, skyTier, skywave, slerp, sunPos, sunVec, toVec } from './geo';
 
 const SANTIAGO = { lat: -33.45, lon: -70.67 };
 const GREENVILLE = { lat: 35.47, lon: -77.19 };
@@ -172,5 +172,59 @@ describe('received ring', () => {
     expect(strong.period).toBeLessThan(weak.period);
     expect(strong.alpha).toBeGreaterThan(weak.alpha);
     for (const r of [weak, s9, strong]) expect(r.speed * (r.period / 1000)).toBeCloseTo(r.maxR, 9);
+  });
+});
+
+describe('skywave', () => {
+  it('takes a hop per ~3500 km, one at least and eight at most', () => {
+    expect(skyHops(0)).toBe(1);
+    expect(skyHops(30)).toBe(1);
+    expect(skyHops(32)).toBe(2);
+    expect(skyHops(180)).toBe(6);
+    expect(skyHops(1000)).toBe(8);
+  });
+
+  it('runs from the transmitter to home, on the ground at each bounce and up between', () => {
+    const { hops, pts, bounces } = skywave(SANTIAGO, GREENVILLE);
+    expect(hops).toBe(3);
+    expect(pts[0][0]).toBeCloseTo(SANTIAGO.lat, 9);
+    expect(pts[pts.length - 1][1]).toBeCloseTo(GREENVILLE.lon, 9);
+    const per = (pts.length - 1) / hops;
+    expect(Number.isInteger(per)).toBe(true);
+    for (let k = 0; k <= hops; k++) expect(pts[k * per][2]).toBeCloseTo(0, 9);
+    // off the ionosphere at each top, off the ground between hops
+    expect(bounces.map((b) => b.along)).toEqual([1, 2, 3, 4, 5].map((k) => k / 6));
+    expect(bounces.map((b) => b.alt > 0)).toEqual([true, false, true, false, true]);
+    expect(bounces[1]).toEqual({ lat: pts[per][0], lon: pts[per][1], alt: pts[per][2], along: 1 / 3 });
+    const top = Math.max(...pts.map((p) => p[2]));
+    expect(pts[per / 2][2]).toBeCloseTo(top, 9);
+    expect(top).toBeGreaterThan(0.03);
+    expect(top).toBeLessThanOrEqual(0.12);
+    for (const p of pts) expect(p[2]).toBeGreaterThanOrEqual(0);
+  });
+
+  it('a station at home still makes one small hop', () => {
+    const { hops, pts, bounces } = skywave(SANTIAGO, SANTIAGO);
+    expect(hops).toBe(1);
+    expect(bounces).toHaveLength(1);
+    expect(bounces[0].along).toBe(0.5);
+    expect(pts.length).toBeGreaterThan(2);
+  });
+
+  it('looks weak, fair or strong by the S-meter, and holds its look on an edge', () => {
+    expect(skyTier(null, 2)).toBe(0);
+    expect(skyTier(-54, 0)).toBe(1); // S0
+    expect(skyTier(-12, 0)).toBe(2); // S7
+    expect(skyTier(20, 0)).toBe(3); // S9+20
+    // S5 is -24 dB: just over it from below stays weak, just under it from above stays fair
+    expect(skyTier(-23, 1)).toBe(1);
+    expect(skyTier(-20, 1)).toBe(2);
+    expect(skyTier(-25, 2)).toBe(2);
+    expect(skyTier(-28, 2)).toBe(1);
+    // S9 is 0 dB
+    expect(skyTier(2, 2)).toBe(2);
+    expect(skyTier(6, 2)).toBe(3);
+    expect(skyTier(-2, 3)).toBe(3);
+    expect(skyTier(-54, 3)).toBe(1);
   });
 });

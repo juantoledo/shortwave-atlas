@@ -34,9 +34,13 @@ interface Props {
   onClose: () => void;
   onError: (e: unknown) => void;
   onApplied: () => void;
+  /** Internet radio (the NET band) is on. */
+  net: boolean;
+  /** Internet radio was just turned on: the station list goes to the NET band. */
+  onNetOn: () => void;
 }
 
-export function Settings({ api, os, rig, update, display, meta, mine, tab, onTab, onClose, onError, onApplied }: Props) {
+export function Settings({ api, os, rig, update, display, meta, mine, tab, onTab, onClose, onError, onApplied, net, onNetOn }: Props) {
   const t = useT();
   const label = { rig: t.rigSection, audio: t.audioSection, sources: t.sourcesSection, display: t.displaySection, updates: t.updatesSection };
   const tabs = (
@@ -51,7 +55,7 @@ export function Settings({ api, os, rig, update, display, meta, mine, tab, onTab
       {/* all mounted, so a half-filled form survives a tab switch */}
       <div hidden={tab !== 'rig'}><RigSection api={api} os={os} rig={rig} onError={onError} onApplied={onApplied} /></div>
       <div hidden={tab !== 'audio'}><AudioSection api={api} os={os} onError={onError} onApplied={onApplied} /></div>
-      <div hidden={tab !== 'sources'}><SourcesSection api={api} meta={meta} mine={mine} onError={onError} /></div>
+      <div hidden={tab !== 'sources'}><SourcesSection api={api} meta={meta} mine={mine} net={net} onError={onError} onApplied={onApplied} onNetOn={onNetOn} /></div>
       <div hidden={tab !== 'display'}><DisplaySection display={display} /></div>
       <div hidden={tab !== 'updates'}><UpdatesSection update={update} onError={onError} /></div>
     </Sheet>

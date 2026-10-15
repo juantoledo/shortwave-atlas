@@ -4,6 +4,8 @@
 //! keeps a copy of the station heard (`StationRef`, as favorites do), so the history outlives
 //! the schedule version it was recorded under.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -130,6 +132,15 @@ pub fn trim(list: &mut Vec<Session>) -> bool {
     let over = list.len().saturating_sub(MAX_SESSIONS);
     list.drain(..over);
     over > 0
+}
+
+/// Keep the first session of each id (two processes recording into one file write some twice);
+/// how many went.
+pub fn dedupe(list: &mut Vec<Session>) -> usize {
+    let n = list.len();
+    let mut seen = HashSet::new();
+    list.retain(|s| seen.insert(s.id.clone()));
+    n - list.len()
 }
 
 /// Forget the sessions that ended before `before`, or all of them (`None`); how many went.
@@ -596,6 +607,12 @@ pub(crate) mod tests {
         assert_eq!(l[0].id, "x");
         assert_eq!(clear_before(&mut l, None), 1);
         assert!(l.is_empty());
+        // the same session written twice (by two processes): the first stays
+        let twin = Session { end: s.end + 1, ..s.clone() };
+        let mut l = vec![s.clone(), list[1].clone(), twin];
+        assert_eq!(dedupe(&mut l), 1);
+        assert_eq!(l, [s.clone(), list[1].clone()]);
+        assert_eq!(dedupe(&mut l), 0);
         let mut many = vec![s; MAX_SESSIONS + 3];
         assert!(trim(&mut many) && many.len() == MAX_SESSIONS);
     }

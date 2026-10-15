@@ -11,6 +11,7 @@ import type { Scan } from '../types/generated/Scan';
 import type { ScanSpeed } from '../types/generated/ScanSpeed';
 import type { ScanStatus } from '../types/generated/ScanStatus';
 import type { ScanSummary } from '../types/generated/ScanSummary';
+import { unlessSame } from './same';
 
 const BUSY_MS = 300;
 /** A scan started from another window shows up within this. */
@@ -19,12 +20,17 @@ const IDLE_MS = 5000;
 export function useScan(api: Api | null, onError: (e: unknown) => void, generation: number | null) {
   const [status, setStatus] = useState<ScanStatus>({ state: 'idle' });
   const [scans, setScans] = useState<ScanSummary[]>([]);
+  /** The saved scans have been read once (until then, `scans` being empty says nothing). */
+  const [loaded, setLoaded] = useState(false);
   const [logbook, setLogbook] = useState<Logged[]>([]);
   const cache = useRef(new Map<string, Promise<Scan>>());
 
   const reload = useCallback(() => {
     if (!api) return;
-    api.scans().then(setScans, () => {});
+    api.scans().then((s) => {
+      setScans(s);
+      setLoaded(true);
+    }, () => {});
     api.logbook().then(setLogbook, () => {});
   }, [api]);
   useEffect(reload, [reload, generation]);
@@ -42,7 +48,7 @@ export function useScan(api: Api | null, onError: (e: unknown) => void, generati
 
   useEffect(() => {
     if (!api) return;
-    const tick = () => void api.scanStatus().then(setStatus, () => {});
+    const tick = () => void api.scanStatus().then((s) => setStatus(unlessSame(s)), () => {});
     tick();
     const id = setInterval(tick, running ? BUSY_MS : IDLE_MS);
     return () => clearInterval(id);
@@ -106,7 +112,7 @@ export function useScan(api: Api | null, onError: (e: unknown) => void, generati
 
   const logged = useMemo(() => new Map(logbook.map((l) => [l.station_id, l])), [logbook]);
   const loggedSites = useMemo(() => new Set(logbook.map((l) => l.site_id)), [logbook]);
-  return { status, finished, scans, logged, loggedSites, start, stop, remove, removeAll, load };
+  return { status, finished, scans, loaded, logged, loggedSites, start, stop, remove, removeAll, load };
 }
 
 export type ScanApi = ReturnType<typeof useScan>;

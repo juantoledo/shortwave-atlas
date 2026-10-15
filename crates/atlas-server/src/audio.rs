@@ -5,11 +5,15 @@
 //! browsers on `GET /api/audio`, the desktop app over a Tauri channel. The capture runs only
 //! while someone listens. A slow listener loses blocks instead of growing a backlog, so
 //! latency cannot creep up.
+//!
+//! The hub is the receiver's one output: it plays the rig, or an internet station instead (the
+//! NET band, `net_audio`) for every listener alike. Switching ends every listener's stream, as a
+//! new audio choice does, and they reconnect to the new source and rate.
 
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -18,6 +22,7 @@ use atlas_core::audio::{
     cards_from_names, find_device, parse_asound, pick_capture_format, rate_drift, AudioChoice, AudioStatus,
     AudioTuning, CaptureFailure, CaptureFormat, CaptureOffer, Converter, SampleKind, SoundCard,
 };
+use atlas_core::net::{JitterBuffer, NetNow, NetPlaying, NetState, NetStream, NET_RATE};
 use atlas_core::platform::Os;
 use bytes::Bytes;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -34,11 +39,17 @@ const DRIFT_CHECK: Duration = Duration::from_secs(10);
 const SILENCE: Duration = Duration::from_secs(3);
 /// How often the capture thread looks at its stop flag.
 const POLL: Duration = Duration::from_millis(100);
+/// After an internet stream fails, listeners are refused this long before it is tried again.
+const NET_BACKOFF: Duration = Duration::from_secs(10);
 
-/// A running capture thread; it owns the cpal stream and stops it when `stop` is set.
-struct Capture {
-    stop: Arc<AtomicBool>,
-    thread: JoinHandle<()>,
+/// A running source: the capture thread (it owns the cpal stream and stops it when `stop` is
+/// set), or an internet stream's decoder thread and its tasks.
+pub(crate) struct Capture {
+    pub(crate) stop: Arc<AtomicBool>,
+    pub(crate) thread: JoinHandle<()>,
+    pub(crate) tasks: Vec<tokio::task::AbortHandle>,
+    /// An internet stream's audio held ahead.
+    pub(crate) jitter: Option<Arc<Mutex<JitterBuffer>>>,
 }
 
 struct Inner {
@@ -53,6 +64,10 @@ struct Inner {
     last_error: Option<String>,
     failure: Option<CaptureFailure>,
     log: VecDeque<String>,
+    /// The internet station played instead of the rig.
+    net: Option<NetStream>,
+    /// Why its stream last failed, and when.
+    net_failed: Option<(Instant, String)>,
 }
 
 impl Inner {
@@ -62,7 +77,19 @@ impl Inner {
         self.silent = false;
         let c = self.capture.take()?;
         c.stop.store(true, Ordering::Relaxed);
+        for t in &c.tasks {
+            t.abort();
+        }
         Some(c.thread)
+    }
+
+    /// End every stream and start from a new source: listeners reconnect to it.
+    fn switch(&mut self, net: Option<NetStream>) {
+        self.stop();
+        self.subs.clear(); // dropping the senders closes the streams
+        self.generation += 1;
+        self.net = net;
+        self.net_failed = None;
     }
 }
 
@@ -75,6 +102,8 @@ pub enum OpenError {
     Disabled,
     /// The capture thread could not be started.
     Spawn(std::io::Error),
+    /// The internet station's stream failed a moment ago.
+    Net(String),
 }
 
 impl std::fmt::Display for OpenError {
@@ -82,6 +111,7 @@ impl std::fmt::Display for OpenError {
         match self {
             Self::Disabled => write!(f, "audio is disabled"),
             Self::Spawn(e) => write!(f, "could not start the audio capture: {e}"),
+            Self::Net(why) => write!(f, "the internet station can't be played: {why}"),
         }
     }
 }
@@ -93,13 +123,39 @@ pub struct Subscription {
     rx: mpsc::Receiver<Bytes>,
     id: u64,
     hub: Weak<AudioHub>,
+    /// The stream ended while a batch was gathered (`next_batch` returned what it had).
+    ended: bool,
 }
 
 impl Subscription {
     /// The next block, or `None` when the stream ended (the capture stopped, the audio was
     /// reconfigured, or nothing arrived for `AUDIO_STALL`).
     pub async fn next_block(&mut self) -> Option<Bytes> {
+        if self.ended {
+            return None;
+        }
         tokio::time::timeout(AUDIO_STALL, self.rx.recv()).await.ok().flatten()
+    }
+
+    /// Blocks joined until at least `min_bytes` (the end of the stream sends what is left), or
+    /// `None` when it ended. Fewer, larger messages for a transport that pays per message.
+    pub async fn next_batch(&mut self, min_bytes: usize) -> Option<Bytes> {
+        let first = self.next_block().await?;
+        if first.len() >= min_bytes {
+            return Some(first);
+        }
+        let mut batch = Vec::with_capacity(min_bytes + first.len());
+        batch.extend_from_slice(&first);
+        while batch.len() < min_bytes {
+            match self.next_block().await {
+                Some(b) => batch.extend_from_slice(&b),
+                None => {
+                    self.ended = true;
+                    break;
+                }
+            }
+        }
+        Some(batch.into())
     }
 }
 
@@ -125,6 +181,8 @@ impl AudioHub {
                 last_error: None,
                 failure: None,
                 log: VecDeque::new(),
+                net: None,
+                net_failed: None,
             }),
         })
     }
@@ -141,28 +199,109 @@ impl AudioHub {
 
     pub fn subscribe(self: &Arc<Self>) -> Result<Subscription, OpenError> {
         let mut inner = self.inner.lock().expect("audio lock");
-        if !inner.choice.enabled {
-            return Err(OpenError::Disabled);
+        match (&inner.net, &inner.net_failed) {
+            (None, _) if !inner.choice.enabled => return Err(OpenError::Disabled),
+            (Some(_), Some((at, why))) if at.elapsed() < NET_BACKOFF => return Err(OpenError::Net(why.clone())),
+            _ => {}
         }
         if inner.capture.is_none() {
             inner.generation += 1;
-            let (hub, generation, choice) = (Arc::downgrade(self), inner.generation, inner.choice.clone());
-            let stop = Arc::new(AtomicBool::new(false));
-            let flag = stop.clone();
-            let thread = std::thread::Builder::new()
-                .name("audio-capture".into())
-                .spawn(move || run_capture(hub, generation, choice, flag))
-                .map_err(OpenError::Spawn)?;
-            inner.capture = Some(Capture { stop, thread });
-            inner.last_error = None;
-            inner.failure = None;
-            inner.log.clear();
+            let (hub, generation) = (Arc::downgrade(self), inner.generation);
+            match inner.net.clone() {
+                Some(stream) => {
+                    let block_ms = inner.choice.tuning.block_ms;
+                    inner.capture = Some(crate::net_audio::start(hub, generation, stream, block_ms)?);
+                    inner.net_failed = None;
+                }
+                None => {
+                    let choice = inner.choice.clone();
+                    let stop = Arc::new(AtomicBool::new(false));
+                    let flag = stop.clone();
+                    let thread = std::thread::Builder::new()
+                        .name("audio-capture".into())
+                        .spawn(move || run_capture(hub, generation, choice, flag))
+                        .map_err(OpenError::Spawn)?;
+                    inner.capture = Some(Capture { stop, thread, tasks: vec![], jitter: None });
+                    inner.last_error = None;
+                    inner.failure = None;
+                    inner.log.clear();
+                }
+            }
         }
         let (tx, rx) = mpsc::channel(Self::queue_blocks(&inner.choice.tuning));
         let id = inner.next_id;
         inner.next_id += 1;
         inner.subs.push((id, tx));
-        Ok(Subscription { rate: inner.choice.rate, rx, id, hub: Arc::downgrade(self) })
+        let rate = if inner.net.is_some() { NET_RATE } else { inner.choice.rate };
+        Ok(Subscription { rate, rx, id, hub: Arc::downgrade(self), ended: false })
+    }
+
+    /// Tune to an internet station instead of the rig, for every listener. Its stream is fetched
+    /// only while someone listens.
+    pub fn tune_net(&self, stream: NetStream) {
+        self.inner.lock().expect("audio lock").switch(Some(stream));
+    }
+
+    /// Back to the rig, if an internet station was playing; `true` if one was.
+    pub fn stop_net(&self) -> bool {
+        let mut inner = self.inner.lock().expect("audio lock");
+        let was = inner.net.is_some();
+        if was {
+            inner.switch(None);
+        }
+        was
+    }
+
+    /// An internet station is the source (playing, connecting or failed).
+    pub fn net_selected(&self) -> bool {
+        self.inner.lock().expect("audio lock").net.is_some()
+    }
+
+    /// The internet station tuned and how its stream is doing (where it is, is the caller's to
+    /// fill: `atlas_core::net::locate`).
+    pub fn net_now(&self) -> Option<NetNow> {
+        let inner = self.inner.lock().expect("audio lock");
+        let stream = inner.net.as_ref()?;
+        let state = match (&inner.net_failed, inner.running, &inner.capture) {
+            (Some((_, why)), _, _) => NetState::Failed { message: why.clone() },
+            (None, true, _) => NetState::Playing,
+            (None, false, Some(_)) => NetState::Connecting,
+            (None, false, None) => NetState::Tuned,
+        };
+        let buffer_ms = inner
+            .capture
+            .as_ref()
+            .and_then(|c| c.jitter.as_ref())
+            .map_or(0, |j| j.lock().expect("jitter buffer").held_ms());
+        Some(NetNow {
+            station: stream.station.clone(),
+            state,
+            buffer_ms,
+            place: None,
+            route: None,
+            sun: None,
+            listened_secs: 0,
+        })
+    }
+
+    /// The internet station whose audio is going out now (for the NET listening history).
+    pub fn net_playing(&self) -> Option<NetPlaying> {
+        let inner = self.inner.lock().expect("audio lock");
+        let playing = inner.running && inner.net_failed.is_none();
+        inner.net.as_ref().filter(|_| playing).map(|s| NetPlaying::of(&s.station))
+    }
+
+    /// The internet stream stopped on its own: say why, end every stream, and refuse listeners
+    /// for `NET_BACKOFF` (they come back and try again after it).
+    pub(crate) fn net_ended(&self, generation: u64, why: String) {
+        let mut inner = self.inner.lock().expect("audio lock");
+        if inner.generation != generation || inner.net.is_none() || inner.capture.is_none() {
+            return;
+        }
+        tracing::warn!("internet station stopped: {why}");
+        inner.stop();
+        inner.subs.clear();
+        inner.net_failed = Some((Instant::now(), why));
     }
 
     fn unsubscribe(&self, id: u64) {
@@ -174,9 +313,14 @@ impl AudioHub {
     }
 
     /// Switch to a new choice: stop the capture and end every stream. Listeners reconnect
-    /// and get the new device and rate (or a refusal, if audio is now disabled).
+    /// and get the new device and rate (or a refusal, if audio is now disabled). An internet
+    /// station playing instead goes on.
     pub fn reconfigure(&self, choice: AudioChoice) {
         let mut inner = self.inner.lock().expect("audio lock");
+        if inner.net.is_some() {
+            inner.choice = choice;
+            return;
+        }
         inner.stop();
         inner.subs.clear(); // dropping the senders closes the streams
         inner.generation += 1;
@@ -205,9 +349,10 @@ impl AudioHub {
 
     pub fn status(&self) -> AudioStatus {
         let inner = self.inner.lock().expect("audio lock");
+        // the rig's capture: an internet station playing instead is not it
         AudioStatus {
             enabled: inner.choice.enabled,
-            running: inner.running,
+            running: inner.running && inner.net.is_none(),
             listeners: inner.subs.len() as u32,
             last_error: inner.last_error.clone(),
             failure: inner.failure,
@@ -216,7 +361,7 @@ impl AudioHub {
         }
     }
 
-    fn fan_out(&self, generation: u64, block: Bytes) {
+    pub(crate) fn fan_out(&self, generation: u64, block: Bytes) {
         let mut inner = self.inner.lock().expect("audio lock");
         if inner.generation != generation {
             return;
@@ -283,7 +428,9 @@ fn run_capture(hub: Weak<AudioHub>, generation: u64, choice: AudioChoice, stop: 
     };
     let end = |why: String, failure| with_hub(&|h| h.ended(generation, why.clone(), failure));
     let (tx, rx) = sync_channel::<Event>(64);
-    let (_stream, name, fmt) = match open(&choice, tx) {
+    // the sample buffers go back to the callback once read, so it needn't allocate
+    let (back, spare) = sync_channel::<Vec<f32>>(64);
+    let (_stream, name, fmt) = match open(&choice, tx, spare) {
         Ok(opened) => opened,
         Err((why, failure)) => return end(why, failure),
     };
@@ -331,6 +478,7 @@ fn run_capture(hub: Weak<AudioHub>, generation: u64, choice: AudioChoice, stop: 
                     let block = Bytes::from(std::mem::replace(&mut pcm, Vec::with_capacity(chunk * 2)));
                     with_hub(&|h| h.fan_out(generation, block.clone()));
                 }
+                let _ = back.try_send(samples);
             }
             Ok(Event::Error(e)) => match e.kind() {
                 // the stream goes on
@@ -355,6 +503,7 @@ fn run_capture(hub: Weak<AudioHub>, generation: u64, choice: AudioChoice, stop: 
 fn open(
     choice: &AudioChoice,
     tx: SyncSender<Event>,
+    spare: Receiver<Vec<f32>>,
 ) -> Result<(cpal::Stream, String, CaptureFormat), (String, CaptureFailure)> {
     let fail = |what: &str, e: cpal::Error| (format!("{}: {what}: {e}", choice.device), failure_of(&e));
     let host = cpal::default_host();
@@ -385,10 +534,10 @@ fn open(
     let config =
         cpal::StreamConfig { channels: fmt.channels, sample_rate: fmt.rate, buffer_size: cpal::BufferSize::Default };
     let stream = match fmt.format {
-        SampleKind::F32 => build::<f32>(dev, config, tx),
-        SampleKind::I16 => build::<i16>(dev, config, tx),
-        SampleKind::I32 => build::<i32>(dev, config, tx),
-        SampleKind::U16 => build::<u16>(dev, config, tx),
+        SampleKind::F32 => build::<f32>(dev, config, tx, spare),
+        SampleKind::I16 => build::<i16>(dev, config, tx, spare),
+        SampleKind::I32 => build::<i32>(dev, config, tx, spare),
+        SampleKind::U16 => build::<u16>(dev, config, tx, spare),
         SampleKind::Other => unreachable!("pick_capture_format never picks it"),
     }
     .map_err(|e| fail("opening it", e))?;
@@ -398,16 +547,29 @@ fn open(
 
 /// An input stream that sends its samples, as f32, and its errors to `tx`. A full channel
 /// (the capture thread is behind) drops the samples rather than blocking the audio thread.
-fn build<T>(dev: &cpal::Device, config: cpal::StreamConfig, tx: SyncSender<Event>) -> Result<cpal::Stream, cpal::Error>
+/// The callback runs on the OS's real-time audio thread: it fills buffers the capture thread
+/// hands back (`spare`), or the one it kept from a drop, and allocates only until they go round.
+fn build<T>(
+    dev: &cpal::Device,
+    config: cpal::StreamConfig,
+    tx: SyncSender<Event>,
+    spare: Receiver<Vec<f32>>,
+) -> Result<cpal::Stream, cpal::Error>
 where
     T: SizedSample + Send + 'static,
     f32: FromSample<T>,
 {
     let errors = tx.clone();
+    let mut kept: Option<Vec<f32>> = None;
     dev.build_input_stream::<T, _, _>(
         config,
         move |data: &[T], _: &cpal::InputCallbackInfo| {
-            let _ = tx.try_send(Event::Data(data.iter().map(|&s| s.to_sample::<f32>()).collect()));
+            let mut buf = kept.take().or_else(|| spare.try_recv().ok()).unwrap_or_default();
+            buf.clear();
+            buf.extend(data.iter().map(|&s| s.to_sample::<f32>()));
+            if let Err(TrySendError::Full(Event::Data(buf))) = tx.try_send(Event::Data(buf)) {
+                kept = Some(buf);
+            }
         },
         move |e| {
             let _ = errors.try_send(Event::Error(e));
@@ -493,6 +655,96 @@ mod tests {
         assert_eq!(AudioHub::chunk(16_000, &t), 1_280);
         assert_eq!(AudioHub::queue_blocks(&t), 13); // rounded up
         assert_eq!(AudioHub::queue_blocks(&AudioTuning { block_ms: 100, queue_ms: 100, ..t }), 2);
+    }
+
+    #[tokio::test]
+    async fn batches_join_blocks_and_flush_at_the_end() {
+        let (tx, rx) = mpsc::channel(8);
+        let mut sub = Subscription { rate: 16_000, rx, id: 0, hub: Weak::new(), ended: false };
+        for b in [&[1u8, 2][..], &[3, 4], &[5, 6, 7, 8], &[9, 10], &[11, 12]] {
+            tx.send(Bytes::copy_from_slice(b)).await.unwrap();
+        }
+        drop(tx);
+        assert_eq!(sub.next_batch(4).await.as_deref(), Some(&[1, 2, 3, 4][..]));
+        assert_eq!(sub.next_batch(4).await.as_deref(), Some(&[5, 6, 7, 8][..]), "a big block goes as is");
+        assert_eq!(sub.next_batch(6).await.as_deref(), Some(&[9, 10, 11, 12][..]), "the rest at the end");
+        assert_eq!(sub.next_batch(6).await, None);
+        assert_eq!(sub.next_block().await, None);
+    }
+
+    fn station(uuid: &str, url: &str) -> NetStream {
+        NetStream {
+            station: atlas_core::net::NetStation {
+                uuid: uuid.into(),
+                name: format!("Radio {uuid}"),
+                itu: None,
+                flag: None,
+                langs: vec![],
+                tags: vec![],
+                codec: Some("MP3".into()),
+                bitrate: None,
+                hls: false,
+                homepage: None,
+                ok: true,
+                votes: 0,
+                playable: true,
+                pos: None,
+            },
+            url: url.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn tuned_fetches_nothing_until_someone_listens() {
+        let hub = AudioHub::new(AudioChoice { enabled: false, ..codec(16_000) });
+        hub.tune_net(station("a", "http://127.0.0.1:9/"));
+        let now = hub.net_now().unwrap();
+        assert_eq!((now.state, now.buffer_ms, hub.status().listeners), (NetState::Tuned, 0, 0));
+        let sub = hub.subscribe().unwrap();
+        assert!(matches!(hub.net_now().unwrap().state, NetState::Connecting | NetState::Failed { .. }));
+        drop(sub);
+        hub.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn an_internet_station_plays_without_rig_audio_and_waits_after_failing() {
+        let hub = AudioHub::new(AudioChoice { enabled: false, ..codec(16_000) });
+        // nothing listens there: the stream fails at once
+        hub.tune_net(station("a", "http://127.0.0.1:9/"));
+        let mut sub = hub.subscribe().unwrap();
+        assert_eq!(sub.rate, NET_RATE);
+        assert_eq!(hub.net_now().map(|n| n.state), Some(NetState::Connecting));
+        assert!(sub.next_block().await.is_none());
+        for _ in 0..100 {
+            if matches!(hub.net_now().map(|n| n.state), Some(NetState::Failed { .. })) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(matches!(hub.net_now().map(|n| n.state), Some(NetState::Failed { .. })), "{:?}", hub.net_now());
+        assert!(matches!(hub.subscribe(), Err(OpenError::Net(_))), "listeners wait out the backoff");
+        assert_eq!(hub.net_playing(), None);
+        assert!(!hub.status().running, "the rig's capture is not running");
+        // back to the rig, whose audio is off
+        assert!(hub.stop_net());
+        assert!(!hub.stop_net());
+        assert!(matches!(hub.subscribe(), Err(OpenError::Disabled)));
+        hub.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn another_station_ends_every_stream() {
+        let hub = AudioHub::new(AudioChoice { enabled: false, ..codec(16_000) });
+        hub.tune_net(station("a", "http://127.0.0.1:9/"));
+        let mut sub = hub.subscribe().unwrap();
+        hub.tune_net(station("b", "http://127.0.0.1:9/"));
+        assert_eq!(hub.status().listeners, 0);
+        assert!(sub.next_block().await.is_none());
+        assert_eq!(hub.net_now().map(|n| n.station.uuid), Some("b".into()));
+        // a new audio choice leaves the station playing
+        hub.reconfigure(codec(8_000));
+        assert!(hub.net_selected());
+        hub.shutdown().await;
     }
 
     #[tokio::test]

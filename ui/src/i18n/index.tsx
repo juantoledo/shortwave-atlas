@@ -49,20 +49,31 @@ export const fmtKm = (t: Messages, km: number) => Math.round(km).toLocaleString(
 /** kHz with one decimal, e.g. 13570.0 */
 export const fmtKhz = (hz: number) => (hz / 1000).toFixed(1);
 
+const formats = new Map<string, Intl.DateTimeFormat>();
+
+/** A date formatter, made once per locale and options: making one costs far more than using it,
+ *  and the lists format a date per row. */
+export function dateFmt(locale: string, o: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = locale + JSON.stringify(o);
+  let f = formats.get(key);
+  if (!f) formats.set(key, (f = new Intl.DateTimeFormat(locale, o)));
+  return f;
+}
+
 /** Short weekday name, Monday = 0. */
 export function weekdayName(t: Messages, wd: number, style: 'short' | 'long' = 'short'): string {
   // 2024-01-01 was a Monday
-  return new Intl.DateTimeFormat(t.locale, { weekday: style, timeZone: 'UTC' }).format(new Date(Date.UTC(2024, 0, 1 + wd)));
+  return dateFmt(t.locale, { weekday: style, timeZone: 'UTC' }).format(new Date(Date.UTC(2024, 0, 1 + wd)));
 }
 
 /** A day number (days since 1970-01-01) or a day and month, as a short date. */
 export function fmtDate(t: Messages, day: number): string {
-  return new Intl.DateTimeFormat(t.locale, { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(day * 864e5));
+  return dateFmt(t.locale, { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(day * 864e5));
 }
 
 /** Unix seconds as a short UTC date and time: `10 Oct, 14:32 UTC`. */
 export function fmtStamp(t: Messages, unix: number): string {
-  const f = new Intl.DateTimeFormat(t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' });
+  const f = dateFmt(t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' });
   return `${f.format(new Date(unix * 1000))} UTC`;
 }
 
@@ -72,7 +83,7 @@ export const fmtSecs = (t: Messages, s: number) => (s < 60 ? `${s} ${t.s}` : fmt
 /** `YYYY-MM` as a month and year. */
 export function fmtMonth(t: Messages, ym: string): string {
   const [y, m] = ym.split('-').map(Number);
-  return new Intl.DateTimeFormat(t.locale, { month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, 1)));
+  return dateFmt(t.locale, { month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, 1)));
 }
 
 /** EiBi day patterns: "Daily", "Mon–Fri", "Tue, Fri", "1st Sat of the month", "15 Sep". */
@@ -83,7 +94,7 @@ export function fmtDays(t: Messages, d: Days): string {
     case 'nth': return t.nth(d.n, weekdayName(t, d.wd, 'long'));
     case 'last': return t.last(weekdayName(t, d.wd, 'long'));
     case 'date':
-      return new Intl.DateTimeFormat(t.locale, { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(2024, d.m - 1, d.d)));
+      return dateFmt(t.locale, { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(2024, d.m - 1, d.d)));
     case 'weekly': {
       if (d.mask === 0x7f) return t.daily;
       // runs of consecutive days; three or more read as a range

@@ -7,7 +7,7 @@
 // lit, added ('lighter').
 
 import { RAD, type Vec3 } from './geo';
-import { nightLayer, shadeAt } from './shade';
+import { nightPixel } from './shade';
 import type { GlobeTexture } from './texture';
 
 /** The night grid's width (half as tall), and the masked lights' width. */
@@ -28,6 +28,9 @@ export class FlatTexture {
   private readonly lit: HTMLCanvasElement;
   /** Each grid cell's position (`toVec`'s frame), worked out once. */
   private readonly cells: Float64Array;
+  /** The night grid's pixels, painted again each update. */
+  private readonly shadeData: ImageData;
+  private readonly maskData: ImageData;
 
   constructor(private readonly tex: GlobeTexture) {
     this.canvas = canvas(tex.base.width, tex.base.height);
@@ -35,6 +38,8 @@ export class FlatTexture {
     this.lit = canvas(lw, lw / 2);
     const w = NIGHT_W, h = NIGHT_W / 2;
     this.cells = new Float64Array(w * h * 3);
+    this.shadeData = new ImageData(w, h);
+    this.maskData = new ImageData(w, h);
     for (let j = 0; j < h; j++) {
       const lat = (90 - ((j + 0.5) * 180) / h) * RAD;
       for (let i = 0; i < w; i++) {
@@ -48,17 +53,8 @@ export class FlatTexture {
   update(sun: Vec3): void {
     const w = NIGHT_W, h = NIGHT_W / 2, n = w * h;
     const sg = this.shade.getContext('2d')!, mg = this.mask.getContext('2d')!;
-    const shade = sg.createImageData(w, h), mask = mg.createImageData(w, h);
-    const p: Vec3 = [0, 0, 0];
-    for (let k = 0; k < n; k++) {
-      p[0] = this.cells[k * 3]; p[1] = this.cells[k * 3 + 1]; p[2] = this.cells[k * 3 + 2];
-      const s = shadeAt(p, sun);
-      const l = nightLayer(s.night, s.twilight, s.dusk);
-      const o = k * 4;
-      shade.data[o] = l.rgb[0] * 255; shade.data[o + 1] = l.rgb[1] * 255; shade.data[o + 2] = l.rgb[2] * 255;
-      shade.data[o + 3] = l.a * 255;
-      mask.data[o + 3] = s.lit * 255;
-    }
+    const shade = this.shadeData, mask = this.maskData, c = this.cells;
+    for (let k = 0; k < n; k++) nightPixel(c[k * 3], c[k * 3 + 1], c[k * 3 + 2], sun, shade.data, mask.data, k * 4);
     sg.putImageData(shade, 0, 0);
     mg.putImageData(mask, 0, 0);
 

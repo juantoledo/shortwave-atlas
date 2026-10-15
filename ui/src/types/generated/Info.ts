@@ -38,4 +38,8 @@ configured: boolean,
 /**
  * Where the core runs (the UI words hints, ports and devices for it).
  */
-os: Os, };
+os: Os, 
+/**
+ * Internet radio is on: the station list offers the NET band (`Call::NetSearch`).
+ */
+net: boolean, };

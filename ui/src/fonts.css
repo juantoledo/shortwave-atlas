@@ -1,0 +1,10 @@
+/* The fonts ship with the app (no font server: the desktop app may be offline). Each subset
+   (latin, latin-ext, ...) downloads only if its characters show. */
+@import '@fontsource/big-shoulders-display/700';
+@import '@fontsource/big-shoulders-display/800';
+@import '@fontsource/ibm-plex-mono/400';
+@import '@fontsource/ibm-plex-mono/500';
+@import '@fontsource/ibm-plex-sans/400';
+@import '@fontsource/ibm-plex-sans/500';
+@import '@fontsource/goldman/400';
+@import '@fontsource/goldman/700';

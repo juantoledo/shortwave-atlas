@@ -16,6 +16,13 @@ import type { ImportReport } from '../types/generated/ImportReport';
 import type { Info } from '../types/generated/Info';
 import type { ListeningNow } from '../types/generated/ListeningNow';
 import type { Logged } from '../types/generated/Logged';
+import type { NetCountry } from '../types/generated/NetCountry';
+import type { NetDot } from '../types/generated/NetDot';
+import type { NetFavorite } from '../types/generated/NetFavorite';
+import type { NetNow } from '../types/generated/NetNow';
+import type { NetPage } from '../types/generated/NetPage';
+import type { NetQuery } from '../types/generated/NetQuery';
+import type { NetStats } from '../types/generated/NetStats';
 import type { Overview } from '../types/generated/Overview';
 import type { Qth } from '../types/generated/Qth';
 import type { RigChoice } from '../types/generated/RigChoice';
@@ -106,4 +113,21 @@ export class Api {
   hearingStation = (args: StationKey) => this.transport.call({ cmd: 'hearing_station', args }) as Promise<null>;
   /** Unix seconds, or `null` for everything; resolves to how many sessions went. */
   clearListening = (before: number | null) => this.transport.call({ cmd: 'clear_listening', args: { before } }) as Promise<number>;
+
+  /** The NET band: internet stations from radio-browser.info (refused while internet radio is off). */
+  netSearch = (args: NetQuery) => this.transport.call({ cmd: 'net_search', args }) as Promise<NetPage>;
+  netCountries = () => this.transport.call({ cmd: 'net_countries' }) as Promise<NetCountry[]>;
+  setNet = (enabled: boolean) => this.transport.call({ cmd: 'set_net', args: { enabled } }) as Promise<null>;
+  /** Tune to an internet station instead of the rig, for every window (Listen plays it). */
+  netTune = (uuid: string) => this.transport.call({ cmd: 'net_tune', args: { uuid } }) as Promise<NetNow>;
+  /** Back to the rig. */
+  netStop = () => this.transport.call({ cmd: 'net_stop' }) as Promise<null>;
+  netNow = () => this.transport.call({ cmd: 'net_now' }) as Promise<NetNow | null>;
+  netStats = (args: StatsQuery) => this.transport.call({ cmd: 'net_stats', args }) as Promise<NetStats>;
+  netFavorites = () => this.transport.call({ cmd: 'net_favorites' }) as Promise<NetFavorite[]>;
+  addNetFavorite = (uuid: string, label: string | null) =>
+    this.transport.call({ cmd: 'add_net_favorite', args: { uuid, label } }) as Promise<NetFavorite>;
+  renameNetFavorite = (id: string, label: string) => this.transport.call({ cmd: 'rename_net_favorite', args: { id, label } }) as Promise<null>;
+  deleteNetFavorite = (id: string) => this.transport.call({ cmd: 'delete_net_favorite', args: { id } }) as Promise<null>;
+  netOverview = () => this.transport.call({ cmd: 'net_overview' }) as Promise<NetDot[]>;
 }

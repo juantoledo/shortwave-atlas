@@ -3,7 +3,8 @@
 //  1. once the choice settles, zoom out and swing to the transmitter (slerp + ease, duration by
 //     distance; a flight that takes over a moving camera carries on its speed, `hermiteEase`)
 //  2. land, show the label and pulsing rings
-//  3. after 450 ms the arc, and the great-circle path drawing itself from the transmitter home
+//  3. after 450 ms the great-circle path drawing itself from the transmitter home, the signal
+//     hopping over it off the ionosphere, pulses running home (an internet station: an arc)
 //  4. when the path lands, a blue "received" ring at the QTH, sized and paced by the S-meter
 //  5. optionally reframe the whole route
 // Off-air stations get the flight and the label only. With nothing tuned the camera goes back
@@ -19,10 +20,12 @@
 // radii; each view turns it into its own (`Camera`).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { altitudeAt, angleDeg, clamp, easeInOut, frameAltitude, frameWithHome, fromVec, hermiteEase, initialSlope, midpoint, pingAlpha, pingRadius, slerp, toVec, type LatLon, type Vec3 } from '../../geo/geo';
+import { altitudeAt, angleDeg, clamp, easeInOut, frameAltitude, frameWithHome, fromVec, hermiteEase, initialSlope, midpoint, pingAlpha, pingRadius, skyTier, slerp, toVec, type LatLon, type Vec3 } from '../../geo/geo';
 import { SIGNAL_DB } from '../scan';
-import { ARC_MS, COOL, HOME_ALT, LOCK_ALT, mkPin, mkPulse, NO_FX, NO_SCAN_FX, PING_MS, PING_PX_PER_DEG, qthRing, REDUCE, ROUTE_MS, route, sonarRing, SPIN, START_ALT, AMBER, type Arc, type Fx, type Path, type Pin, type Ring, type ScanFx } from './fx';
+import { ARC_MS, COOL, HOME_ALT, LOCK_ALT, mkPin, mkPulse, netQthRing, netRings, NO_FX, NO_SCAN_FX, siteRings, PING_MS, PING_PX_PER_DEG, qthRing, REDUCE, ROUTE_MS, route, skyLook, skyRoute, skyStrands, splashRings, sonarRing, SPIN, START_ALT, type Arc, type Fx, type Path, type Pin, type Ring, type ScanFx, type SkyPath } from './fx';
+import type { Meter } from '../../hooks/meter';
 import type { MapMode } from '../../hooks/useDisplay';
+import { keep, loadKept, readPov } from '../../hooks/usePersisted';
 import type { Candidate } from '../../types/generated/Candidate';
 import type { Qth } from '../../types/generated/Qth';
 import type { ScanPing } from '../../types/generated/ScanPing';
@@ -38,6 +41,9 @@ const SCAN_ALT = 2.8, FINALE_MS = 4000, MAX_PINGS = 30, MAX_ARCS = 8, HANDS_OFF_
 const FOLLOW_MS = 6000, FOLLOW_SPAN_MS = 15_000, FOLLOW_MIN_DEG = 10;
 /** How fast the turn eases in and out (ms; out quicker, so a hovered dot stays put). */
 const SPIN_IN_MS = 800, SPIN_OUT_MS = 250;
+/** How often where the camera rests is kept. */
+const KEEP_MS = 2000;
+const round4 = (x: number) => Math.round(x * 1e4) / 1e4;
 /** A station chosen this soon after another one (tuning through them) flies once, to the last. */
 const SETTLE_MS = 150;
 /** The S-meter's smoothing. */
@@ -71,8 +77,25 @@ export interface Camera {
  *  `alt0` to `alt1` over `ms` from `t0`, leaving with ease slope `v0`. */
 interface Flight { id: number; a: Vec3; b: Vec3; la: LatLon; lb: LatLon; alt0: number; alt1: number; bump: number; ms: number; t0: number; v0: number; done: (landed: boolean) => void }
 
+/** An internet station tuned instead of the rig: pinned where it is, with no route (a stream
+ *  has no radio path). `key` changes when another is tuned. */
+export interface NetPin {
+  key: string;
+  lat: number;
+  lon: number;
+  name: string;
+  sub: string;
+  flag: string | null;
+  /** Its audio is going out (someone listens): the point beats. */
+  playing: boolean;
+}
+
 export interface StageInput {
   sel: Candidate | null;
+  /** Wins over `sel` while set. */
+  net: NetPin | null;
+  /** Someone listens here (the audio panel plays): the tuned station's point beats. */
+  listening: boolean;
   qth: Qth;
   frame: boolean;
   /** Hidden behind another view (phones): stop the frame loop. */
@@ -80,8 +103,10 @@ export interface StageInput {
   /** The user dragged, clicked or zoomed the view. */
   onInteract: () => void;
   sites: SiteDot[];
-  /** The S-meter while the rig is on (dB over S9). */
-  strengthDb: number | null;
+  /** Which view this is (each keeps where its camera rested). */
+  mode: MapMode;
+  /** The S-meter (dB over S9) while the rig is on, read each frame. */
+  meter: Meter | null;
   /** While a band scan runs: its last steps measured, and the noise floor so far. */
   scan: { pings: readonly ScanPing[]; floorDb: number | null } | null;
   /** A scan that just ended (`key`: its id) and the sites of the stations it logged. */
@@ -100,7 +125,6 @@ export interface ViewProps extends StageInput {
   onSite: (id: number) => void;
   /** Tooltip text for a site: country name and "n of m on the air". */
   siteLabel: (s: SiteDot) => { country: string; onAir: string };
-  mode: MapMode;
   onMode: (m: MapMode) => void;
 }
 
@@ -111,6 +135,8 @@ export interface Stage {
   fx: Fx;
   rings: Ring[];
   arcs: Arc[];
+  /** The skywave's strands while a transmitter's route shows (its pulse follows the S-meter). */
+  sky: SkyPath[];
   /** The QTH's pin, the station's and the scan's pulses. */
   pins: Pin[];
   /** The S-meter as the received ring shows it: smoothed, null without a reading. */
@@ -126,7 +152,7 @@ export interface Stage {
   hover(on: boolean): void;
 }
 
-export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, strengthDb, scan, finale }: StageInput): Stage {
+export function useStage({ sel, net, listening, qth, frame: framing, paused, onInteract, sites, mode, meter, scan, finale }: StageInput): Stage {
   const cam = useRef<Camera | null>(null);
   const [ready, setReady] = useState(false);
   const [fx, setFx] = useState<Fx>(NO_FX);
@@ -138,8 +164,8 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
   const spin = useRef(0), spinNow = useRef(0);
   /** The route being drawn and when it started (`ms` 0: drawn at once). */
   const routing = useRef<{ path: Path; t0: number; ms: number } | null>(null);
-  const strength = useRef(strengthDb);
-  strength.current = strengthDb;
+  const strength = useRef(meter);
+  strength.current = meter;
   const level = useRef<number | null>(null);
   const qthRef = useRef(qth);
   qthRef.current = qth;
@@ -157,6 +183,10 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
   const handsOff = () => performance.now() - touched.current > HANDS_OFF_MS;
   const selRef = useRef(sel);
   selRef.current = sel;
+  const netRef = useRef(net);
+  netRef.current = net;
+  const listeningRef = useRef(listening);
+  listeningRef.current = listening;
   const interact = useRef(onInteract);
   interact.current = onInteract;
   /** When the user last touched the view (performance.now()). */
@@ -165,18 +195,51 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
   const hovering = useRef(false);
   /** Nothing tuned, nothing hovered, untouched for a while: the view may turn. */
   const idle = useCallback(
-    () => !REDUCE && !selRef.current && !hovering.current && performance.now() - touched.current > IDLE_MS,
+    () => !REDUCE && !selRef.current && !netRef.current && !hovering.current && performance.now() - touched.current > IDLE_MS,
     [],
   );
   const fit = useCallback((alt: number) => cam.current!.fit(alt), []);
 
+  // Where the camera last rested is kept on this device, per view (an altitude means another
+  // thing on each), and the view starts there, held still as if just let go; else over the QTH,
+  // turning. A turn's drift is never kept.
+  const camKey = `swatlas.camera.${mode}`;
   const attach = useCallback((c: Camera) => {
     cam.current = c;
-    const q = qthRef.current;
-    c.set({ lat: q.lat, lon: q.lon, alt: c.fit(START_ALT) });
-    spin.current = REDUCE ? 0 : SPIN;
+    const kept = loadKept(camKey, null, readPov);
+    if (kept) {
+      const [lo, hi] = c.range();
+      c.set({ lat: kept.lat, lon: kept.lon, alt: clamp(kept.alt, lo, hi) });
+      touched.current = performance.now();
+    } else {
+      const q = qthRef.current;
+      c.set({ lat: q.lat, lon: q.lon, alt: c.fit(START_ALT) });
+      spin.current = REDUCE ? 0 : SPIN;
+    }
     setReady(true);
-  }, []);
+  }, [camKey]);
+  useEffect(() => {
+    if (!ready) return;
+    let last = '';
+    const save = () => {
+      const c = cam.current;
+      if (!c || flying.current || spin.current || spinNow.current) return;
+      let p: Pov;
+      try { p = c.pov(); } catch { return; } // the view is gone already
+      const pov = { lat: round4(p.lat), lon: round4(p.lon), alt: round4(p.alt) };
+      const s = JSON.stringify(pov);
+      if (s === last) return;
+      last = s;
+      keep(camKey, pov);
+    };
+    const id = setInterval(save, KEEP_MS);
+    window.addEventListener('pagehide', save);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('pagehide', save);
+      save(); // the other view takes over
+    };
+  }, [ready, camKey]);
 
   /** Stop turning at once (not eased). */
   const stopSpin = useCallback(() => {
@@ -248,7 +311,7 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
 
   // Lock on when the selected station (or its on-air status) changes; not during a scan or its
   // finale (they own the camera), and again when they end.
-  const lockKey = sel ? `${sel.station.id}:${sel.air.on}` : null;
+  const lockKey = net ? `net:${net.key}` : sel ? `${sel.station.id}:${sel.air.on}` : null;
   const lastKey = useRef<string | null>(null);
   useEffect(() => {
     if (!ready) return;
@@ -259,6 +322,38 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
     const my = ++seq.current;
     const was = lastKey.current;
     lastKey.current = lockKey;
+    const n = netRef.current;
+    if (n) {
+      // an internet station: fly there and pin it; no route home and no signal rings
+      setFx(NO_FX);
+      (async () => {
+        if (was !== null) {
+          await sleep(SETTLE_MS);
+          if (my !== seq.current) return;
+        }
+        spin.current = 0;
+        const p0 = cam.current!.pov();
+        const mv = angleDeg({ lat: p0.lat, lon: p0.lon }, { lat: n.lat, lon: n.lon });
+        await fly(n.lat, n.lon, fit(LOCK_ALT), Math.round(1500 + 1700 * Math.min(1, mv / 150)), 0.5 + 1.4 * Math.min(1, mv / 120));
+        if (my !== seq.current) return;
+        // as it is when it lands: the beat follows below
+        const site = { lat: n.lat, lon: n.lon };
+        const live = netRef.current?.key === n.key && netRef.current.playing;
+        const station = { lat: n.lat, lng: n.lon, el: mkPin('net' + (live ? ' playing' : ''), n.name, n.sub, n.flag) };
+        setFx({ ...NO_FX, station, rings: netRings(site, live) });
+        // then the route home, as for a transmitter, in the station's pink
+        await sleep(450); if (my !== seq.current) return;
+        setFx((f) => ({ ...f, ...route(site, qthRef.current) }));
+        await sleep(ROUTE_MS); if (my !== seq.current) return;
+        const playing = !!netRef.current?.playing;
+        setFx((f) => ({ ...f, rings: [...netRings(site, playing), ...(playing ? [netQthRing(qthRef.current)] : [])] }));
+        if (!frameRef.current || grabbed.current === my) return;
+        await sleep(1100); if (my !== seq.current || grabbed.current === my) return;
+        const mid = midpoint(qthRef.current, site);
+        fly(mid.lat, mid.lon, fit(clamp(0.55 + angleDeg(qthRef.current, site) / 42, 1.5, 3.4)), 2200, 0.15);
+      })();
+      return;
+    }
     if (!sel) {
       flight.current++;
       setFx(NO_FX);
@@ -284,12 +379,12 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
       const mv = angleDeg({ lat: p0.lat, lon: p0.lon }, site);
       await fly(site.lat, site.lon, fit(LOCK_ALT), Math.round(1500 + 1700 * Math.min(1, mv / 150)), 0.5 + 1.4 * Math.min(1, mv / 120));
       if (my !== seq.current) return;
-      const station = { lat: site.lat, lng: site.lon, el: mkPin(on ? '' : 'off', sel.station.name, sel.site.name, sel.station.flag) };
-      const siteRing: Ring = { lat: site.lat, lng: site.lon, maxR: 7, speed: 3.2, period: 1400, rgb: AMBER };
-      setFx({ ...NO_FX, station, rings: on ? [siteRing] : [] });
+      const beat = on && listeningRef.current;
+      const station = { lat: site.lat, lng: site.lon, el: mkPin(on ? (beat ? 'playing' : '') : 'off', sel.station.name, sel.site.name, sel.station.flag) };
+      setFx({ ...NO_FX, station, rings: on ? siteRings(site, beat) : [] });
       if (!on) return;
       await sleep(450); if (my !== seq.current) return;
-      setFx((f) => ({ ...f, ...route(site, qthRef.current) }));
+      setFx((f) => ({ ...f, ...skyRoute(site, qthRef.current) }));
       // received when the path lands
       await sleep(ROUTE_MS); if (my !== seq.current) return;
       setFx((f) => ({ ...f, rings: [...f.rings, qthRing(qthRef.current)] }));
@@ -299,6 +394,31 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
       fly(mid.lat, mid.lon, fit(clamp(0.55 + angleDeg(qthRef.current, site) / 42, 1.5, 3.4)), 2200, 0.15);
     })();
   }, [lockKey, ready, fly, fit, home, scanning, finaleOn]);
+
+  // The station tuned starts or stops being listened to: its point beats, or rests (once landed);
+  // the rings that arrive at the QTH stay as they are (the S-meter's, or the stream's).
+  const netPlaying = net?.playing ?? false;
+  useEffect(() => {
+    const n = netRef.current;
+    if (!n || lastKey.current !== `net:${n.key}`) return;
+    const q = qthRef.current;
+    setFx((f) => {
+      if (!f.station?.el.classList.contains('net')) return f;
+      f.station.el.classList.toggle('playing', netPlaying);
+      const home = f.path ? (netPlaying ? [netQthRing(q)] : []) : [];
+      return { ...f, rings: [...netRings({ lat: n.lat, lon: n.lon }, netPlaying), ...home] };
+    });
+  }, [netPlaying]);
+  useEffect(() => {
+    const s = selRef.current;
+    if (netRef.current || !s || !s.air.on || lastKey.current !== `${s.station.id}:${s.air.on}`) return;
+    const site = { lat: s.site.lat, lon: s.site.lon };
+    setFx((f) => {
+      if (!f.station || f.station.el.classList.contains('net')) return f;
+      f.station.el.classList.toggle('playing', listening);
+      return { ...f, rings: [...siteRings(site, listening), ...f.rings.filter((r) => r.rgb === COOL)] };
+    });
+  }, [listening]);
 
   // A scan starts: drop the station and its route, hold over the QTH. It ends: clear its layers.
   useEffect(() => {
@@ -452,7 +572,7 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
         c.turn(spinNow.current, dt);
       }
 
-      const db = REDUCE ? null : strength.current, lv = level.current;
+      const db = REDUCE ? null : strength.current?.get() ?? null, lv = level.current;
       level.current = db === null ? null : lv === null ? db : lv + (db - lv) * (1 - Math.exp(-dt / LEVEL_MS));
 
       c.frame?.(now, dt);
@@ -462,21 +582,53 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
   }, [ready, paused]);
 
   const sonar = useMemo(() => sonarRing(qth), [qth]);
-  const rings = useMemo(() => (scanning && !REDUCE ? [...fx.rings, sonar] : fx.rings), [fx.rings, scanning, sonar]);
   const arcs = useMemo(() => [...fx.arcs, ...scanFx.arcs], [fx.arcs, scanFx.arcs]);
 
-  // Moving the QTH redraws the route in place.
+  // Moving the QTH redraws the route in place (the same path: redrawn at once, not drawn on again).
   useEffect(() => {
     setFx((f) => {
-      if (!sel || !f.arcs.length) return f;
-      return {
-        ...f,
-        ...route({ lat: sel.site.lat, lon: sel.site.lon }, qth),
-        path: f.path, // the same path: redrawn at once, not drawn on again
-        rings: f.rings.filter((r) => r.rgb !== COOL).concat([qthRing(qth)]),
-      };
+      if (!f.path) return f;
+      const n = netRef.current, rings = f.rings.filter((r) => r.rgb !== COOL);
+      if (n) return { ...f, ...route({ lat: n.lat, lon: n.lon }, qth), path: f.path, rings: n.playing ? [...rings, netQthRing(qth)] : rings };
+      if (!sel) return f;
+      return { ...f, ...skyRoute({ lat: sel.site.lat, lon: sel.site.lon }, qth), path: f.path, rings: [...rings, qthRing(qth)] };
     });
   }, [qth.lat, qth.lon]);
+
+  // The skywave's pulse follows the S-meter, a step at a time.
+  const [tier, setTier] = useState(0);
+  const skyOn = fx.sky !== null;
+  useEffect(() => {
+    if (!skyOn || REDUCE) return;
+    const id = setInterval(() => setTier((t) => skyTier(level.current, t)), 500);
+    return () => clearInterval(id);
+  }, [skyOn]);
+  // The same strands while the route stays (the QTH moved, the look changed), changed in place:
+  // the globe knows a strand by the object, and a new one grows in from the transmitter again.
+  const strands = useRef<{ path: Path; sky: SkyPath[] } | null>(null);
+  const sky = useMemo(() => {
+    if (!fx.sky || !fx.path) {
+      strands.current = null;
+      return [];
+    }
+    if (strands.current?.path !== fx.path) strands.current = { path: fx.path, sky: skyStrands() };
+    skyLook(strands.current.sky, fx.sky, tier);
+    return [...strands.current.sky];
+  }, [fx.sky, fx.path, tier]);
+  // A splash where it bounces off the ground as each pulse touches down: the views send a ring as
+  // it is added and each period after, so each bounce's is added as the first pulse gets there
+  // (once the strands have grown in, when they are new). The pulses restart with each new look.
+  const [splashes, setSplashes] = useState<Ring[]>([]);
+  const splashed = useRef<SkyPath[] | null>(null);
+  useEffect(() => {
+    setSplashes([]);
+    const st = strands.current?.sky ?? null, s = fx.sky;
+    const fresh = splashed.current !== st;
+    splashed.current = st;
+    if (!st || !s || st.length < 2) return;
+    const ids = splashRings(s, tier, fresh && !REDUCE ? ROUTE_MS : 0).map(({ ring, at }) => setTimeout(() => setSplashes((l) => [...l, ring]), at));
+    return () => ids.forEach(clearTimeout);
+  }, [sky]);
 
   /** Hold the turn while the pointer is on a site, or the dot slides out from under it and the
    *  tooltip blinks. */
@@ -487,8 +639,9 @@ export function useStage({ sel, qth, frame: framing, paused, onInteract, sites, 
     else if (idle()) spin.current = SPIN;
   }, [idle]);
 
+  const rings = useMemo(() => [...fx.rings, ...splashes, ...(scanning && !REDUCE ? [sonar] : [])], [fx.rings, splashes, scanning, sonar]);
   const qthPin = useMemo<Pin>(() => ({ lat: qth.lat, lng: qth.lon, el: mkPin('qth', 'QTH', qth.name) }), [qth]);
   const pins = useMemo(() => [qthPin, ...(fx.station ? [fx.station] : []), ...scanFx.marks], [qthPin, fx.station, scanFx.marks]);
 
-  return { ready, attach, fx, rings, arcs, pins, level, routeProgress, zoom, goHome, userStart, hover };
+  return { ready, attach, fx, rings, arcs, sky, pins, level, routeProgress, zoom, goHome, userStart, hover };
 }

@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use atlas_core::listening::{clear_before, parse_lines, to_line, trim, Ctx, Event, Session, Tracker};
+use atlas_core::listening::{clear_before, dedupe, parse_lines, to_line, trim, Ctx, Event, Session, Tracker};
 use atlas_core::rig::RigState;
 use atlas_core::source::StationKey;
 
@@ -18,8 +18,9 @@ pub struct ListeningService {
 }
 
 struct Inner {
-    /// Ended sessions, oldest first.
-    list: Vec<Session>,
+    /// Ended sessions, oldest first. Shared with readers (`with`), which work on a snapshot
+    /// outside the lock; a session ending copies it only while a reader holds one.
+    list: Arc<Vec<Session>>,
     tracker: Tracker,
 }
 
@@ -38,7 +39,13 @@ impl ListeningService {
         }
         list.sort_by_key(|s| s.start);
         trim(&mut list);
-        Arc::new(Self { file, inner: Mutex::new(Inner { list, tracker: Tracker::default() }) })
+        let twice = dedupe(&mut list);
+        let svc = Self { file, inner: Mutex::new(Inner { list: Arc::new(list), tracker: Tracker::default() }) };
+        if twice > 0 {
+            tracing::warn!("dropped {twice} sessions recorded twice in the listening history");
+            svc.save(&svc.lock().list);
+        }
+        Arc::new(svc)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
@@ -74,8 +81,9 @@ impl ListeningService {
 
     fn keep(&self, inner: &mut Inner, s: Session) {
         let line = to_line(&s);
-        inner.list.push(s);
-        if trim(&mut inner.list) {
+        let list = Arc::make_mut(&mut inner.list);
+        list.push(s);
+        if trim(list) {
             self.save(&inner.list);
         } else if let Some(p) = &self.file {
             let append = || -> std::io::Result<()> {
@@ -100,23 +108,26 @@ impl ListeningService {
         }
     }
 
-    /// Run `f` on the ended sessions (oldest first) and the one under way up to `now`.
+    /// Run `f` on the ended sessions (oldest first) and the one under way up to `now`. `f` runs
+    /// on a snapshot, without the lock: the tracker records on while a long pass (Stats) runs.
     pub fn with<T>(&self, now: i64, f: impl FnOnce(&[Session], Option<&Session>) -> T) -> T {
-        let inner = self.lock();
-        let open = inner.tracker.open(now);
-        f(&inner.list, open.as_ref())
+        let (list, open) = {
+            let inner = self.lock();
+            (inner.list.clone(), inner.tracker.open(now))
+        };
+        f(&list, open.as_ref())
     }
 
     /// Forget the sessions that ended before `before`, or all of them; how many went.
     pub fn clear(&self, before: Option<i64>) -> Result<usize, String> {
         let mut inner = self.lock();
-        let mut next = inner.list.clone();
+        let mut next = Vec::clone(&inner.list);
         let n = clear_before(&mut next, before);
         if let Some(p) = &self.file {
             let text: String = next.iter().map(to_line).collect();
             write_atomic(p, &text).map_err(|e| e.to_string())?;
         }
-        inner.list = next;
+        inner.list = Arc::new(next);
         Ok(n)
     }
 }
@@ -157,11 +168,16 @@ mod tests {
 
         // read back, with a bad line skipped
         let mut text = std::fs::read_to_string(&file).unwrap();
+        let first = text.lines().next().unwrap().to_owned();
         text.push_str("{oops\n");
+        // the same session written again (by a second process) is dropped, and the file rewritten
+        text.push_str(&first);
+        text.push('\n');
         std::fs::write(&file, text).unwrap();
         let again = ListeningService::new(Some(file.clone()));
         let ids = again.with(0, |l, _| l.iter().map(|s| s.freq_hz).collect::<Vec<_>>());
         assert_eq!(ids, [6_070_000, 9_500_000]);
+        assert_eq!(std::fs::read_to_string(&file).unwrap().lines().count(), 2);
         assert_eq!(again.clear(Some(t0 + 15)), Ok(1));
         assert_eq!(ListeningService::new(Some(file.clone())).with(0, |l, _| l.len()), 1);
         assert_eq!(again.clear(None), Ok(1));

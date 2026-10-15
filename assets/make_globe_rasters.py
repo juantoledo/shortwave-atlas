@@ -7,6 +7,7 @@ usage (needs numpy + pillow), from a folder holding the two sources:
 
 relief.jpg  Natural Earth SR_50M shaded relief, re-centred so flat terrain = 128
             (neutral under a soft-light blend). Public domain, naturalearthdata.com.
+            It goes into the base layer: run `npm --prefix ui run globe-base` after it.
 lights.jpg  NASA Black Marble 2016 city lights: red channel minus the dim land/ice
             background, gamma-lifted so small towns show. Public domain, NASA EO.
 """

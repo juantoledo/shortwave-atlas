@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { toVec } from './geo';
-import { DAWN, DUSK, NIGHT_ALPHA, nightLayer, shadeAt, TWILIGHT } from './shade';
+import { DAWN, DUSK, NIGHT_ALPHA, nightLayer, nightPixel, shadeAt, TWILIGHT } from './shade';
 
 const SUN = toVec(0, 0);
 
@@ -41,5 +41,23 @@ describe('day and night', () => {
     const two = (base * (1 - a1) + (2 / 255) * a1) * (1 - a2) + DUSK[0] * a2;
     const one = nightLayer(0.5, a2, true);
     expect(base * (1 - one.a) + one.rgb[0] * one.a).toBeCloseTo(two, 9);
+  });
+});
+
+describe('nightPixel', () => {
+  it('paints what shadeAt and nightLayer give, pixel for pixel', () => {
+    const n = 360 * 181, want = new Uint8ClampedArray(n * 4), wantLit = new Uint8ClampedArray(n * 4);
+    const got = new Uint8ClampedArray(n * 4), gotLit = new Uint8ClampedArray(n * 4);
+    let k = 0;
+    for (let lat = -90; lat <= 90; lat++) {
+      for (let lon = -180; lon < 180; lon++, k++) {
+        const p = toVec(lat, lon), s = shadeAt(p, SUN), l = nightLayer(s.night, s.twilight, s.dusk), o = k * 4;
+        want[o] = l.rgb[0] * 255; want[o + 1] = l.rgb[1] * 255; want[o + 2] = l.rgb[2] * 255; want[o + 3] = l.a * 255;
+        wantLit[o + 3] = s.lit * 255;
+        nightPixel(p[0], p[1], p[2], SUN, got, gotLit, o);
+      }
+    }
+    expect(got).toEqual(want);
+    expect(gotLit).toEqual(wantLit);
   });
 });

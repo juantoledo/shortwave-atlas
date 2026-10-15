@@ -4,13 +4,14 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { useDismiss } from '../hooks/useDismiss';
 import { useT } from '../i18n';
-import type { Favorite } from '../types/generated/Favorite';
+/** A favorite as the star shows it: a radio favorite or an internet one. */
+type Fav = { id: string; label: string };
 
 const MAX_LABEL = 60;
 
 interface Props {
   /** The favorite already kept here, if any. */
-  fav: Favorite | null;
+  fav: Fav | null;
   disabled?: boolean;
   onAdd: () => void;
   onRename: (label: string) => void;
@@ -51,7 +52,7 @@ export function FavStar({ fav, disabled, onAdd, onRename, onRemove }: Props) {
 }
 
 interface EditProps {
-  fav: Favorite;
+  fav: Fav;
   anchor: RefObject<HTMLElement | null>;
   onSave: (label: string) => void;
   onRemove: () => void;

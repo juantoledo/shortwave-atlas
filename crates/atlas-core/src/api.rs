@@ -7,6 +7,7 @@ use ts_rs::TS;
 use crate::audio::{AudioChoice, AudioHint, AudioStatus, AudioTuning};
 use crate::favorites::FavoriteRequest;
 use crate::geo::LatLon;
+use crate::net::NetQuery;
 use crate::platform::Os;
 use crate::rig::{CommandError, RigCommand, RigState};
 use crate::scan::ScanRequest;
@@ -166,6 +167,45 @@ pub enum Call {
         #[ts(type = "number | null")]
         before: Option<i64>,
     },
+    /// Internet stations from the radio-browser.info directory, the NET band (result:
+    /// `NetPage`). Refused while internet radio is off.
+    NetSearch(NetQuery),
+    /// Countries the NET band's search can filter by (result: `NetCountry[]`).
+    NetCountries,
+    /// Turn internet radio (the NET band) on or off, and save it.
+    SetNet {
+        enabled: bool,
+    },
+    /// Tune the receiver to an internet station instead of the rig: its audio (`GET /api/audio`,
+    /// `audio_open`) is that station's stream for every listener, fetched only while someone
+    /// listens. Refused while internet radio is off or if the stream can't be played (result:
+    /// `NetNow`).
+    NetTune {
+        uuid: String,
+    },
+    /// Back to the rig. Tuning the rig, a scan, or turning internet radio off do it too.
+    NetStop,
+    /// The internet station tuned, if any (result: `NetNow | null`).
+    NetNow,
+    /// The internet stations kept, in memory-channel order (result: `NetFavorite[]`).
+    NetFavorites,
+    /// Keep an internet station, or relabel the one kept (result: `NetFavorite`).
+    AddNetFavorite {
+        uuid: String,
+        label: Option<String>,
+    },
+    RenameNetFavorite {
+        id: String,
+        label: String,
+    },
+    DeleteNetFavorite {
+        id: String,
+    },
+    /// Countries with internet stations, for the map while browsing the NET band (result:
+    /// `NetDot[]`).
+    NetOverview,
+    /// Internet listening in a period, kept apart from the rig's Stats (result: `NetStats`).
+    NetStats(StatsQuery),
 }
 
 /// Argument of `Call::SetUpdatePrefs`.
@@ -246,6 +286,8 @@ pub struct Info {
     pub configured: bool,
     /// Where the core runs (the UI words hints, ports and devices for it).
     pub os: Os,
+    /// Internet radio is on: the station list offers the NET band (`Call::NetSearch`).
+    pub net: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -379,6 +421,31 @@ mod tests {
             (r#"{"cmd":"clear_listening","args":{"before":null}}"#, Call::ClearListening { before: None }),
             (r#"{"cmd":"clear_listening","args":{"before":5}}"#, Call::ClearListening { before: Some(5) }),
             (r#"{"cmd":"export_user_stations"}"#, Call::ExportUserStations),
+            (
+                r#"{"cmd":"net_search","args":{"q":"rri","country":"ROU","offset":0,"limit":50}}"#,
+                Call::NetSearch(NetQuery { q: "rri".into(), country: Some("ROU".into()), offset: 0, limit: 50 }),
+            ),
+            (r#"{"cmd":"net_search","args":{}}"#, Call::NetSearch(NetQuery::default())),
+            (r#"{"cmd":"set_net","args":{"enabled":true}}"#, Call::SetNet { enabled: true }),
+            (r#"{"cmd":"net_countries"}"#, Call::NetCountries),
+            (r#"{"cmd":"net_tune","args":{"uuid":"u1"}}"#, Call::NetTune { uuid: "u1".into() }),
+            (r#"{"cmd":"net_favorites"}"#, Call::NetFavorites),
+            (
+                r#"{"cmd":"add_net_favorite","args":{"uuid":"u1","label":null}}"#,
+                Call::AddNetFavorite { uuid: "u1".into(), label: None },
+            ),
+            (
+                r#"{"cmd":"rename_net_favorite","args":{"id":"1-u1","label":"Mitre"}}"#,
+                Call::RenameNetFavorite { id: "1-u1".into(), label: "Mitre".into() },
+            ),
+            (r#"{"cmd":"delete_net_favorite","args":{"id":"1-u1"}}"#, Call::DeleteNetFavorite { id: "1-u1".into() }),
+            (r#"{"cmd":"net_overview"}"#, Call::NetOverview),
+            (r#"{"cmd":"net_stop"}"#, Call::NetStop),
+            (r#"{"cmd":"net_now"}"#, Call::NetNow),
+            (
+                r#"{"cmd":"net_stats","args":{"period":"week","tz_offset_min":60}}"#,
+                Call::NetStats(StatsQuery { period: crate::stats::Period::Week, tz_offset_min: 60 }),
+            ),
             (r#"{"cmd":"delete_user_station","args":{"id":"x"}}"#, Call::DeleteUserStation { id: "x".into() }),
             (
                 r#"{"cmd":"import_user_stations","args":{"json":"{}","replace":true}}"#,

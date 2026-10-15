@@ -22,9 +22,12 @@ interface Props {
   /** What the rig receives: the knob stops at its edges. */
   coverage: readonly RxRange[];
   onTune: (hz: number) => void;
+  /** Instead of tuning by frequency: each detent, either ring, is a step (the NET band's memory
+   *  channels). */
+  onStep?: (clicks: number) => void;
 }
 
-export function Knob({ disabled, hz, coverage, onTune }: Props) {
+export function Knob({ disabled, hz, coverage, onTune, onStep }: Props) {
   const t = useT();
   const root = useRef<HTMLDivElement>(null);
   const [deg, setDeg] = useState<Record<Ring, number>>({ outer: 0, inner: 0 });
@@ -42,6 +45,11 @@ export function Knob({ disabled, hz, coverage, onTune }: Props) {
 
   const turn = (ring: Ring, clicks: number) => {
     if (disabled || clicks === 0) return;
+    if (onStep) {
+      onStep(clicks);
+      setDeg((d) => ({ ...d, [ring]: d[ring] + clicks * DETENT_DEG }));
+      return;
+    }
     const from = target.current ?? hz;
     if (from === null) return;
     const to = clampToCoverage(stepHz(from, clicks, STEP_HZ[ring]), coverage);

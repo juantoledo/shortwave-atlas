@@ -37,6 +37,8 @@ export function columns(spec: Float32Array, fftSize: number, sampleRate: number,
 export class Waterfall {
   private floor: number | null = null;
   private spec: Float32Array<ArrayBuffer>;
+  /** A row's values, sorted for its noise floor (kept: a tick allocates nothing for it). */
+  private sorted = new Float32Array(WF_W);
   private line: ImageData;
   private wf: CanvasRenderingContext2D;
   private sp: CanvasRenderingContext2D;
@@ -51,7 +53,8 @@ export class Waterfall {
   tick(spanHz: number) {
     this.analyser.getFloatFrequencyData(this.spec);
     const row = columns(this.spec, this.analyser.fftSize, this.analyser.context.sampleRate, spanHz, WF_W);
-    const floor = Float32Array.from(row).sort()[Math.floor(WF_W * 0.2)];
+    this.sorted.set(row);
+    const floor = this.sorted.sort()[Math.floor(WF_W * 0.2)];
     // track the floor slowly, but jump when it rises a lot (first audio after silence)
     this.floor = this.floor === null || floor > this.floor + 20 ? floor : this.floor + (floor - this.floor) * 0.05;
     const lo = this.floor - 3, k = 255 / RANGE_DB;

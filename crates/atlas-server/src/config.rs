@@ -19,6 +19,7 @@ pub struct AppConfig {
     pub server: ServerConfig,
     pub audio: AudioConfig,
     pub update: UpdateConfig,
+    pub net: NetConfig,
     /// Starting QTH; a QTH picked in the UI is saved separately (see `Atlas`).
     pub qth: Qth,
     /// UI language (`en`, `es`); unset = follow the browser/OS.
@@ -133,6 +134,15 @@ impl Default for UpdateConfig {
     fn default() -> Self {
         Self { check: true, channel: Channel::Stable, url: None }
     }
+}
+
+/// The NET band: internet radio from the radio-browser.info directory.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NetConfig {
+    /// Offer the NET band in the station list; its searches go to radio-browser.info. Off until
+    /// the listener turns it on (Settings → Sources).
+    pub enabled: bool,
 }
 
 /// Default config directory: `~/.config/swatlas` on Linux.
@@ -317,6 +327,11 @@ pub fn save_audio(path: &Path, choice: &AudioChoice) -> Result<(), String> {
 /// (`url` is kept).
 pub fn save_update(path: &Path, check: bool, channel: Channel) -> Result<(), String> {
     save_table(path, "update", [("check", check.into()), ("channel", channel.as_str().into())], &[])
+}
+
+/// Write the NET band's switch into the `[net]` table, the same way as `save_rig`.
+pub fn save_net(path: &Path, enabled: bool) -> Result<(), String> {
+    save_table(path, "net", [("enabled", enabled.into())], &[])
 }
 
 /// Set `keys` in table `name` of the TOML at `path` and remove `obsolete`, keeping everything else.

@@ -1,8 +1,6 @@
 //! Favorites: frequencies the listener keeps to come back to, each with its mode, a label and
 //! the station heard there. The station is a copy (`StationRef`), not a `Station::id`, so a
-//! favorite outlives the schedule version it was saved under; `resolve` finds it again.
-
-use std::collections::HashMap;
+//! favorite outlives the schedule version it was saved under; `StationRef::find` finds it again.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -61,7 +59,7 @@ pub struct FavoriteView {
     pub station_id: Option<u32>,
 }
 
-fn clean_label(label: &str) -> Result<String, String> {
+pub(crate) fn clean_label(label: &str) -> Result<String, String> {
     let label = label.trim();
     if label.chars().count() > MAX_LABEL {
         return Err(format!("A label has at most {MAX_LABEL} characters"));
@@ -137,24 +135,10 @@ pub fn remove(list: &mut Vec<Favorite>, id: &str) -> bool {
     list.len() != before
 }
 
-/// Favorites against the running catalog: by station id where the schedule still has their
-/// station, and the others (no station, or one it no longer has).
-pub struct Resolved<'a> {
-    pub by_station: HashMap<u32, &'a Favorite>,
-    pub off: Vec<&'a Favorite>,
-}
-
-pub fn resolve<'a>(list: &'a [Favorite], cat: &Catalog) -> Resolved<'a> {
-    let mut r = Resolved { by_station: HashMap::new(), off: vec![] };
-    for f in list {
-        match f.station.as_ref().and_then(|s| s.find(cat)) {
-            Some(st) => {
-                r.by_station.entry(st.id).or_insert(f);
-            }
-            None => r.off.push(f),
-        }
-    }
-    r
+/// The favorites the running catalog has no station for: saved without one, or with one it no
+/// longer has.
+pub fn off_schedule<'a>(list: &'a [Favorite], cat: &Catalog) -> Vec<&'a Favorite> {
+    list.iter().filter(|f| f.station.as_ref().and_then(|s| s.find(cat)).is_none()).collect()
 }
 
 /// Every favorite with its station id, by frequency.
@@ -255,10 +239,7 @@ mod tests {
         st.freq_hz += 5_000;
         st.key.clear(); // keyed by its fields again, as EiBi keys its rows
         list.push(moved);
-        let r = resolve(&list, &c);
-        assert_eq!(r.by_station.len(), 2);
-        assert_eq!(r.by_station[&a.id].id, list[1].id);
-        let off: Vec<&str> = r.off.iter().map(|f| f.id.as_str()).collect();
+        let off: Vec<&str> = off_schedule(&list, &c).iter().map(|f| f.id.as_str()).collect();
         assert_eq!(off, ["3-7000000", "moved"]);
         let v = views(&list, &c);
         assert!(v.windows(2).all(|w| w[0].favorite.freq_hz <= w[1].favorite.freq_hz));

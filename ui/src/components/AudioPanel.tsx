@@ -1,12 +1,17 @@
 // Rig audio and the audio waterfall, in the desktop app and the remote browser: the dock's
 // right-hand cell. The waterfall box is always there (empty until you listen), so the dock
 // does not jump; `audio-x` parts fold away on phones until the dock is expanded.
+// The same stream carries an internet station instead of the rig while the receiver is tuned to
+// one (the NET band): Listen plays whatever it is tuned to. With the rig's audio off it offers
+// Listen while an internet station is tuned, and invites to set the rig's audio up otherwise.
 
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { OpenAudio } from '../api/transport';
 import { AudioPlayer, type PlayerBuffer, type PlayerStatus } from '../audio/player';
 import { cwDelta, SP_H, Waterfall, WF_H, WF_W } from '../audio/waterfall';
 import { useT, type Messages } from '../i18n';
+import type { NetNow } from '../types/generated/NetNow';
+import { canListen } from './net';
 
 const ROW_MS = 50;
 
@@ -36,9 +41,26 @@ interface Props {
   freqHz: number | null;
   onTune: (hz: number) => void;
   keys?: RefObject<AudioKeys | null>;
+  /** The rig's audio is set up. */
+  rigAudio: boolean;
+  /** The internet station tuned instead of the rig, if any. */
+  net: NetNow | null;
+  onSetUp: () => void;
+  /** Listening started or stopped (the map's point beats meanwhile). */
+  onListening: (on: boolean) => void;
 }
 
-export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onTune, keys }: Props) {
+/** What the panel says about the internet station: connecting, or why it stopped. */
+function netLine(t: Messages, n: NetNow): string {
+  switch (n.state.state) {
+    case 'tuned':
+    case 'playing': return '';
+    case 'connecting': return t.netConnecting;
+    case 'failed': return t.netFailed(n.state.message);
+  }
+}
+
+export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onTune, keys, rigAudio, net, onSetUp, onListening }: Props) {
   const t = useT();
   const spans = [...new Set([3000, 4000, rate / 2])].filter((s) => s <= rate / 2);
   const [span, setSpan] = useState(spans[0]);
@@ -53,26 +75,44 @@ export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onT
   useEffect(() => {
     if (!player) return;
     const wf = new Waterfall(wfRef.current!, spRef.current!, player.analyser);
-    const id = setInterval(() => wf.tick(spanRef.current), ROW_MS);
+    // drawn only while it shows (it folds away on phones, or scrolls out of sight)
+    let shown = true;
+    const io = typeof IntersectionObserver === 'undefined' ? null
+      : new IntersectionObserver(([e]) => { shown = e.isIntersecting; });
+    io?.observe(wfRef.current!);
+    const id = setInterval(() => { if (shown) wf.tick(spanRef.current); }, ROW_MS);
     return () => {
       clearInterval(id);
+      io?.disconnect();
       for (const c of [wfRef.current, spRef.current]) c?.getContext('2d')?.clearRect(0, 0, c.width, c.height);
     };
   }, [player]);
   useEffect(() => () => player?.stop(), [player]);
+  useEffect(() => {
+    onListening(player !== null);
+    return () => onListening(false);
+  }, [player, onListening]);
   useEffect(() => player?.setVolume(volume), [player, volume]);
   const { cushionMs, maxAheadMs } = buffer;
   useEffect(() => player?.setBuffer({ cushionMs, maxAheadMs }), [player, cushionMs, maxAheadMs]);
 
+  const listenable = canListen(rigAudio, net);
   const toggle = () => {
     if (player) {
       setPlayer(null);
       setStatus(null);
       setHover('');
-    } else {
+    } else if (listenable) {
       setPlayer(new AudioPlayer(openAudio, volume, buffer, setStatus));
     }
   };
+  // nothing left to hear (the internet station stopped, the rig's audio is off): stop listening
+  useEffect(() => {
+    if (!listenable && player) {
+      setPlayer(null);
+      setStatus(null);
+    }
+  }, [listenable, player]);
   // mute remembers the level it left
   const unmuted = useRef(volume);
   const mute = () => {
@@ -84,7 +124,7 @@ export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onT
   useEffect(() => () => { if (keys) keys.current = null; }, [keys]);
   if (keys) keys.current = { toggle, mute, volume: (d) => setVolume((v) => Math.round(Math.min(1, Math.max(0, v + d)) * 100) / 100) };
 
-  const isCW = (mode === 'CW' || mode === 'CWR') && !!cwPitch;
+  const isCW = !net && (mode === 'CW' || mode === 'CWR') && !!cwPitch;
   const toneAt = (clientX: number) => {
     const r = wrapRef.current!.getBoundingClientRect();
     return Math.min(1, Math.max(0, (clientX - r.left) / r.width)) * span;
@@ -95,8 +135,10 @@ export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onT
     setHover(`${Math.round(toneAt(clientX))} Hz` + (isCW ? ' · ' + t.cwTuneHint(cwPitch!, (d >= 0 ? '+' : '') + d) : ''));
   };
 
+  if (!listenable && !player) return <AudioOff onSetUp={onSetUp} />;
+  const netNote = net && netLine(t, net);
   return (
-    <section className="audio" aria-label={t.audio}>
+    <section className={'audio' + (net ? ' net' : '')} aria-label={t.audio}>
       <div className="audio-row">
         <button className={'btn' + (player ? ' primary' : '')} type="button" aria-pressed={!!player} title={t.keyHint(player ? t.stop : t.listen, t.keySpace)} onClick={toggle}>
           {player ? `■ ${t.stop}` : `▶ ${t.listen}`}
@@ -109,7 +151,7 @@ export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onT
             {spans.map((s) => <option key={s} value={s}>{s / 1000} kHz</option>)}
           </select>
         </label>
-        <span className="audio-st">{statusText(t, status)}</span>
+        <span className="audio-st">{netNote || statusText(t, status)}</span>
       </div>
       <div
         className={'wf-wrap audio-x' + (player ? '' : ' idle')}

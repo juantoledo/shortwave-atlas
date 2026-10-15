@@ -11,6 +11,7 @@ use crate::collect::rarity;
 use crate::eibi::names::{band_of, OUT_OF_BAND};
 use crate::geo::{dark_share, dist_bearing, LatLon};
 use crate::listening::Session;
+use crate::net_listening::NetSession;
 use crate::rig::{Mode, RxRange};
 use crate::scan::{Logged, StationRef};
 use crate::schedule::any_on;
@@ -87,6 +88,9 @@ pub struct Usual {
 #[ts(export)]
 pub struct ListeningNow {
     pub now: Option<NowListening>,
+    /// The internet station being recorded (the NET band's own history), if any.
+    #[serde(default)]
+    pub net: Option<NetSession>,
     /// When nothing is being recorded: the usual station at this hour, if it is on.
     pub usual: Option<Usual>,
 }
