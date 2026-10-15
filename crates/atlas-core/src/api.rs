@@ -155,6 +155,8 @@ pub enum Call {
     Hunt,
     /// A station's signal week by week (result: `TrendPoint[]`).
     StationTrend(StationKey),
+    /// Channels listened to with a valid signal, all time (result: `FreqHeat[]`).
+    ListenedFreqs,
     /// The listener chose this station as the one they hear: the session there is credited to
     /// it.
     HearingStation(StationKey),
@@ -357,6 +359,7 @@ mod tests {
             (r#"{"cmd":"code_tables"}"#, Call::CodeTables),
             (r#"{"cmd":"listening"}"#, Call::Listening),
             (r#"{"cmd":"hunt"}"#, Call::Hunt),
+            (r#"{"cmd":"listened_freqs"}"#, Call::ListenedFreqs),
             (
                 r#"{"cmd":"stats","args":{"period":"month","tz_offset_min":-180}}"#,
                 Call::Stats(StatsQuery { period: crate::stats::Period::Month, tz_offset_min: -180 }),

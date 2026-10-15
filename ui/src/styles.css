@@ -21,6 +21,11 @@
   --dim: #8498ad;
   --amber: #ffb33f;
   --amber-soft: rgba(255, 179, 63, 0.14);
+  /* the band dial's heat strip, levels 1 to 4: more time at a stronger signal, brighter */
+  --heat-1: rgba(255, 179, 63, 0.22);
+  --heat-2: rgba(255, 179, 63, 0.45);
+  --heat-3: rgba(255, 179, 63, 0.72);
+  --heat-4: var(--amber);
   --cool: #7fd0ff;
   --warn: #ff8a7a;
   --site-on: #ffe2a0;
@@ -804,6 +809,14 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .bdial-scale.has-prof { height: 82px; }
 .bdial-scale.has-prof .dial-marks { top: 26px; }
 .bdial-scale.has-prof .dial-scale { top: 48px; }
+/* the channels listened to: a strip under the scale's labels */
+.bdial-scale.has-heat { height: 64px; }
+.bdial-scale.has-prof.has-heat { height: 90px; }
+.listen-heat { position: absolute; left: 0; bottom: 0; width: 100%; height: 5px; pointer-events: none; }
+.listen-heat .h1 { fill: var(--heat-1); }
+.listen-heat .h2 { fill: var(--heat-2); }
+.listen-heat .h3 { fill: var(--heat-3); }
+.listen-heat .h4 { fill: var(--heat-4); filter: drop-shadow(0 0 2px rgba(255, 179, 63, 0.75)); }
 .scan-prof { position: absolute; left: 0; top: 0; width: 100%; height: 24px; overflow: visible; pointer-events: none; }
 .scan-prof path, .scan-big path { vector-effect: non-scaling-stroke; }
 .scan-prof .now, .scan-big .now { fill: rgba(79, 200, 164, 0.2); stroke: var(--band-ham); stroke-width: 1px; }
@@ -1121,6 +1134,7 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
   .bdial-head .icon-btn { width: 40px; height: 40px; }
   .scan-index .scan-del-one { width: 40px; height: 40px; }
   .bdial-scale { height: 64px; }
+  .bdial-scale.has-heat { height: 72px; }
   .dial { height: 92px; }
   .drop, .finder input[type="search"] { min-height: 44px; }
   .drop-o { padding: 10px 8px; }

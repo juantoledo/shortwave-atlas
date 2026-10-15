@@ -602,6 +602,69 @@ pub fn listened_ids<'a>(all: impl IntoIterator<Item = &'a Session>, cat: &Catalo
         .collect()
 }
 
+/// Mean S-meter (dB over S9) a session needs to show on the band dial's heat strip: S3.
+pub const VALID_DB: i16 = -36;
+/// Weighted minutes for heat levels 1 to 4.
+pub const HEAT_LEVELS: [f64; 4] = [0.5, 5.0, 30.0, 120.0];
+
+/// Listening on one channel, all time: only sessions with a valid signal (the band dial's
+/// heat strip).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FreqHeat {
+    pub khz: u32,
+    pub seconds: u32,
+    pub sessions: u32,
+    /// Mean of the sessions' mean S-meter, dB over S9.
+    pub avg_db: Option<i16>,
+    /// 1 (a little, or weak) to 4 (hours, strong).
+    pub level: u8,
+}
+
+/// The signal was there: a good enough meter, or, without a meter, a station on the air.
+fn valid(s: &Session) -> bool {
+    match s.avg_db {
+        Some(db) => db >= VALID_DB,
+        None => s.station.is_some(),
+    }
+}
+
+/// How much a minute counts: half at S3, all of it from S9 up (and without a meter).
+fn weight(db: Option<i16>) -> f64 {
+    db.map_or(1.0, |db| 0.5 + 0.5 * (f64::from(db - VALID_DB) / f64::from(-VALID_DB)).clamp(0.0, 1.0))
+}
+
+/// Every channel listened to with a valid signal, by kHz, low to high.
+pub fn freq_heat<'a>(all: impl IntoIterator<Item = &'a Session>) -> Vec<FreqHeat> {
+    // per kHz: seconds, sessions, dB sum and count, score
+    let mut acc: HashMap<u32, (i64, u32, i64, u32, f64)> = HashMap::new();
+    for s in all.into_iter().filter(|s| valid(s)) {
+        let e = acc.entry((s.freq_hz + 500) / 1000).or_default();
+        e.0 += s.secs();
+        e.1 += 1;
+        if let Some(db) = s.avg_db {
+            e.2 += i64::from(db);
+            e.3 += 1;
+        }
+        e.4 += s.secs() as f64 / 60.0 * weight(s.avg_db);
+    }
+    let mut out: Vec<FreqHeat> = acc
+        .into_iter()
+        .filter_map(|(khz, (secs, n, sum, dbs, score))| {
+            let level = HEAT_LEVELS.iter().filter(|&&t| score >= t).count() as u8;
+            (level > 0).then(|| FreqHeat {
+                khz,
+                seconds: sat(secs),
+                sessions: n,
+                avg_db: (dbs > 0).then(|| (sum as f64 / f64::from(dbs)).round() as i16),
+                level,
+            })
+        })
+        .collect();
+    out.sort_by_key(|h| h.khz);
+    out
+}
+
 /// One week of a station's signal.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -804,6 +867,32 @@ mod tests {
         let b49 = p.day_night.iter().find(|b| b.band == "49m").unwrap();
         assert_eq!((b49.day_s, b49.night_s), (0, 540));
         assert_eq!(p.faint[0].avg_db, Some(-30));
+    }
+
+    #[test]
+    fn heat_of_the_channels() {
+        let at = |hz: u32, mins: i64, db: Option<i16>, st: bool| Session {
+            freq_hz: hz,
+            avg_db: db,
+            ..sess(T0, mins, st.then(|| sref("X", "CHN", "M")))
+        };
+        let h = freq_heat(&[
+            at(6_070_000, 10, Some(0), false),
+            at(6_070_400, 10, Some(-6), false), // the same kHz
+            at(6_090_000, 60, Some(-50), true), // too weak, even identified
+            at(7_200_000, 3, None, true),       // no meter: the station counts
+            at(7_300_000, 3, None, false),      // no meter, nothing on the air
+            at(9_500_000, 40, Some(0), false),
+            at(9_600_000, 40, Some(VALID_DB), false),
+            at(9_700_000, 0, Some(0), false), // nothing to weigh
+        ]);
+        let got: Vec<_> = h.iter().map(|x| (x.khz, x.sessions, x.level)).collect();
+        assert_eq!(got, [(6070, 2, 2), (7200, 1, 1), (9500, 1, 3), (9600, 1, 2)]);
+        assert_eq!((h[0].seconds, h[0].avg_db), (1200, Some(-3)));
+        assert_eq!(h[1].avg_db, None);
+        // the same minutes, a stronger signal: a higher level
+        assert!(h[2].level > h[3].level);
+        assert_eq!(freq_heat(&[at(9_500_000, 120, Some(10), false)])[0].level, 4);
     }
 
     #[test]

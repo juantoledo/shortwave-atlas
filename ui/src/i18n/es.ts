@@ -54,6 +54,7 @@ export const es: Messages = {
   scanSpeeds: { fast: 'Rápido', normal: 'Normal', thorough: 'Minucioso' },
   scanEstimate: (n, dur) => `${n} pasos · ~${dur}`,
   scanProfile: 'Intensidad de señal del último escaneo',
+  listenHeat: 'Dónde has escuchado con buena señal: más brillante cuanto más tiempo y más fuerte',
   moreControls: 'Más controles del receptor',
   lessControls: 'Menos controles del receptor',
 

@@ -186,3 +186,20 @@ export function clampToCoverage(hz: number, coverage: readonly RxRange[]): numbe
   }
   return best;
 }
+
+/** Narrowest heat cell, in the marks' viewBox units. */
+const HEAT_MIN_W = 2;
+
+/** The listened channels over [lo, hi] kHz as cells of the marks' viewBox (`MARKS_W` wide): one
+ *  channel (`stepKhz`) wide around each, at least `HEAT_MIN_W`, cut at the window's edges. */
+export function heatCells(heat: readonly { khz: number; level: number }[], lo: number, hi: number, stepKhz: number): { x: number; w: number; level: number }[] {
+  const at = (khz: number) => ((khz - lo) / (hi - lo)) * MARKS_W;
+  const out: { x: number; w: number; level: number }[] = [];
+  for (const h of heat) {
+    if (h.khz < lo || h.khz > hi) continue;
+    const w = Math.max(HEAT_MIN_W, at(h.khz + stepKhz / 2) - at(h.khz - stepKhz / 2));
+    const x = Math.max(0, Math.min(MARKS_W - w, at(h.khz) - w / 2));
+    out.push({ x: Math.round(x * 10) / 10, w: Math.round(w * 10) / 10, level: h.level });
+  }
+  return out;
+}

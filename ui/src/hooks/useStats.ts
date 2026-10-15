@@ -1,9 +1,11 @@
 // The listening history as the core works it out: the session being recorded (for the top
-// bar), the stats of a period while the Stats view is open, and the nudges of the Hunt tab.
+// bar), the stats of a period while the Stats view is open, the nudges of the Hunt tab, and the
+// channels listened to (the band dial's heat strip).
 // The core records; these only ask, every few seconds, so the view stays live.
 
 import { useCallback, useEffect, useState } from 'react';
 import type { Api } from '../api/client';
+import type { FreqHeat } from '../types/generated/FreqHeat';
 import type { Hunt } from '../types/generated/Hunt';
 import type { ListeningNow } from '../types/generated/ListeningNow';
 import type { Period } from '../types/generated/Period';
@@ -53,4 +55,17 @@ export function useHunt(api: Api | null, on: boolean, key: unknown) {
     return () => { alive = false; };
   }, [api, on, key]);
   return hunt;
+}
+
+/** The channels listened to with a valid signal; asked again with `key` (the session under way,
+ *  so a session that starts or ends shows). */
+export function useFreqHeat(api: Api | null, key: unknown) {
+  const [heat, setHeat] = useState<FreqHeat[]>([]);
+  useEffect(() => {
+    if (!api) return;
+    let alive = true;
+    api.listenedFreqs().then((h) => { if (alive) setHeat(h); }, () => {});
+    return () => { alive = false; };
+  }, [api, key]);
+  return heat;
 }

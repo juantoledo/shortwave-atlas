@@ -17,7 +17,7 @@ use atlas_core::platform::Os;
 use atlas_core::scan::{plan, ScanRequest, ScanStatus};
 use atlas_core::setup::{validate_choice, BackendKind, RigChoice, RigModel};
 use atlas_core::stations::{Catalog, CatalogCell, Lens, LOOKUP_TOLERANCE_HZ};
-use atlas_core::stats::{listened_ids, stats, trend_for, NowListening};
+use atlas_core::stats::{freq_heat, listened_ids, stats, trend_for, NowListening};
 use atlas_rig::{discover, Rig, RigConfig, ScanStop};
 use serde_json::Value;
 use tokio::sync::OnceCell;
@@ -466,6 +466,9 @@ impl Atlas {
                 let cat = self.stations.get();
                 json(serde_json::to_value(self.listening.with(now, |l, _| trend_for(l, &cat, &key, now))))
             }
+            Call::ListenedFreqs => {
+                json(serde_json::to_value(self.listening.with(now, |l, open| freq_heat(l.iter().chain(open)))))
+            }
             Call::HearingStation(key) => {
                 let cat = self.stations.get();
                 self.listening.hint(key, &Ctx { cat: &cat, qth: self.qth().pos() }, now);
@@ -826,6 +829,7 @@ pub(crate) mod tests {
         assert!(atlas.call(Call::Hunt).await.unwrap()["now"].is_array());
         let trend = atlas.call(Call::StationTrend(serde_json::from_value(key).unwrap())).await.unwrap();
         assert_eq!(trend.as_array().unwrap().len(), 26);
+        assert!(atlas.call(Call::ListenedFreqs).await.unwrap().is_array());
         // on a fast machine all this takes less than a second, and a session that ends within
         // the second it began overlaps no period: let it last one
         let start = l["now"]["session"]["start"].as_i64().unwrap();
