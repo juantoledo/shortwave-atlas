@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NO_FILTERS, type Filters } from '../hooks/useCore';
 import type { NetNow } from '../types/generated/NetNow';
+import { siteColor } from './stage/fx';
 import { audioCell, bufferSegs, canListen, dimSites, favFilter, isNet, lensFilters, leaveNet, NET_BAND, NET_DOT_ID, netCountryOpts, netQuery, netSiteDots, playingUuid, stepChannel, streamLabel } from './net';
 
 const radio: Filters = { ...NO_FILTERS, q: 'radio', langs: ['S'], regions: ['am'], countries: ['ARG'], sources: ['eibi'], site: 7, scan: 's1', lens: 'all' };
@@ -89,6 +90,11 @@ describe('NET band', () => {
     const sites = [{ ...dots[0], id: 1, on: 4 }, { ...dots[1], id: 2, on: 0 }];
     expect(dimSites(sites).map((s) => s.on)).toEqual([0, 0]);
     expect(dimSites(sites)[1]).toBe(sites[1]);
+    // pink on the map, like the tuned station's pin; white when picked
+    expect(siteColor(dots[0], false, false)).toBe('rgba(255,122,196,1)');
+    expect(siteColor(dots[1], false, false)).toBe('rgba(255,122,196,0.8)');
+    expect(siteColor(dots[0], true, false)).toBe('#ffffff');
+    expect(siteColor(sites[0], false, false)).not.toContain('255,122,196');
   });
 
   it('offers countries by name in the UI language', () => {

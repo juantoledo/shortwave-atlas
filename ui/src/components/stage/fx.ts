@@ -4,6 +4,7 @@
 import { receivedRing, type LatLon } from '../../geo/geo';
 import { flagUrl } from '../../catalog/flags';
 import type { SiteDot } from '../../types/generated/SiteDot';
+import { NET_DOT_ID } from '../net';
 
 export const REDUCE = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 /** Camera altitudes, in globe radii, for a square view. */
@@ -71,12 +72,14 @@ export function siteTip(s: SiteDot, label: { country: string; onAir: string }): 
 }
 
 /** Transmitter sites: short towers where something is on the air (taller with more), flat
- *  dim dots elsewhere, so they stand out from the city lights; the active site is white, sites
+ *  dim dots elsewhere, so they stand out from the city lights; the countries of the NET band
+ *  are pink, like everything internet on the map; the active site is white, sites
  *  listened to (the Listened lens) glow amber, larger with more time (`listened` 0..1), sites
  *  of stations a scan logged are green (a little larger), and sites of the listener's own
  *  stations violet. Radius in degrees. */
 export const siteColor = (s: SiteDot, active: boolean, logged: boolean, listened?: number) =>
   active ? '#ffffff'
+  : s.id >= NET_DOT_ID ? `rgba(${NET_RGB},${s.total >= 100 ? 1 : 0.8})`
   : listened !== undefined ? `rgba(255,179,63,${(0.55 + 0.45 * listened).toFixed(2)})`
   : logged ? `rgba(79,200,164,${s.on ? 1 : 0.7})`
   : s.mine > 0 ? `rgba(190,160,255,${s.on ? 1 : 0.75})`

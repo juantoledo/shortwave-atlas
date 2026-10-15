@@ -506,7 +506,7 @@ export function App() {
               failedMsg={t.globeFailed}
               sites={globeSites}
               strengthDb={on && !netNow ? rig.strength_db : null}
-              activeSite={filters.site}
+              activeSite={netActive ? netDots.find((d) => d.itu === filters.countries[0])?.id ?? null : filters.site}
               loggedSites={scan.loggedSites}
               listenedSites={listenedSites}
               scan={globeScan}
