@@ -1,5 +1,5 @@
 // Before the NET band is turned on: what it is, where its stations come from, what leaves this
-// computer, how to use it, and how far to trust it. Turn on or Cancel; Escape and the backdrop
+// computer, how to use it, how far to trust it, and who answers for it. Turn on or Cancel; Escape and the backdrop
 // cancel. Rendered on <body>: the Settings sheet it opens from is transformed, and would hold a
 // fixed layer inside it.
 
@@ -57,6 +57,8 @@ export function NetNotice({ busy, onConfirm, onCancel }: Props) {
             <ul>{t.netNoticeHow.map((s) => <li key={s}>{s}</li>)}</ul>
             <h2 className="h"><span>{t.netNoticeAsIsTitle}</span></h2>
             <p>{t.netNoticeAsIs}</p>
+            <h2 className="h"><span>{t.netNoticeLegalTitle}</span></h2>
+            <p>{t.netNoticeLegal}</p>
           </section>
         </div>
         <footer className="welcome-foot">

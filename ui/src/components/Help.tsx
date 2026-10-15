@@ -58,6 +58,16 @@ function Extra({ topic, version, meta }: { topic: HelpTopic; version: string | n
         <p>{t.receiveOnly}</p>
         {meta && <p>{t.listFoot(season)}</p>}
         <DataNotice />
+        <section className="data-notice net-notice">
+          <h2 className="h"><span>{t.netNoticeTitle}</span></h2>
+          <p>
+            {t.netNoticeSource}{' '}
+            <a className="link" href="https://www.radio-browser.info" target="_blank" rel="noreferrer">radio-browser.info</a>
+          </p>
+          <p>{t.netNoticeAsIs}</p>
+          <h2 className="h"><span>{t.netNoticeLegalTitle}</span></h2>
+          <p>{t.netNoticeLegal}</p>
+        </section>
         <p><a className="link" href="https://github.com/juantoledo/shortwave-atlas" target="_blank" rel="noreferrer">{t.sourceCode}</a></p>
         <p className="note">{t.thirdParty}</p>
       </>
