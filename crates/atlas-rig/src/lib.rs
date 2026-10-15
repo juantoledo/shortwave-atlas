@@ -301,6 +301,8 @@ impl Rig {
     }
 
     /// What the rig receives: asked once per backend (until it answers), else the default.
+    /// Not asked while the link is down: nothing would answer, and each try (a refused connect
+    /// takes seconds on Windows) would hold up the tune, Hunt or dial that wanted it.
     pub async fn coverage(&self) -> Vec<RxRange> {
         let (backend, cache) = {
             let guard = self.running.lock().expect("rig lock");
@@ -309,6 +311,9 @@ impl Rig {
         };
         if let Some(c) = cache.lock().expect("coverage lock").clone() {
             return c;
+        }
+        if self.state.borrow().link == Link::Down {
+            return default_coverage();
         }
         let answer = backend.coverage().await;
         // a reachable rigctld that cannot say keeps the fallback, rather than being asked on every tune
@@ -622,6 +627,17 @@ mod tests {
         until(&mut rx, |s| s.freq_hz == Some(145_500_000)).await;
         let e = rig.execute(RigCommand::SetFreq { hz: 500_000_000 }).await.unwrap_err();
         assert!(matches!(e, CommandError::Invalid(_)));
+    }
+
+    #[tokio::test]
+    async fn coverage_is_not_asked_of_a_rig_that_is_down() {
+        // a port nothing listens on
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let rig = Rig::start(Arc::new(hamlib::Hamlib::new("127.0.0.1", port)));
+        let mut rx = rig.subscribe();
+        until(&mut rx, |s| s.link == Link::Down).await;
+        let c = tokio::time::timeout(Duration::from_millis(100), rig.coverage()).await;
+        assert_eq!(c.ok(), Some(default_coverage()));
     }
 
     #[tokio::test]
