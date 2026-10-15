@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NO_FILTERS, type Filters } from '../hooks/useCore';
 import type { NetNow } from '../types/generated/NetNow';
-import { netRings, siteColor } from './stage/fx';
+import { netRings, route, siteColor, siteRings } from './stage/fx';
 import { audioCell, bufferSegs, canListen, dimSites, favFilter, isNet, lensFilters, leaveNet, NET_BAND, NET_DOT_ID, netCountryOpts, netQuery, netSiteDots, playingUuid, stepChannel, streamLabel } from './net';
 
 const radio: Filters = { ...NO_FILTERS, q: 'radio', langs: ['S'], regions: ['am'], countries: ['ARG'], sources: ['eibi'], site: 7, scan: 's1', lens: 'all' };
@@ -105,6 +105,17 @@ describe('NET band', () => {
     expect(Math.max(...playing.map((r) => r.maxR))).toBeGreaterThan(tuned[0].maxR);
     expect(Math.min(...playing.map((r) => r.period))).toBeLessThan(tuned[0].period);
     expect([...tuned, ...playing].every((r) => r.rgb === '255,122,196' && r.lat === at.lat && r.lng === at.lon)).toBe(true);
+  });
+
+  it('routes an internet station home in its pink, and beats a transmitter in amber', () => {
+    const site = { lat: -34.6, lon: -58.4 }, qth = { lat: -33.45, lon: -70.67 };
+    const net = route(site, qth, true), sw = route(site, qth);
+    expect(net.path).toEqual({ site, rgb: '255,122,196' });
+    expect(net.arcs[0].colors[0]).toContain('255,122,196');
+    expect(sw.path).toEqual({ site });
+    expect(sw.arcs[0].colors[0]).toContain('255,179,63');
+    expect(siteRings(site, false)).toHaveLength(1);
+    expect(siteRings(site, true).map((r) => r.rgb)).toEqual(['255,179,63', '255,179,63']);
   });
 
   it('offers countries by name in the UI language', () => {

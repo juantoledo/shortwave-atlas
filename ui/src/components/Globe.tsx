@@ -39,7 +39,7 @@ function placeholder(): string {
 
 /** The great-circle path from `site` to `qth` as a line just above the ground (`coords`: the
  *  globe's), a vertex per degree, to be drawn on with its draw range. */
-function routeLine(site: LatLon, qth: LatLon, coords: GlobeMethods['getCoords']): Line {
+function routeLine(site: LatLon, qth: LatLon, coords: GlobeMethods['getCoords'], rgb = '255,200,130'): Line {
   const pts = greatCircle(site, qth, Math.max(16, Math.round(angleDeg(site, qth))));
   const pos = new Float32Array(pts.length * 3);
   pts.forEach((p, i) => {
@@ -48,7 +48,8 @@ function routeLine(site: LatLon, qth: LatLon, coords: GlobeMethods['getCoords'])
   });
   const geom = new BufferGeometry();
   geom.setAttribute('position', new BufferAttribute(pos, 3));
-  return new Line(geom, new LineBasicMaterial({ color: 0xffc882, transparent: true, opacity: 0.4, depthWrite: false }));
+  const [r, g, b] = rgb.split(',').map(Number);
+  return new Line(geom, new LineBasicMaterial({ color: (r << 16) | (g << 8) | b, transparent: true, opacity: 0.4, depthWrite: false }));
 }
 
 // Accessors live out here (or in useCallback) so each render hands the globe the same functions:
@@ -146,7 +147,7 @@ function GlobeView(props: ViewProps) {
   useEffect(() => {
     const g = globe.current;
     if (!stage.ready || !g || !path) return;
-    const line = routeLine(path.site, qth, g.getCoords);
+    const line = routeLine(path.site, qth, g.getCoords, path.rgb);
     line.geometry.setDrawRange(0, Math.ceil(routeProgress(performance.now()) * line.geometry.getAttribute('position').count));
     g.scene().add(line);
     routing.current = line;

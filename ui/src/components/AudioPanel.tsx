@@ -46,6 +46,8 @@ interface Props {
   /** The internet station tuned instead of the rig, if any. */
   net: NetNow | null;
   onSetUp: () => void;
+  /** Listening started or stopped (the map's point beats meanwhile). */
+  onListening: (on: boolean) => void;
 }
 
 /** What the panel says about the internet station: connecting, or why it stopped. */
@@ -58,7 +60,7 @@ function netLine(t: Messages, n: NetNow): string {
   }
 }
 
-export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onTune, keys, rigAudio, net, onSetUp }: Props) {
+export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onTune, keys, rigAudio, net, onSetUp, onListening }: Props) {
   const t = useT();
   const spans = [...new Set([3000, 4000, rate / 2])].filter((s) => s <= rate / 2);
   const [span, setSpan] = useState(spans[0]);
@@ -80,6 +82,10 @@ export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onT
     };
   }, [player]);
   useEffect(() => () => player?.stop(), [player]);
+  useEffect(() => {
+    onListening(player !== null);
+    return () => onListening(false);
+  }, [player, onListening]);
   useEffect(() => player?.setVolume(volume), [player, volume]);
   const { cushionMs, maxAheadMs } = buffer;
   useEffect(() => player?.setBuffer({ cushionMs, maxAheadMs }), [player, cushionMs, maxAheadMs]);

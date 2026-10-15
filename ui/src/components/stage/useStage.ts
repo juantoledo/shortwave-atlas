@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { altitudeAt, angleDeg, clamp, easeInOut, frameAltitude, frameWithHome, fromVec, hermiteEase, initialSlope, midpoint, pingAlpha, pingRadius, slerp, toVec, type LatLon, type Vec3 } from '../../geo/geo';
 import { SIGNAL_DB } from '../scan';
-import { ARC_MS, COOL, HOME_ALT, LOCK_ALT, mkPin, mkPulse, netRings, NO_FX, NO_SCAN_FX, PING_MS, PING_PX_PER_DEG, qthRing, REDUCE, ROUTE_MS, route, sonarRing, SPIN, START_ALT, AMBER, type Arc, type Fx, type Path, type Pin, type Ring, type ScanFx } from './fx';
+import { ARC_MS, COOL, HOME_ALT, LOCK_ALT, mkPin, mkPulse, netQthRing, netRings, NO_FX, NO_SCAN_FX, siteRings, PING_MS, PING_PX_PER_DEG, qthRing, REDUCE, ROUTE_MS, route, sonarRing, SPIN, START_ALT, type Arc, type Fx, type Path, type Pin, type Ring, type ScanFx } from './fx';
 import type { MapMode } from '../../hooks/useDisplay';
 import type { Candidate } from '../../types/generated/Candidate';
 import type { Qth } from '../../types/generated/Qth';
@@ -88,6 +88,8 @@ export interface StageInput {
   sel: Candidate | null;
   /** Wins over `sel` while set. */
   net: NetPin | null;
+  /** Someone listens here (the audio panel plays): the tuned station's point beats. */
+  listening: boolean;
   qth: Qth;
   frame: boolean;
   /** Hidden behind another view (phones): stop the frame loop. */
@@ -141,7 +143,7 @@ export interface Stage {
   hover(on: boolean): void;
 }
 
-export function useStage({ sel, net, qth, frame: framing, paused, onInteract, sites, strengthDb, scan, finale }: StageInput): Stage {
+export function useStage({ sel, net, listening, qth, frame: framing, paused, onInteract, sites, strengthDb, scan, finale }: StageInput): Stage {
   const cam = useRef<Camera | null>(null);
   const [ready, setReady] = useState(false);
   const [fx, setFx] = useState<Fx>(NO_FX);
@@ -174,6 +176,8 @@ export function useStage({ sel, net, qth, frame: framing, paused, onInteract, si
   selRef.current = sel;
   const netRef = useRef(net);
   netRef.current = net;
+  const listeningRef = useRef(listening);
+  listeningRef.current = listening;
   const interact = useRef(onInteract);
   interact.current = onInteract;
   /** When the user last touched the view (performance.now()). */
@@ -291,9 +295,20 @@ export function useStage({ sel, net, qth, frame: framing, paused, onInteract, si
         await fly(n.lat, n.lon, fit(LOCK_ALT), Math.round(1500 + 1700 * Math.min(1, mv / 150)), 0.5 + 1.4 * Math.min(1, mv / 120));
         if (my !== seq.current) return;
         // as it is when it lands: the beat follows below
+        const site = { lat: n.lat, lon: n.lon };
         const live = netRef.current?.key === n.key && netRef.current.playing;
         const station = { lat: n.lat, lng: n.lon, el: mkPin('net' + (live ? ' playing' : ''), n.name, n.sub, n.flag) };
-        setFx({ ...NO_FX, station, rings: netRings({ lat: n.lat, lon: n.lon }, live) });
+        setFx({ ...NO_FX, station, rings: netRings(site, live) });
+        // then the route home, as for a transmitter, in the station's pink
+        await sleep(450); if (my !== seq.current) return;
+        setFx((f) => ({ ...f, ...route(site, qthRef.current, true) }));
+        await sleep(ROUTE_MS); if (my !== seq.current) return;
+        const playing = !!netRef.current?.playing;
+        setFx((f) => ({ ...f, rings: [...netRings(site, playing), ...(playing ? [netQthRing(qthRef.current)] : [])] }));
+        if (!frameRef.current || grabbed.current === my) return;
+        await sleep(1100); if (my !== seq.current || grabbed.current === my) return;
+        const mid = midpoint(qthRef.current, site);
+        fly(mid.lat, mid.lon, fit(clamp(0.55 + angleDeg(qthRef.current, site) / 42, 1.5, 3.4)), 2200, 0.15);
       })();
       return;
     }
@@ -322,9 +337,9 @@ export function useStage({ sel, net, qth, frame: framing, paused, onInteract, si
       const mv = angleDeg({ lat: p0.lat, lon: p0.lon }, site);
       await fly(site.lat, site.lon, fit(LOCK_ALT), Math.round(1500 + 1700 * Math.min(1, mv / 150)), 0.5 + 1.4 * Math.min(1, mv / 120));
       if (my !== seq.current) return;
-      const station = { lat: site.lat, lng: site.lon, el: mkPin(on ? '' : 'off', sel.station.name, sel.site.name, sel.station.flag) };
-      const siteRing: Ring = { lat: site.lat, lng: site.lon, maxR: 7, speed: 3.2, period: 1400, rgb: AMBER };
-      setFx({ ...NO_FX, station, rings: on ? [siteRing] : [] });
+      const beat = on && listeningRef.current;
+      const station = { lat: site.lat, lng: site.lon, el: mkPin(on ? (beat ? 'playing' : '') : 'off', sel.station.name, sel.site.name, sel.station.flag) };
+      setFx({ ...NO_FX, station, rings: on ? siteRings(site, beat) : [] });
       if (!on) return;
       await sleep(450); if (my !== seq.current) return;
       setFx((f) => ({ ...f, ...route(site, qthRef.current) }));
@@ -338,17 +353,30 @@ export function useStage({ sel, net, qth, frame: framing, paused, onInteract, si
     })();
   }, [lockKey, ready, fly, fit, home, scanning, finaleOn]);
 
-  // The internet station tuned starts or stops playing: its point beats, or rests (once landed).
+  // The station tuned starts or stops being listened to: its point beats, or rests (once landed);
+  // the rings that arrive at the QTH stay as they are (the S-meter's, or the stream's).
   const netPlaying = net?.playing ?? false;
   useEffect(() => {
     const n = netRef.current;
     if (!n || lastKey.current !== `net:${n.key}`) return;
+    const q = qthRef.current;
     setFx((f) => {
       if (!f.station?.el.classList.contains('net')) return f;
       f.station.el.classList.toggle('playing', netPlaying);
-      return { ...f, rings: netRings({ lat: n.lat, lon: n.lon }, netPlaying) };
+      const home = f.path ? (netPlaying ? [netQthRing(q)] : []) : [];
+      return { ...f, rings: [...netRings({ lat: n.lat, lon: n.lon }, netPlaying), ...home] };
     });
   }, [netPlaying]);
+  useEffect(() => {
+    const s = selRef.current;
+    if (netRef.current || !s || !s.air.on || lastKey.current !== `${s.station.id}:${s.air.on}`) return;
+    const site = { lat: s.site.lat, lon: s.site.lon };
+    setFx((f) => {
+      if (!f.station || f.station.el.classList.contains('net')) return f;
+      f.station.el.classList.toggle('playing', listening);
+      return { ...f, rings: [...siteRings(site, listening), ...f.rings.filter((r) => r.rgb === COOL)] };
+    });
+  }, [listening]);
 
   // A scan starts: drop the station and its route, hold over the QTH. It ends: clear its layers.
   useEffect(() => {

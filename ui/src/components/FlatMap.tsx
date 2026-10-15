@@ -204,7 +204,7 @@ export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boole
 
     // the route home on the ground, drawing itself on
     if (sc.path) {
-      g.strokeStyle = 'rgba(255,200,130,0.4)';
+      g.strokeStyle = `rgba(${sc.path.rgb ?? '255,200,130'},0.4)`;
       g.lineWidth = 1.5;
       strokeCopies(g, arcPx(v, sc.path.site, sc.qth, 0), progress, worldW, w);
     }

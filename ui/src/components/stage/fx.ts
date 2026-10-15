@@ -28,7 +28,8 @@ export interface Pin { lat: number; lng: number; el: HTMLElement }
 export interface Ring { lat: number; lng: number; maxR: number; speed: number; period: number; rgb: string; alpha?: number; live?: boolean }
 export interface Arc { sLat: number; sLng: number; eLat: number; eLng: number; dash: number; gap: number; anim: number; stroke: number; colors: string[] }
 /** The great-circle path from a transmitter home (each view draws it on). */
-export interface Path { site: LatLon }
+/** The route home on the ground; `rgb`: its colour (a transmitter's amber unless said). */
+export interface Path { site: LatLon; rgb?: string }
 export interface Fx { station: Pin | null; rings: Ring[]; arcs: Arc[]; path: Path | null }
 export const NO_FX: Fx = { station: null, rings: [], arcs: [], path: null };
 /** A scan's pings (glowing markers that pulse once) and arcs, each until a time (performance.now()). */
@@ -88,27 +89,42 @@ export const siteRadius = (s: SiteDot, active: boolean, logged: boolean, listene
   (active ? 0.6 : s.on ? 0.45 : 0.32) + (active ? 0 : listened !== undefined ? 0.15 + 0.5 * listened : logged ? 0.1 : 0);
 export const siteAltitude = (s: SiteDot, active: boolean) => (active ? 0.05 : s.on ? 0.012 + Math.min(0.03, s.on * 0.002) : 0.003);
 
-export function route(site: LatLon, qth: LatLon): Pick<Fx, 'arcs' | 'path'> {
+/** The route home: from a transmitter in amber, from an internet station (`net`) in its pink. */
+export function route(site: LatLon, qth: LatLon, net = false): Pick<Fx, 'arcs' | 'path'> {
   const [a, b] = [site, qth];
+  const [from, lit] = net ? [NET_RGB, '255,190,225'] : [AMBER, '255,228,175'];
   return {
     arcs: [
-      { sLat: a.lat, sLng: a.lon, eLat: b.lat, eLng: b.lon, dash: 1, gap: 0, anim: 0, stroke: 0.22, colors: [`rgba(${AMBER},0.4)`, `rgba(${COOL},0.4)`] },
-      { sLat: a.lat, sLng: a.lon, eLat: b.lat, eLng: b.lon, dash: 0.16, gap: 1.2, anim: 2600, stroke: 0.55, colors: ['rgba(255,228,175,1)', `rgba(${COOL},1)`] },
+      { sLat: a.lat, sLng: a.lon, eLat: b.lat, eLng: b.lon, dash: 1, gap: 0, anim: 0, stroke: 0.22, colors: [`rgba(${from},0.4)`, `rgba(${COOL},0.4)`] },
+      { sLat: a.lat, sLng: a.lon, eLat: b.lat, eLng: b.lon, dash: 0.16, gap: 1.2, anim: 2600, stroke: 0.55, colors: [`rgba(${lit},1)`, `rgba(${COOL},1)`] },
     ],
-    path: { site },
+    path: net ? { site, rgb: NET_RGB } : { site },
   };
 }
 
-/** An internet station's place: one slow ring while it is only tuned; while it plays, a beat of
- *  quick wide rings with a tighter one inside, its audio going out. */
-export function netRings(p: LatLon, playing: boolean): Ring[] {
-  const at = { lat: p.lat, lng: p.lon, rgb: NET_RGB };
-  if (!playing) return [{ ...at, maxR: 4, speed: 1.5, period: 2600, alpha: 0.6 }];
+/** The station's point: while listened to, a beat of quick wide rings with a tighter one inside,
+ *  in its colour (`rgb`); else `calm` (a slow ring, or none). */
+export function beatRings(p: LatLon, rgb: string, listening: boolean, calm: Ring[]): Ring[] {
+  if (!listening) return calm;
+  const at = { lat: p.lat, lng: p.lon, rgb };
   return [
     { ...at, maxR: 9, speed: 6, period: 1100 },
     { ...at, maxR: 4, speed: 3, period: 550, alpha: 0.8 },
   ];
 }
+
+/** A transmitter on the air: its steady ring, or the beat while listened to. */
+export const siteRings = (p: LatLon, listening: boolean): Ring[] =>
+  beatRings(p, AMBER, listening, [{ lat: p.lat, lng: p.lon, maxR: 7, speed: 3.2, period: 1400, rgb: AMBER }]);
+
+/** An internet station's place: one slow ring while it is only tuned; while it plays, a beat of
+ *  quick wide rings with a tighter one inside, its audio going out. */
+export function netRings(p: LatLon, playing: boolean): Ring[] {
+  return beatRings(p, NET_RGB, playing, [{ lat: p.lat, lng: p.lon, rgb: NET_RGB, maxR: 4, speed: 1.5, period: 2600, alpha: 0.6 }]);
+}
+
+/** What arrives at the QTH from an internet station while it plays (no S-meter to follow). */
+export const netQthRing = (q: LatLon): Ring => ({ lat: q.lat, lng: q.lon, maxR: 4.5, speed: 2, period: 2200, rgb: COOL });
 
 export const qthRing = (q: LatLon): Ring => ({ lat: q.lat, lng: q.lon, maxR: 4.5, speed: 2, period: 2200, rgb: COOL, live: true });
 export const sonarRing = (q: LatLon): Ring => ({ lat: q.lat, lng: q.lon, maxR: 25, speed: 6, period: 2500, rgb: COOL, alpha: 0.6 });

@@ -354,6 +354,8 @@ export function App() {
   // the keyboard (keys/keymap.ts): typing anywhere starts a new search
   const searchRef = useRef<HTMLInputElement>(null);
   const audioKeys = useRef<AudioKeys>(null);
+  // the audio panel plays: the map's tuned point beats
+  const [audioOn, setAudioOn] = useState(false);
   // an internet station instead of the rig: tuned, as a radio station is; Listen (the audio
   // panel) plays it, and while listening another one switches at once
   const tuneNet = (uuid: string) => {
@@ -498,6 +500,7 @@ export function App() {
             <Globe
               sel={on && !netNow ? sel : null}
               net={netPin}
+              listening={audioOn}
               qth={qth}
               frame={frame}
               onFrame={toggleFrame}
@@ -643,6 +646,7 @@ export function App() {
               rigAudio={info.audio}
               net={netNow}
               onSetUp={() => openSettings('audio')}
+              onListening={setAudioOn}
             />
           ) : (
             info && <AudioOff onSetUp={() => openSettings('audio')} />
