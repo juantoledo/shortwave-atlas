@@ -226,7 +226,7 @@ mod tests {
         // one second at NET_RATE, 2 bytes a sample (the resampler holds back a little)
         let secs = pcm.len() as f32 / (NET_RATE as f32 * 2.0);
         assert!((0.9..=1.01).contains(&secs), "{secs} s");
-        let loud = pcm.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]).unsigned_abs()).max().unwrap();
+        let loud = pcm.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b).unsigned_abs()).max().unwrap();
         assert!((10_000..=13_000).contains(&loud), "{loud}");
     }
 
@@ -266,7 +266,7 @@ mod tests {
         let secs = pcm.len() as f32 / (NET_RATE as f32 * 2.0);
         assert!(secs > 2.5, "{secs} s in 5 s");
         assert!(hub.net_playing().is_some());
-        let loud = pcm.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]).unsigned_abs()).max().unwrap();
+        let loud = pcm.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b).unsigned_abs()).max().unwrap();
         assert!(loud > 1000, "silent: {loud}");
         drop(sub);
         hub.shutdown().await;
