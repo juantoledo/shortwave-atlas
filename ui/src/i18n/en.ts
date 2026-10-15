@@ -69,6 +69,7 @@ export const en = {
   scanSpeeds: { fast: 'Fast', normal: 'Normal', thorough: 'Thorough' } as Record<ScanSpeed, string>,
   scanEstimate: (n: number, dur: string) => `${n} steps · ~${dur}`,
   scanProfile: 'Signal strength from the last scan',
+  listenHeat: 'Where you have listened with a good signal: brighter for longer and stronger',
   moreControls: 'More receiver controls',
   lessControls: 'Fewer receiver controls',
 

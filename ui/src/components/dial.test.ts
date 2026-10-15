@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Band } from '../types/generated/Band';
 import type { Span } from '../types/generated/Span';
 import {
-  adjacentBand, bandAt, bandBars, bandEntryHz, bandWindow, clampToCoverage, dialPct, dialTicks, fitLabels, HF_SPAN, markPaths, rangeLabel,
+  adjacentBand, bandAt, bandBars, bandEntryHz, bandWindow, clampToCoverage, dialPct, dialTicks, fitLabels, heatCells, HF_SPAN, markPaths, rangeLabel,
   spanAt, tickLabel, uncovered, windowPct, windowTicks,
 } from './dial';
 
@@ -161,5 +161,17 @@ describe('band dial', () => {
   it('enters a band on its lowest on-air frequency, else at its edge', () => {
     expect(bandEntryHz(BANDS[1], [9_900_000, 9_420_000, 6_000_000])).toBe(9_420_000);
     expect(bandEntryHz(BANDS[1], [6_000_000])).toBe(9_300_000);
+  });
+});
+
+describe('listened heat', () => {
+  it('draws a channel-wide cell per listened kHz inside the window', () => {
+    const heat = [{ khz: 5790, level: 4 }, { khz: 5800, level: 1 }, { khz: 6050, level: 2 }, { khz: 6400, level: 3 }];
+    expect(heatCells(heat, 5800, 6300, 5)).toEqual([
+      { x: 0, w: 10, level: 1 }, // cut at the window's edge
+      { x: 495, w: 10, level: 2 },
+    ]);
+    // a 1 kHz channel on a wide window is still visible
+    expect(heatCells([{ khz: 15000, level: 1 }], 1700, 30000, 1)[0].w).toBe(2);
   });
 });

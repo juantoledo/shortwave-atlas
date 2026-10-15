@@ -10,6 +10,7 @@ import type { Dial } from '../types/generated/Dial';
 import type { Favorite } from '../types/generated/Favorite';
 import type { FavoriteRequest } from '../types/generated/FavoriteRequest';
 import type { FavoriteView } from '../types/generated/FavoriteView';
+import type { FreqHeat } from '../types/generated/FreqHeat';
 import type { Hunt } from '../types/generated/Hunt';
 import type { ImportReport } from '../types/generated/ImportReport';
 import type { Info } from '../types/generated/Info';
@@ -100,6 +101,7 @@ export class Api {
   stats = (args: StatsQuery) => this.transport.call({ cmd: 'stats', args }) as Promise<Stats>;
   listening = () => this.transport.call({ cmd: 'listening' }) as Promise<ListeningNow>;
   hunt = () => this.transport.call({ cmd: 'hunt' }) as Promise<Hunt>;
+  listenedFreqs = () => this.transport.call({ cmd: 'listened_freqs' }) as Promise<FreqHeat[]>;
   stationTrend = (args: StationKey) => this.transport.call({ cmd: 'station_trend', args }) as Promise<TrendPoint[]>;
   hearingStation = (args: StationKey) => this.transport.call({ cmd: 'hearing_station', args }) as Promise<null>;
   /** Unix seconds, or `null` for everything; resolves to how many sessions went. */

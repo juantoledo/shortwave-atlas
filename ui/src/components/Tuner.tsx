@@ -3,19 +3,21 @@
 // receives: LW/MW, HF, VHF or UHF), which shows broadcast bands on one lane and ham, CB and
 // utility bands on another, with a lens over where the band dial looks; and the dual tuning
 // knob at the right; under the band dial, the scan controls, and over it the strength profile of
-// the band's last scan (or the one running) with the scan before it as a ghost. `rx-x` parts fold
-// away on small screens until expanded.
+// the band's last scan (or the one running) with the scan before it as a ghost, and under it a
+// heat strip of the channels listened to with a valid signal. `rx-x` parts fold away on small
+// screens until expanded.
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNames } from '../catalog/names';
 import { sLabel, useT } from '../i18n';
 import { altName, isMac } from '../keys/keymap';
 import type { Band } from '../types/generated/Band';
+import type { FreqHeat } from '../types/generated/FreqHeat';
 import type { Mode } from '../types/generated/Mode';
 import type { RxRange } from '../types/generated/RxRange';
 import type { Span } from '../types/generated/Span';
 import {
-  adjacentBand, bandBars, bandEntryHz, bandWindow, dialPct, dialTicks, fitLabels, markPaths, MARKS_W, rangeLabel, spanAt,
+  adjacentBand, bandBars, bandEntryHz, bandWindow, dialPct, dialTicks, fitLabels, heatCells, markPaths, MARKS_W, rangeLabel, spanAt,
   tickLabel, uncovered, windowOf, windowPct, windowTicks, type DialWindow,
 } from './dial';
 import { Dropdown, type DropOpt } from './Dropdown';
@@ -31,6 +33,8 @@ const METER_SEGS = 11;
 const IDLE_KHZ = 9500;
 /** Width of a band label's character (12px monospace), for fitting them. */
 const LABEL_CHAR_PX = 7.4;
+/** A heat cell's width where the dial's window is no band (kHz). */
+const HEAT_STEP_KHZ = 5;
 
 /** dB relative to S9 -> lit segments (9 up to S9, one per 10 dB over). */
 export function meterSegments(db: number | null): number {
@@ -123,6 +127,8 @@ interface Props {
   win: ReturnType<typeof useBandWindow>;
   /** Scan profiles to draw over the band dial: the latest (or running) scan and the one before. */
   profiles: { now: Profile | null; ghost: Profile | null };
+  /** The channels listened to with a valid signal, for the heat strip under the band dial. */
+  heat: readonly FreqHeat[];
   /** The scan controls (`ScanBar`). */
   scanBar: ReactNode;
   /** The favorite star for the tuned frequency. */
@@ -134,7 +140,7 @@ interface Props {
   onMode: (m: Mode) => void;
 }
 
-export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, spans, coverage, win, profiles, scanBar, star, expanded, onExpand, onTune, onMode }: Props) {
+export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, spans, coverage, win, profiles, heat, scanBar, star, expanded, onExpand, onTune, onMode }: Props) {
   const t = useT();
   const names = useNames();
   const shown = freqHz === null ? '' : fmtReadout(freqHz);
@@ -177,6 +183,8 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
     ghost: profiles.ghost ? profilePath(profiles.ghost, w.lo, w.hi) : '',
   }), [profiles, w.lo, w.hi]);
   const hasProf = prof.now !== '' || prof.ghost !== '';
+  const heatStep = w.band ? w.band.scan_step_hz / 1000 : HEAT_STEP_KHZ;
+  const cells = useMemo(() => heatCells(heat, w.lo, w.hi, heatStep), [heat, w.lo, w.hi, heatStep]);
   const prev = win.step(-1), next = win.step(1);
   const jump = (dir: 1 | -1) => {
     const hz = win.jump(dir);
@@ -254,7 +262,7 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
             />
             <button className="icon-btn" type="button" disabled={!on || !next} aria-label={t.nextBand} title={t.keyHint(t.nextBand, t.keyPgUp)} onClick={() => jump(1)}>›</button>
           </div>
-          <div className={'bdial-scale' + (hasProf ? ' has-prof' : '')}>
+          <div className={'bdial-scale' + (hasProf ? ' has-prof' : '') + (cells.length ? ' has-heat' : '')}>
             {hasProf && (
               <svg className="scan-prof" viewBox={`0 0 ${MARKS_W} 1`} preserveAspectRatio="none" role="img" aria-label={t.scanProfile}>
                 <path className="ghost" d={prof.ghost} />
@@ -271,6 +279,11 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
                 </span>
               ))}
             </div>
+            {cells.length > 0 && (
+              <svg className="listen-heat" viewBox={`0 0 ${MARKS_W} 1`} preserveAspectRatio="none" role="img" aria-label={t.listenHeat}>
+                {cells.map((c) => <rect key={c.x} className={'h' + c.level} x={c.x} y={0} width={c.w} height={1} />)}
+              </svg>
+            )}
             <input
               className="tune"
               type="range"

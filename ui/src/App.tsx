@@ -37,7 +37,7 @@ import { useBandScans, useScan } from './hooks/useScan';
 import { useUpdate } from './hooks/useUpdate';
 import { useUserStations } from './hooks/useUserStations';
 import { useWelcome } from './hooks/useWelcome';
-import { useListening, useStats } from './hooks/useStats';
+import { useFreqHeat, useListening, useStats } from './hooks/useStats';
 import { fmtStamp, I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
 import { stepIndex, type Action } from './keys/keymap';
@@ -127,6 +127,9 @@ export function App() {
   // the lenses change with the logbook, the favorites and the listening history (a session
   // starting or ending), and every list with the catalog
   const sessionKey = filters.lens === 'listened' ? listening?.now?.session.id ?? null : null;
+  // the band dial's heat strip: again when a session starts or ends, and on leaving Stats (where
+  // the history can be cleared)
+  const heat = useFreqHeat(api, `${listening?.now?.session.id ?? ''}|${page}`);
   const lensKey = useMemo(() => ({}), [scan.logged, favs.views, generation, sessionKey]);
   const search = useStationSearch(api, filters, lensKey);
   const cands = useCandidates(api, on ? freqHz : null, `${qth?.lat},${qth?.lon},${now.getTime()},${generation}`);
@@ -486,6 +489,7 @@ export function App() {
             coverage={coverage}
             win={win}
             profiles={profiles}
+            heat={heat}
             scanBar={
               <ScanBar
                 on={on}
