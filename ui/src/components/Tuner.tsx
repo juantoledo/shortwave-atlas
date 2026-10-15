@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNames } from '../catalog/names';
+import { useMeter, type Meter } from '../hooks/meter';
 import { sLabel, useT } from '../i18n';
 import { altName, isMac } from '../keys/keymap';
 import type { Band } from '../types/generated/Band';
@@ -41,6 +42,22 @@ const IDLE_KHZ = 9500;
 const LABEL_CHAR_PX = 7.4;
 /** A heat cell's width where the dial's window is no band (kHz). */
 const HEAT_STEP_KHZ = 5;
+
+/** The signal meter: the one part of the faceplate that follows every reading. */
+function SMeter({ on, meter }: { on: boolean; meter: Meter }) {
+  const t = useT();
+  const db = useMeter(meter);
+  const lit = meterSegments(on ? db : null);
+  return (
+    <div className="sm" aria-label={t.signalMeter}>
+      <span className="lab">{t.signal}</span>
+      <div className="segs">
+        {Array.from({ length: METER_SEGS }, (_, i) => <i key={i} className={i < lit ? 'on' : ''} />)}
+      </div>
+      <span className="sval">{on ? sLabel(db) : '--'}</span>
+    </div>
+  );
+}
 
 /** dB relative to S9 -> lit segments (9 up to S9, one per 10 dB over). */
 export function meterSegments(db: number | null): number {
@@ -142,7 +159,8 @@ interface Props {
   on: boolean;
   freqHz: number | null;
   mode: string | null;
-  strengthDb: number | null;
+  /** The S-meter; only the meter re-renders with it. */
+  meter: Meter;
   /** Every frequency in the schedule, and those on the air now. */
   freqsHz: readonly number[];
   onAirHz: readonly number[];
@@ -170,7 +188,7 @@ interface Props {
   onNetSpan: (() => void) | null;
 }
 
-export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, spans, coverage, win, profiles, heat, scanBar, star, expanded, onExpand, onTune, onMode, net, onNetSpan }: Props) {
+export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans, coverage, win, profiles, heat, scanBar, star, expanded, onExpand, onTune, onMode, net, onNetSpan }: Props) {
   const t = useT();
   const names = useNames();
   const shown = freqHz === null ? '' : fmtReadout(freqHz);
@@ -188,7 +206,6 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
   };
   const nudge = (khz: number) => { if (on && freqHz !== null) onTune(freqHz + khz * 1000); };
 
-  const lit = meterSegments(on ? strengthDb : null);
   const { w, khz } = win;
   const dialKhz = Math.round(khz);
 
@@ -422,13 +439,7 @@ export function Tuner({ on, freqHz, mode, strengthDb, freqsHz, onAirHz, bands, s
 
         <div className="dial-row rx-x">
           <div className="dial-side">
-            <div className="sm" aria-label={t.signalMeter}>
-              <span className="lab">{t.signal}</span>
-              <div className="segs">
-                {Array.from({ length: METER_SEGS }, (_, i) => <i key={i} className={i < lit ? 'on' : ''} />)}
-              </div>
-              <span className="sval">{on ? sLabel(strengthDb) : '--'}</span>
-            </div>
+            <SMeter on={on} meter={meter} />
             {spans.length > 1 && (
               <div className="seg spans" role="radiogroup" aria-label={t.spansLabel}>
                 {spans.map((s) => (

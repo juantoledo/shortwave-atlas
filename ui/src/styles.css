@@ -357,11 +357,12 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
 }
-/* the panel is the backdrop here: the rows blur under the header */
-.app[data-globe="full"] .slots th {
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+/* the rows scroll under the header: nearly opaque rather than blurred again (a backdrop filter
+   per cell, inside the panel's, re-blurs with every frame of the globe) */
+.app[data-globe="full"] .slots th { background: rgba(10, 19, 29, 0.92); }
+/* less transparency asked for (the OS setting): solid panels, and no blur to compute */
+@media (prefers-reduced-transparency: reduce) {
+  .app[data-globe="full"] { --glass: rgba(10, 19, 29, 0.94); --glass-blur: none; }
 }
 
 /* pins on the globe */
@@ -474,7 +475,9 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 .flag-stage {
   position: absolute; top: -3%; left: -6%; right: -6%; aspect-ratio: 4 / 3;
   display: flex; isolation: isolate; overflow: hidden;
-  opacity: 0.2; filter: saturate(0.8) blur(0.6px);
+  /* no filter here: over a moving subtree it is redone each frame; the strips' transforms are
+     the compositor's alone (at this opacity a blur or a desaturation hardly shows) */
+  opacity: 0.18;
 }
 .flag-stage i {
   flex: 1; height: 100%;

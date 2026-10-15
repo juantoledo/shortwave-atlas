@@ -75,9 +75,15 @@ export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onT
   useEffect(() => {
     if (!player) return;
     const wf = new Waterfall(wfRef.current!, spRef.current!, player.analyser);
-    const id = setInterval(() => wf.tick(spanRef.current), ROW_MS);
+    // drawn only while it shows (it folds away on phones, or scrolls out of sight)
+    let shown = true;
+    const io = typeof IntersectionObserver === 'undefined' ? null
+      : new IntersectionObserver(([e]) => { shown = e.isIntersecting; });
+    io?.observe(wfRef.current!);
+    const id = setInterval(() => { if (shown) wf.tick(spanRef.current); }, ROW_MS);
     return () => {
       clearInterval(id);
+      io?.disconnect();
       for (const c of [wfRef.current, spRef.current]) c?.getContext('2d')?.clearRect(0, 0, c.width, c.height);
     };
   }, [player]);

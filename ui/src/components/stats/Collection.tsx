@@ -3,7 +3,7 @@
 // milestones. No fanfare: an earned badge just sits on the shelf. Settings › Display hides it.
 
 import { useNames } from '../../catalog/names';
-import { fmtDate, fmtStamp, useT } from '../../i18n';
+import { dateFmt, fmtDate, fmtStamp, useT } from '../../i18n';
 import type { Messages } from '../../i18n';
 import type { Challenge } from '../../types/generated/Challenge';
 import type { Stats } from '../../types/generated/Stats';
@@ -34,7 +34,7 @@ export function Collection({ s, onShowGlobe }: { s: Stats; onShowGlobe: () => vo
   const t = useT();
   const names = useNames();
   const c = s.collection;
-  const month = new Intl.DateTimeFormat(t.locale, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(c.bingo.year, c.bingo.month - 1, 1)));
+  const month = dateFmt(t.locale, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(c.bingo.year, c.bingo.month - 1, 1)));
   return (
     <div className="st-grid">
       <section className="st-card st-wide">

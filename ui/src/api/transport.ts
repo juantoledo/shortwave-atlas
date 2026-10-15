@@ -109,7 +109,13 @@ async function tauriTransport(): Promise<Transport> {
 
 /* ---------------- Remote browser: WebSocket ---------------- */
 
-const RETRY_MS = 1500;
+const RETRY_MS = 1500, RETRY_MAX_MS = 15_000;
+
+/** The wait before reconnect attempt `n` (0 first): growing to 15 s, give or take a fifth, so
+ *  the browsers of one server don't all knock at once. `rand` is 0..1. */
+export function retryDelay(n: number, rand = Math.random()): number {
+  return Math.min(RETRY_MAX_MS, RETRY_MS * 1.5 ** n) * (0.8 + 0.4 * rand);
+}
 
 class WsTransport implements Transport {
   readonly kind = 'ws' as const;
@@ -121,11 +127,24 @@ class WsTransport implements Transport {
   private status: LinkStatus = 'connecting';
   private opened: Promise<void>;
   private markOpen!: () => void;
+  /** Attempts since the socket was last open, and the next one waiting. */
+  private retries = 0;
+  private retry: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private url: string, private audioUrl: string) {
     this.opened = new Promise((r) => (this.markOpen = r));
     this.open();
+    window.addEventListener('online', this.now);
+    document.addEventListener('visibilitychange', this.now);
   }
+
+  /** Lost, and the network is back or the page is in front again: try at once. */
+  private now = () => {
+    if (this.status !== 'lost' || this.retry === undefined || document.visibilityState !== 'visible') return;
+    clearTimeout(this.retry);
+    this.retry = undefined;
+    this.open();
+  };
 
   private setStatus(s: LinkStatus) {
     this.status = s;
@@ -135,6 +154,9 @@ class WsTransport implements Transport {
   close() {
     const ws = this.ws;
     this.ws = null; // stops the reconnect in onclose
+    clearTimeout(this.retry);
+    window.removeEventListener('online', this.now);
+    document.removeEventListener('visibilitychange', this.now);
     ws?.close();
   }
 
@@ -142,6 +164,7 @@ class WsTransport implements Transport {
     const ws = new WebSocket(this.url);
     this.ws = ws;
     ws.onopen = () => {
+      this.retries = 0;
       this.setStatus('open');
       this.markOpen();
     };
@@ -163,7 +186,10 @@ class WsTransport implements Transport {
       this.pending.clear();
       this.opened = new Promise((r) => (this.markOpen = r));
       this.setStatus('lost');
-      setTimeout(() => this.open(), RETRY_MS);
+      this.retry = setTimeout(() => {
+        this.retry = undefined;
+        this.open();
+      }, retryDelay(this.retries++));
     };
   }
 

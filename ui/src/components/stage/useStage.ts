@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { altitudeAt, angleDeg, clamp, easeInOut, frameAltitude, frameWithHome, fromVec, hermiteEase, initialSlope, midpoint, pingAlpha, pingRadius, slerp, toVec, type LatLon, type Vec3 } from '../../geo/geo';
 import { SIGNAL_DB } from '../scan';
 import { ARC_MS, COOL, HOME_ALT, LOCK_ALT, mkPin, mkPulse, netQthRing, netRings, NO_FX, NO_SCAN_FX, siteRings, PING_MS, PING_PX_PER_DEG, qthRing, REDUCE, ROUTE_MS, route, sonarRing, SPIN, START_ALT, type Arc, type Fx, type Path, type Pin, type Ring, type ScanFx } from './fx';
+import type { Meter } from '../../hooks/meter';
 import type { MapMode } from '../../hooks/useDisplay';
 import { keep, loadKept, readPov } from '../../hooks/usePersisted';
 import type { Candidate } from '../../types/generated/Candidate';
@@ -103,8 +104,8 @@ export interface StageInput {
   sites: SiteDot[];
   /** Which view this is (each keeps where its camera rested). */
   mode: MapMode;
-  /** The S-meter while the rig is on (dB over S9). */
-  strengthDb: number | null;
+  /** The S-meter (dB over S9) while the rig is on, read each frame. */
+  meter: Meter | null;
   /** While a band scan runs: its last steps measured, and the noise floor so far. */
   scan: { pings: readonly ScanPing[]; floorDb: number | null } | null;
   /** A scan that just ended (`key`: its id) and the sites of the stations it logged. */
@@ -148,7 +149,7 @@ export interface Stage {
   hover(on: boolean): void;
 }
 
-export function useStage({ sel, net, listening, qth, frame: framing, paused, onInteract, sites, mode, strengthDb, scan, finale }: StageInput): Stage {
+export function useStage({ sel, net, listening, qth, frame: framing, paused, onInteract, sites, mode, meter, scan, finale }: StageInput): Stage {
   const cam = useRef<Camera | null>(null);
   const [ready, setReady] = useState(false);
   const [fx, setFx] = useState<Fx>(NO_FX);
@@ -160,8 +161,8 @@ export function useStage({ sel, net, listening, qth, frame: framing, paused, onI
   const spin = useRef(0), spinNow = useRef(0);
   /** The route being drawn and when it started (`ms` 0: drawn at once). */
   const routing = useRef<{ path: Path; t0: number; ms: number } | null>(null);
-  const strength = useRef(strengthDb);
-  strength.current = strengthDb;
+  const strength = useRef(meter);
+  strength.current = meter;
   const level = useRef<number | null>(null);
   const qthRef = useRef(qth);
   qthRef.current = qth;
@@ -568,7 +569,7 @@ export function useStage({ sel, net, listening, qth, frame: framing, paused, onI
         c.turn(spinNow.current, dt);
       }
 
-      const db = REDUCE ? null : strength.current, lv = level.current;
+      const db = REDUCE ? null : strength.current?.get() ?? null, lv = level.current;
       level.current = db === null ? null : lv === null ? db : lv + (db - lv) * (1 - Math.exp(-dt / LEVEL_MS));
 
       c.frame?.(now, dt);

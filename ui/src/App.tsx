@@ -4,20 +4,17 @@
 // The globe may also be drawn behind the whole window (`data-globe`, Settings → Display).
 // Stats (`data-page="stats"`) takes the middle of the window; the top bar and faceplate stay.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AudioOff, AudioPanel, type AudioKeys } from './components/AudioPanel';
 import { Dossier } from './components/Dossier';
 import { FavStar } from './components/FavStar';
 import { asMode, favAt } from './components/favorites';
 import { Globe } from './components/Globe';
-import { Help } from './components/Help';
 import { Hud } from './components/Hud';
 import { ScanBar } from './components/ScanBar';
-import { Scans } from './components/Scans';
-import { StatsView, type StatsTab } from './components/stats/StatsView';
+import type { StatsTab } from './components/stats/StatsView';
 import { PanelHead, ViewTabs, type View } from './components/NavBar';
-import { Settings, type SettingsTab } from './components/settings/Settings';
-import { StationForm } from './components/StationForm';
+import type { SettingsTab } from './components/settings/Settings';
 import { draftFrom, draftFromOff, draftHere, draftOf } from './components/stationDraft';
 import { StationList } from './components/StationList';
 import { TopBar } from './components/TopBar';
@@ -27,7 +24,6 @@ import { bandOf, noiseFloor } from './components/scan';
 import { keyOf, MINE } from './components/sources';
 import { UpdateBanner } from './components/UpdateBanner';
 import { chromeFor } from './api/window';
-import { Welcome } from './components/Welcome';
 import { makeNames, NamesProvider } from './catalog/names';
 import { NO_FILTERS, useCandidates, useCore, useDial, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
 import { PHONE, useMedia } from './hooks/useMedia';
@@ -61,6 +57,14 @@ import type { SiteDot } from './types/generated/SiteDot';
 import type { StationRow } from './types/generated/StationRow';
 import type { UserStationDraft } from './types/generated/UserStationDraft';
 
+// What opens on demand loads then (its own chunk), not with the app.
+const Help = lazy(() => import('./components/Help').then((m) => ({ default: m.Help })));
+const Scans = lazy(() => import('./components/Scans').then((m) => ({ default: m.Scans })));
+const Settings = lazy(() => import('./components/settings/Settings').then((m) => ({ default: m.Settings })));
+const StationForm = lazy(() => import('./components/StationForm').then((m) => ({ default: m.StationForm })));
+const StatsView = lazy(() => import('./components/stats/StatsView').then((m) => ({ default: m.StatsView })));
+const Welcome = lazy(() => import('./components/Welcome').then((m) => ({ default: m.Welcome })));
+
 const MSG_MS = 6000;
 /** How long the rows a finished scan heard stay lit. */
 const FRESH_MS = 10000;
@@ -78,7 +82,7 @@ type SheetState =
   | null;
 
 export function App() {
-  const { api, info, reloadInfo, rig, status } = useCore();
+  const { api, info, reloadInfo, rig, meter, status } = useCore();
   const update = useUpdate(api);
   const display = useDisplay();
   const welcome = useWelcome();
@@ -170,12 +174,17 @@ export function App() {
   // the globe's listened sites, while the list is on Listened
   const lensListened = filters.lens === 'listened' && page === 'main';
   const { stats: allTime } = useStats(api, 'all', lensListened);
+  // in steps of 2 %, and the same map while they hold: a new one rebuilds the globe's towers
+  const listenedPrev = useRef(new Map<number, number>());
   const listenedSites = useMemo(() => {
     const m = new Map<number, number>();
-    if (!lensListened || !allTime) return m;
-    const max = Math.max(1, ...allTime.sites.map((x) => x.seconds));
-    for (const x of allTime.sites) m.set(x.site, x.seconds / max);
-    return m;
+    if (lensListened && allTime) {
+      const max = Math.max(1, ...allTime.sites.map((x) => x.seconds));
+      for (const x of allTime.sites) m.set(x.site, Math.round((x.seconds / max) * 50) / 50);
+    }
+    const prev = listenedPrev.current;
+    if (prev.size === m.size && [...m].every(([k, v]) => prev.get(k) === v)) return prev;
+    return (listenedPrev.current = m);
   }, [lensListened, allTime]);
   useEffect(() => {
     if (!on || !cands.length) setSel(null);
@@ -533,7 +542,7 @@ export function App() {
               onQth={moveQth}
               failedMsg={t.globeFailed}
               sites={globeSites}
-              strengthDb={on && !netNow ? rig.strength_db : null}
+              meter={on && !netNow ? meter : null}
               activeSite={netActive ? netDots.find((d) => d.itu === filters.countries[0])?.id ?? null : filters.site}
               loggedSites={scan.loggedSites}
               listenedSites={listenedSites}
@@ -622,7 +631,7 @@ export function App() {
             on={on}
             freqHz={freqHz}
             mode={rig.mode}
-            strengthDb={rig.strength_db}
+            meter={meter}
             freqsHz={meta?.freqs_hz ?? NO_HZ}
             onAirHz={overview?.on_hz ?? NO_HZ}
             bands={dialBands}
@@ -677,6 +686,7 @@ export function App() {
           )}
         </footer>
 
+        <Suspense fallback={null}>
         {page === 'stats' && (
           <StatsView
             api={api}
@@ -700,11 +710,13 @@ export function App() {
             onError={onError}
           />
         )}
+        </Suspense>
 
         <ViewTabs className="nav" views={['globe', 'station', 'browse']} current={view} onView={setView} count={shortCount} />
 
         <p className="toast" role="alert">{msg && t.error(msg)}</p>
 
+        <Suspense fallback={null}>
         {sheet?.kind === 'settings' && api && (
           <Settings
             api={api}
@@ -754,6 +766,7 @@ export function App() {
           />
         )}
         {welcome.open && <Welcome onClose={welcome.close} />}
+        </Suspense>
       </div>
       </NamesProvider>
     </I18nProvider>

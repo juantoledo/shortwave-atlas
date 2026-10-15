@@ -11,6 +11,7 @@ import type { Scan } from '../types/generated/Scan';
 import type { ScanSpeed } from '../types/generated/ScanSpeed';
 import type { ScanStatus } from '../types/generated/ScanStatus';
 import type { ScanSummary } from '../types/generated/ScanSummary';
+import { unlessSame } from './same';
 
 const BUSY_MS = 300;
 /** A scan started from another window shows up within this. */
@@ -47,7 +48,7 @@ export function useScan(api: Api | null, onError: (e: unknown) => void, generati
 
   useEffect(() => {
     if (!api) return;
-    const tick = () => void api.scanStatus().then(setStatus, () => {});
+    const tick = () => void api.scanStatus().then((s) => setStatus(unlessSame(s)), () => {});
     tick();
     const id = setInterval(tick, running ? BUSY_MS : IDLE_MS);
     return () => clearInterval(id);

@@ -11,6 +11,7 @@ import type { ListeningNow } from '../types/generated/ListeningNow';
 import type { NetStats } from '../types/generated/NetStats';
 import type { Period } from '../types/generated/Period';
 import type { Stats } from '../types/generated/Stats';
+import { unlessSame } from './same';
 
 /** How often the top bar and the open view ask again. */
 const POLL_MS = 10_000;
@@ -31,7 +32,7 @@ function usePoll(on: boolean, ms: number, f: () => void) {
 /** The session under way, or the usual station at this hour. */
 export function useListening(api: Api | null) {
   const [now, setNow] = useState<ListeningNow | null>(null);
-  const load = useCallback(() => { api?.listening().then(setNow, () => {}); }, [api]);
+  const load = useCallback(() => { api?.listening().then((n) => setNow(unlessSame<ListeningNow | null>(n)), () => {}); }, [api]);
   usePoll(api !== null, POLL_MS, load);
   return { listening: now, reload: load };
 }
@@ -40,7 +41,7 @@ export function useListening(api: Api | null) {
 export function useStats(api: Api | null, period: Period, on: boolean) {
   const [stats, setStats] = useState<Stats | null>(null);
   const load = useCallback(() => {
-    api?.stats({ period, tz_offset_min: tzOffsetMin() }).then(setStats, () => {});
+    api?.stats({ period, tz_offset_min: tzOffsetMin() }).then((s) => setStats(unlessSame<Stats | null>(s)), () => {});
   }, [api, period]);
   usePoll(on && api !== null, POLL_MS, load);
   return { stats, reload: load };

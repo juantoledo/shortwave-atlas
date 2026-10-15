@@ -9,7 +9,7 @@
 // last heard (nothing about the schedule there). It fills its panel: the controls are fixed,
 // the rows scroll in their own box and load the next page when you reach the end.
 
-import { useEffect, useId, useMemo, useRef, type KeyboardEvent, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, type KeyboardEvent, type RefObject } from 'react';
 import { useNames } from '../catalog/names';
 import type { Filters } from '../hooks/useCore';
 import type { NetSearch } from '../hooks/useNetSearch';
@@ -106,24 +106,39 @@ function ranked(opts: DropOpt[]): DropOpt[] {
   return [...top, ...rest];
 }
 
-/** A catalog row; `log` = in the Heard list, with what the scans read; `mine` = one of the
- *  listener's own stations. */
-function StationItem({ r, p, log, mine }: { r: StationRow; p: Props; log?: Logged; mine: boolean }) {
+interface ItemProps {
+  r: StationRow;
+  on: boolean;
+  /** The station shown (and tuned). */
+  current: boolean;
+  /** What the scans logged of it. */
+  lg: Logged | undefined;
+  fav: boolean;
+  /** Under a scan filter: what that scan read here, `undefined` if it missed it. */
+  scanned: boolean;
+  db: number | undefined;
+  freshSince: number | null | undefined;
+  /** In the Heard list, with what the scans read. */
+  log?: Logged;
+  /** One of the listener's own stations. */
+  mine: boolean;
+  onPick: (r: StationRow) => void;
+}
+
+/** A catalog row. Memoized, with props of its own: the list re-renders with the app, and a long
+ *  one would otherwise render every row each time. */
+const StationItem = memo(function StationItem({ r, on, current, lg, fav, scanned, db, freshSince, log, mine, onPick }: ItemProps) {
   const t = useT();
   const names = useNames();
   const country = names.country(r.itu);
   const abroad = r.site_itu !== r.itu;
-  const lg = p.logged.get(r.id);
-  const fav = p.favs.has(r.id);
-  const scan = p.filters.scan;
-  const db = scan === null ? undefined : p.scanDb[r.id];
-  const missed = scan !== null && db === undefined;
+  const missed = scanned && db === undefined;
   // heard by the scan just run; `first` too: never logged before it
-  const fresh = log && p.freshSince != null && log.last >= p.freshSince;
-  const first = fresh && log.first >= p.freshSince!;
+  const fresh = log && freshSince != null && log.last >= freshSince;
+  const first = fresh && log.first >= freshSince!;
   return (
     <li>
-      <button className={'row' + (log ? ' heard-row' : '') + (fresh ? ' fresh' : '') + (first ? ' first' : '') + (missed ? ' missed' : '')} type="button" aria-current={p.on && p.selId === r.id} disabled={!p.on} title={missed ? t.scanMissedRow : undefined} onClick={() => p.onPick(r)}>
+      <button className={'row' + (log ? ' heard-row' : '') + (fresh ? ' fresh' : '') + (first ? ' first' : '') + (missed ? ' missed' : '')} type="button" aria-current={on && current} disabled={!on} title={missed ? t.scanMissedRow : undefined} onClick={() => onPick(r)}>
         <span className="rf">{r.freq_hz / 1000}</span>
         <span className="rn">
           <b>
@@ -154,7 +169,7 @@ function StationItem({ r, p, log, mine }: { r: StationRow; p: Props; log?: Logge
       </button>
     </li>
   );
-}
+});
 
 /** A row the schedule has none for: a signal, a favorite, or both; "+" adds a station there. */
 function OffItem({ o, p }: { o: OffSchedule; p: Props }) {
@@ -225,12 +240,18 @@ export function StationList(p: Props) {
     { value: 'oob', label: names.band('oob'), n: count(p.facets?.bands, 'oob') },
     ...(p.net.enabled ? [{ value: NET_BAND, label: t.netBand, hint: t.netBandHint }] : []),
   ];
-  const langs = ranked((p.meta?.langs ?? []).map((l) => ({ value: l.code, label: names.lang(l.code), n: count(p.facets?.langs, l.code) })));
+  const langs = useMemo(
+    () => ranked((p.meta?.langs ?? []).map((l) => ({ value: l.code, label: names.lang(l.code), n: p.facets?.langs[l.code] ?? 0 }))),
+    [p.meta, p.facets, names],
+  );
   const regions: DropOpt[] = REGIONS.map((r) => ({ value: r, label: names.region(r), n: count(p.facets?.regions, r) }));
   const netCountries = useMemo(() => netCountryOpts(p.net.countries, t.locale), [p.net.countries, t.locale]);
   const netCountry = useMemo(() => new Map(netCountries.map((c) => [c.value, c.label])), [netCountries]);
-  const countries = net ? netCountries
-    : ranked((p.meta?.countries ?? []).map((c) => ({ value: c.itu, label: names.country(c.itu), n: count(p.facets?.countries, c.itu) })));
+  const schedCountries = useMemo(
+    () => ranked((p.meta?.countries ?? []).map((c) => ({ value: c.itu, label: names.country(c.itu), n: p.facets?.countries[c.itu] ?? 0 }))),
+    [p.meta, p.facets, names],
+  );
+  const countries = net ? netCountries : schedCountries;
   // the NET band's Favorites lens: the stations kept, from the store (no directory query)
   const netFavs = net && f.lens === 'favorites';
   const favRows = useMemo(() => (netFavs ? favFilter(p.net.favs, f.q) : []), [netFavs, p.net.favs, f.q]);
@@ -288,6 +309,30 @@ export function StationList(p: Props) {
     const br = b.getBoundingClientRect(), rr = row.getBoundingClientRect();
     if (rr.top < br.top || rr.bottom > br.bottom) b.scrollTop += rr.top - br.top - b.clientHeight / 3;
   }, [p.selId]);
+
+  // the rows' click handler stays the same function across renders (StationItem is memoized)
+  const pickNow = useRef(p.onPick);
+  pickNow.current = p.onPick;
+  const onPick = useCallback((r: StationRow) => pickNow.current(r), []);
+  const item = (r: StationRow, log?: Logged) => {
+    const scanned = f.scan !== null;
+    return (
+      <StationItem
+        key={log ? `s${r.id}` : r.id}
+        r={r}
+        on={p.on}
+        current={p.selId === r.id}
+        lg={p.logged.get(r.id)}
+        fav={p.favs.has(r.id)}
+        scanned={scanned}
+        db={scanned ? p.scanDb[r.id] : undefined}
+        freshSince={p.freshSince}
+        log={log}
+        mine={mineSrc.has(r.source)}
+        onPick={onPick}
+      />
+    );
+  };
 
   const rowButtons = () => [...(box.current?.querySelectorAll<HTMLButtonElement>('.row:not(:disabled)') ?? [])];
   const onSearchKey = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -416,7 +461,7 @@ export function StationList(p: Props) {
         ) : heardList ? (
           <ul className="list">
             {p.heard.map((h) => h.kind === 'station'
-              ? <StationItem key={`s${h.row.id}`} r={h.row} p={p} log={h.log} mine={mineSrc.has(h.row.source)} />
+              ? item(h.row, h.log)
               : <OffItem key={`o${offKey(h.row)}`} o={h.row} p={p} />)}
           </ul>
         ) : (
@@ -431,7 +476,7 @@ export function StationList(p: Props) {
               </>
             )}
             <ul className="list">
-              {p.rows.map((r) => <StationItem key={r.id} r={r} p={p} mine={mineSrc.has(r.source)} />)}
+              {p.rows.map((r) => item(r))}
             </ul>
           </>
         )}

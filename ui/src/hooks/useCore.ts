@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Api } from '../api/client';
 import { connect, type LinkStatus } from '../api/transport';
 import { clampToCoverage } from '../components/dial';
+import { Meter } from './meter';
 import type { Candidate } from '../types/generated/Candidate';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
 import type { Dial } from '../types/generated/Dial';
@@ -31,15 +32,28 @@ export const PAGE_ROWS = 100;
 
 const NO_RIG: RigState = { link: 'down', power: 'unknown', freq_hz: null, mode: null, passband_hz: null, strength_db: null, cw_pitch_hz: null };
 
+/** The same state but for the S-meter (which `meter` carries). */
+export function sameRig(a: RigState, b: RigState): boolean {
+  return a.link === b.link && a.power === b.power && a.freq_hz === b.freq_hz && a.mode === b.mode
+    && a.passband_hz === b.passband_hz && a.cw_pitch_hz === b.cw_pitch_hz;
+}
+
+/** The connection, app info, and the rig: `rig` changes when the link, power, frequency or mode
+ *  do (its `strength_db` is not kept up to date); the S-meter, read 5 times a second, is `meter`. */
 export function useCore() {
   const [api, setApi] = useState<Api | null>(null);
   const [info, setInfo] = useState<Info | null>(null);
-  const [rig, setRig] = useState<RigState>(NO_RIG);
+  const [rig, setRigState] = useState<RigState>(NO_RIG);
   const [status, setStatus] = useState<LinkStatus>('connecting');
+  const [meter] = useState(() => new Meter());
 
   useEffect(() => {
     let alive = true;
     const offs: (() => void)[] = [];
+    const setRig = (s: RigState) => {
+      meter.set(s.strength_db);
+      setRigState((cur) => (sameRig(cur, s) ? cur : s));
+    };
     connect().then(async (t) => {
       if (!alive) return t.close();
       const a = new Api(t);
@@ -57,7 +71,7 @@ export function useCore() {
   /** Re-read app info (backend, configured) after the settings change. */
   const reloadInfo = useCallback(() => { api?.info().then(setInfo, () => {}); }, [api]);
 
-  return { api, info, reloadInfo, rig, status };
+  return { api, info, reloadInfo, rig, meter, status };
 }
 
 /** The displayed frequency: what we just asked for, until the rig reports it (or a timeout). */
@@ -199,7 +213,21 @@ export function useStationSearch(api: Api | null, filters: Filters, refresh: unk
     };
   }, [load]);
 
-  const more = useCallback(() => { load(shown.current + PAGE_ROWS).catch(() => {}); }, [load]);
+  /** The next page, added to the rows shown (a new search or a refresh meanwhile wins). */
+  const more = useCallback(async () => {
+    if (!api) return;
+    const my = seq.current, from = shown.current;
+    const p = await api.search({ ...filters, offset: from, limit: PAGE_ROWS, facets: false }).catch(() => null);
+    if (!p || my !== seq.current) return;
+    setSt((s) => (s.rows.length + s.heard.length !== from ? s : {
+      ...s,
+      rows: [...s.rows, ...p.items],
+      heard: [...s.heard, ...p.heard],
+      scanDb: { ...s.scanDb, ...p.scan_db },
+      total: p.total,
+      onAir: p.on_air,
+    }));
+  }, [api, key, refresh]); // `key` stands for `filters`
   return { ...st, more };
 }
 
