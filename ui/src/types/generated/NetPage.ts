@@ -4,8 +4,16 @@ import type { NetStation } from "./NetStation";
 /**
  * Result of `Call::NetSearch`.
  */
-export type NetPage = { items: Array<NetStation>, 
+export type NetPage = { 
+/**
+ * Only stations that can be listened to here (`playable`).
+ */
+items: Array<NetStation>, 
 /**
  * A full page came back: there may be more (the directory gives no total).
  */
-more: boolean, };
+more: boolean, 
+/**
+ * Where the next page starts in the directory: the rows it sent, not only those kept.
+ */
+next_offset: number, };

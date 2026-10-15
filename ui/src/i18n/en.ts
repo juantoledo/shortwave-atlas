@@ -251,7 +251,6 @@ export const en = {
   netVotes: (n: number) => `${n.toLocaleString('en')} vote${n === 1 ? '' : 's'}`,
   netCheckOk: "The stream answered the directory's last check.",
   netCheckFailed: "The stream did not answer the directory's last check.",
-  netNotPlayable: "This stream can't be played here yet (its format isn't supported).",
   netPlayingNow: 'Playing now',
   netConnecting: 'Connecting to the stream…',
   netFailed: (why: string) => `The stream stopped (${why}). Trying again shortly.`,

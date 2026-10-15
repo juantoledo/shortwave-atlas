@@ -207,9 +207,7 @@ function NetItem({ s, country, open, playing, onToggle, onListen, onStop }: {
           <p>
             {playing
               ? <button className="btn primary" type="button" onClick={onStop}>■ {t.stop}</button>
-              : s.playable
-                ? <button className="btn" type="button" onClick={onListen}>▶ {t.listen}</button>
-                : t.netNotPlayable}
+              : <button className="btn" type="button" onClick={onListen}>▶ {t.listen}</button>}
           </p>
           {s.homepage && <p><a className="link" href={s.homepage} target="_blank" rel="noreferrer">{t.netHomepage}: {s.homepage.replace(/^https?:\/\//, '').replace(/\/$/, '')}</a></p>}
           {s.tags.length > 3 && <p>{s.tags.join(', ')}</p>}

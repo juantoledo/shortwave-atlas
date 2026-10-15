@@ -123,15 +123,10 @@ pub struct NetNow {
 }
 
 /// Whether a stream in this format can be decoded here. HLS is a playlist of segments, not one
-/// stream; an unknown codec is tried (the decoder probes it).
+/// stream; a codec the directory couldn't tell is mostly one of those, or a stream that fails.
 pub fn playable(codec: Option<&str>, hls: bool) -> bool {
-    if hls {
-        return false;
-    }
-    match codec.map(str::to_ascii_uppercase).as_deref() {
-        None => true,
-        Some(c) => ["MP3", "AAC", "AAC+", "OGG", "VORBIS", "FLAC"].contains(&c),
-    }
+    !hls && codec
+        .is_some_and(|c| ["MP3", "AAC", "AAC+", "OGG", "VORBIS", "FLAC"].contains(&c.to_ascii_uppercase().as_str()))
 }
 
 /// A stream URL the server may open: http or https, and not an address on the listener's own
@@ -272,9 +267,12 @@ impl JitterBuffer {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct NetPage {
+    /// Only stations that can be listened to here (`playable`).
     pub items: Vec<NetStation>,
     /// A full page came back: there may be more (the directory gives no total).
     pub more: bool,
+    /// Where the next page starts in the directory: the rows it sent, not only those kept.
+    pub next_offset: u32,
 }
 
 /// A country the directory can search, for the NET band's country filter.
@@ -363,10 +361,13 @@ pub fn parse_stations(json: &str) -> Result<(Vec<NetStation>, usize), String> {
     Ok((out, bad))
 }
 
-/// A page from one search answer: `more` while the directory filled the page.
+/// A page from one search answer, keeping only the stations that can be listened to here: `more`
+/// while the directory filled the page, whatever was left out of it.
 pub fn page(json: &str, q: &NetQuery) -> Result<NetPage, String> {
-    let (items, bad) = parse_stations(json)?;
-    Ok(NetPage { more: items.len() + bad >= q.limit() as usize, items })
+    let (all, bad) = parse_stations(json)?;
+    let sent = all.len() + bad;
+    let items: Vec<NetStation> = all.into_iter().filter(|s| s.playable).collect();
+    Ok(NetPage { more: sent >= q.limit() as usize, next_offset: q.offset + sent as u32, items })
 }
 
 fn station(r: &Value) -> Option<NetStation> {
@@ -471,11 +472,17 @@ mod tests {
 
     #[test]
     fn a_page_is_full_or_the_last() {
-        let q = NetQuery { limit: 6, ..Default::default() };
-        assert!(page(ANSWER, &q).unwrap().more, "6 rows came back (2 unusable) for 6 asked");
+        let q = NetQuery { limit: 6, offset: 12, ..Default::default() };
+        let p = page(ANSWER, &q).unwrap();
+        assert!(p.more, "6 rows came back (2 unusable, 2 that can't play) for 6 asked");
+        assert_eq!(
+            p.items.iter().map(|s| s.uuid.as_str()).collect::<Vec<_>>(),
+            ["9644d860-0601-11e8-ae97-52543be04c81", "ca4b428b-7652-44f6-ae27-dccf8213d76a"]
+        );
+        assert_eq!(p.next_offset, 18, "the next page starts after every row sent");
         let q = NetQuery { limit: 10, ..Default::default() };
         let p = page(ANSWER, &q).unwrap();
-        assert_eq!((p.items.len(), p.more), (4, false));
+        assert_eq!((p.items.len(), p.more, p.next_offset), (2, false, 6));
         assert!(parse_stations("{}").is_err());
         assert!(parse_stations("not json").is_err());
     }
@@ -526,10 +533,10 @@ mod tests {
     #[test]
     fn what_can_play() {
         let (st, _) = parse_stations(ANSWER).unwrap();
-        assert_eq!(st.iter().map(|s| s.playable).collect::<Vec<_>>(), [true, true, false, true], "the third is HLS");
+        assert_eq!(st.iter().map(|s| s.playable).collect::<Vec<_>>(), [true, true, false, false], "HLS; no codec");
         assert!(playable(Some("mp3"), false));
         assert!(playable(Some("AAC+"), false));
-        assert!(playable(None, false));
+        assert!(!playable(None, false));
         assert!(!playable(Some("MP3"), true));
         assert!(!playable(Some("OPUS"), false));
     }

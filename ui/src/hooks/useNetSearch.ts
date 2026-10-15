@@ -6,11 +6,24 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Api } from '../api/client';
 import { netQuery } from '../components/net';
 import type { NetCountry } from '../types/generated/NetCountry';
+import type { NetPage } from '../types/generated/NetPage';
 import type { NetStation } from '../types/generated/NetStation';
 import type { Filters } from './useCore';
 
 const DEBOUNCE_MS = 350;
 const PAGE = 50;
+/** Directory pages read at most to find stations that can play, before showing none. */
+const TRIES = 4;
+
+/** A page of stations that can play from `offset`, reading on while the directory's pages hold
+ *  none (they may all be HLS) and it has more. */
+async function somePlayable(api: Api, filters: Filters, offset: number): Promise<NetPage> {
+  let p = await api.netSearch(netQuery(filters, offset, PAGE));
+  for (let i = 1; i < TRIES && p.items.length === 0 && p.more; i++) {
+    p = await api.netSearch(netQuery(filters, p.next_offset, PAGE));
+  }
+  return p;
+}
 
 export interface NetSearch {
   items: NetStation[];
@@ -23,44 +36,45 @@ export interface NetSearch {
 
 /** `active`: the list is on NET; nothing is asked otherwise. */
 export function useNetSearch(api: Api | null, filters: Filters, active: boolean): NetSearch {
-  const [st, setSt] = useState({ items: [] as NetStation[], more: false, loading: false, failed: false });
+  const [st, setSt] = useState({ items: [] as NetStation[], more: false, next: 0, loading: false, failed: false });
   const seq = useRef(0);
   const q = netQuery(filters, 0, PAGE);
-  const key = `${q.q}|${q.country ?? ''}`;
+  const key = `${q.q}|${q.country ?? ''}`; // what the search uses of `filters`
 
   useEffect(() => {
     seq.current++;
     if (!api || !active) {
-      setSt({ items: [], more: false, loading: false, failed: false });
+      setSt({ items: [], more: false, next: 0, loading: false, failed: false });
       return;
     }
     const my = seq.current;
     setSt((s) => ({ ...s, loading: true, failed: false }));
     const t = setTimeout(() => {
-      api.netSearch(q).then(
-        (p) => { if (my === seq.current) setSt({ items: p.items, more: p.more, loading: false, failed: false }); },
-        () => { if (my === seq.current) setSt({ items: [], more: false, loading: false, failed: true }); },
+      somePlayable(api, filters, 0).then(
+        (p) => { if (my === seq.current) setSt({ items: p.items, more: p.more, next: p.next_offset, loading: false, failed: false }); },
+        () => { if (my === seq.current) setSt({ items: [], more: false, next: 0, loading: false, failed: true }); },
       );
     }, DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [api, active, key]); // `key` stands for `q`
+  }, [api, active, key]); // `key` stands for `filters`
 
   const loadMore = useCallback(() => {
     if (!api || !active || st.loading || !st.more) return;
     const my = seq.current;
     setSt((s) => ({ ...s, loading: true }));
-    api.netSearch(netQuery(filters, st.items.length, PAGE)).then(
+    // from where the directory left off: stations that can't play were left out of the pages
+    somePlayable(api, filters, st.next).then(
       (p) => {
         if (my !== seq.current) return;
         // a station the directory moved between pages shows once
         setSt((s) => {
           const seen = new Set(s.items.map((i) => i.uuid));
-          return { items: [...s.items, ...p.items.filter((i) => !seen.has(i.uuid))], more: p.more, loading: false, failed: false };
+          return { items: [...s.items, ...p.items.filter((i) => !seen.has(i.uuid))], more: p.more, next: p.next_offset, loading: false, failed: false };
         });
       },
       () => { if (my === seq.current) setSt((s) => ({ ...s, loading: false, failed: true })); },
     );
-  }, [api, active, key, st.loading, st.more, st.items.length]);
+  }, [api, active, key, st.loading, st.more, st.next]);
 
   return { ...st, loadMore };
 }

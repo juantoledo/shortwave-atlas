@@ -208,7 +208,7 @@ pub(crate) mod tests {
         let net = NetService::with_fetch(true, fake(asked.clone()));
         let q = NetQuery { country: Some("ARG".into()), ..Default::default() };
         let p = net.search(&q).await.unwrap();
-        assert_eq!((p.items.len(), p.items[0].itu.as_deref(), p.more), (1, Some("ARG"), false));
+        assert_eq!((p.items.len(), p.items[0].itu.as_deref(), p.more, p.next_offset), (1, Some("ARG"), false, 1));
         let n = asked.lock().unwrap().len();
         assert!((2..=3).contains(&n), "the server list, then one or both servers: {n}");
         assert!(asked.lock().unwrap().iter().all(|u| u == SERVERS_URL || u.contains("countrycode=AR")));
@@ -228,8 +228,9 @@ pub(crate) mod tests {
         let net = NetService::new(true);
         let q = NetQuery { q: "radio".into(), country: Some("ARG".into()), limit: 10, ..Default::default() };
         let p = net.search(&q).await.unwrap();
-        assert_eq!(p.items.len(), 10, "{p:?}");
-        assert!(p.more);
+        // full pages, less what can't play here
+        assert!((1..=10).contains(&p.items.len()) && p.more && p.next_offset == 10, "{p:?}");
+        assert!(p.items.iter().all(|s| s.playable && !s.hls && s.codec.is_some()), "{p:?}");
         assert!(p.items.iter().all(|s| s.itu.as_deref() == Some("ARG") && !s.uuid.is_empty()), "{p:?}");
         assert!(p.items.iter().all(|s| s.name == s.name.trim()));
     }

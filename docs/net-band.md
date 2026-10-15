@@ -325,7 +325,9 @@ switches every window over, and tuning the rig, a scan or turning internet radio
 - **Decoding:** symphonia, pure Rust. MP3, AAC, Ogg Vorbis and FLAC play.
   - AAC+ (HE-AAC) plays its AAC core only (no SBR), at reduced high-frequency fidelity, roughly
     AM-broadcast quality.
-  - HLS streams show as not playable.
+  - Stations that can't play here are left out of the list: HLS, other codecs, and streams whose
+    codec the directory doesn't know. Paging follows the directory's offsets, and an empty page
+    is read past.
 - **Pacing:** PCM is mono 16-bit at 32 kHz (`NET_RATE`). A `JitterBuffer` holds 1.5 s before
   playing, at most 5 s, and hands out one block per tick, so network bursts don't reach the
   player.

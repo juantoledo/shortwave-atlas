@@ -236,7 +236,6 @@ export const es: Messages = {
   netVotes: (n) => `${n.toLocaleString('es')} voto${n === 1 ? '' : 's'}`,
   netCheckOk: 'La transmisión respondió en la última revisión del directorio.',
   netCheckFailed: 'La transmisión no respondió en la última revisión del directorio.',
-  netNotPlayable: 'Esta transmisión aún no se puede escuchar aquí (su formato no es compatible).',
   netPlayingNow: 'Sonando ahora',
   netConnecting: 'Conectando con la transmisión…',
   netFailed: (why) => `La transmisión se detuvo (${why}). Se reintentará en un momento.`,
