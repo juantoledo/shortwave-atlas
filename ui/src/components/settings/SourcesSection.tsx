@@ -1,6 +1,7 @@
 // Sources: where the stations come from (EiBi's schedule, and the listener's own), the switch for
-// internet radio (the NET band, from radio-browser.info), and the listener's stations to a file and
-// back: export, and import merged with theirs or instead of them.
+// internet radio (the NET band, from radio-browser.info; turning it on asks first, in NetNotice),
+// and the listener's stations to a file and back: export, and import merged with theirs or
+// instead of them.
 
 import { useRef, useState } from 'react';
 import type { Api } from '../../api/client';
@@ -9,6 +10,7 @@ import type { UserStationsApi } from '../../hooks/useUserStations';
 import { useT } from '../../i18n';
 import type { CatalogMeta } from '../../types/generated/CatalogMeta';
 import type { ImportReport } from '../../types/generated/ImportReport';
+import { NetNotice } from '../NetNotice';
 import { exportName, stationsIn } from '../sources';
 
 /** Larger than any file of stations (500 of them are about 400 kB). */
@@ -23,9 +25,11 @@ interface Props {
   onError: (e: unknown) => void;
   /** A setting changed: read the app info again. */
   onApplied: () => void;
+  /** Internet radio was just turned on (from NetNotice). */
+  onNetOn: () => void;
 }
 
-export function SourcesSection({ api, meta, mine, net, onError, onApplied }: Props) {
+export function SourcesSection({ api, meta, mine, net, onError, onApplied, onNetOn }: Props) {
   const t = useT();
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<{ name: string; json: string; n: number | null } | null>(null);
@@ -34,15 +38,21 @@ export function SourcesSection({ api, meta, mine, net, onError, onApplied }: Pro
   const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [netBusy, setNetBusy] = useState(false);
+  // turning internet radio on asks first (NetNotice); off is immediate
+  const [askNet, setAskNet] = useState(false);
+  /** Whether it changed. */
   const setNet = async (on: boolean) => {
     setNetBusy(true);
+    let ok = false;
     try {
       await api.setNet(on);
       onApplied();
+      ok = true;
     } catch (e) {
       onError(e);
     }
     setNetBusy(false);
+    return ok;
   };
 
   const exportFile = async () => {
@@ -96,13 +106,20 @@ export function SourcesSection({ api, meta, mine, net, onError, onApplied }: Pro
         <b>{t.netSource}</b>
         <div className="seg" role="radiogroup" aria-label={t.netSource}>
           {[true, false].map((on) => (
-            <button key={String(on)} type="button" role="radio" aria-checked={net === on} disabled={netBusy} onClick={() => setNet(on)}>
+            <button key={String(on)} type="button" role="radio" aria-checked={net === on} disabled={netBusy} onClick={() => (on && !net ? setAskNet(true) : setNet(on))}>
               {on ? t.netOn : t.netOff}
             </button>
           ))}
         </div>
         <p className="note">{t.netSourceNote}</p>
       </div>
+      {askNet && (
+        <NetNotice
+          busy={netBusy}
+          onConfirm={async () => { if (await setNet(true)) onNetOn(); setAskNet(false); }}
+          onCancel={() => setAskNet(false)}
+        />
+      )}
 
       <div className="field">
         <span>{t.stationsFile}</span>

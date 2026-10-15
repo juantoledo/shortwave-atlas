@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use atlas_core::listening::{clear_before, parse_lines, to_line, trim, Ctx, Event, Session, Tracker};
+use atlas_core::listening::{clear_before, dedupe, parse_lines, to_line, trim, Ctx, Event, Session, Tracker};
 use atlas_core::rig::RigState;
 use atlas_core::source::StationKey;
 
@@ -38,7 +38,13 @@ impl ListeningService {
         }
         list.sort_by_key(|s| s.start);
         trim(&mut list);
-        Arc::new(Self { file, inner: Mutex::new(Inner { list, tracker: Tracker::default() }) })
+        let twice = dedupe(&mut list);
+        let svc = Self { file, inner: Mutex::new(Inner { list, tracker: Tracker::default() }) };
+        if twice > 0 {
+            tracing::warn!("dropped {twice} sessions recorded twice in the listening history");
+            svc.save(&svc.lock().list);
+        }
+        Arc::new(svc)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
@@ -157,11 +163,16 @@ mod tests {
 
         // read back, with a bad line skipped
         let mut text = std::fs::read_to_string(&file).unwrap();
+        let first = text.lines().next().unwrap().to_owned();
         text.push_str("{oops\n");
+        // the same session written again (by a second process) is dropped, and the file rewritten
+        text.push_str(&first);
+        text.push('\n');
         std::fs::write(&file, text).unwrap();
         let again = ListeningService::new(Some(file.clone()));
         let ids = again.with(0, |l, _| l.iter().map(|s| s.freq_hz).collect::<Vec<_>>());
         assert_eq!(ids, [6_070_000, 9_500_000]);
+        assert_eq!(std::fs::read_to_string(&file).unwrap().lines().count(), 2);
         assert_eq!(again.clear(Some(t0 + 15)), Ok(1));
         assert_eq!(ListeningService::new(Some(file.clone())).with(0, |l, _| l.len()), 1);
         assert_eq!(again.clear(None), Ok(1));

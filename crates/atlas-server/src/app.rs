@@ -1,7 +1,8 @@
 //! `Atlas`: the running app (rig + stations + QTH) and the one dispatcher for every UI
 //! `Call`, used by both the Tauri shell and the WebSocket.
 
-use std::path::PathBuf;
+use std::fs::{File, OpenOptions, TryLockError};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -68,6 +69,30 @@ pub struct Atlas {
     pub net_favorites: Arc<NetFavoriteService>,
     /// Ourselves, for the background install task.
     me: Weak<Atlas>,
+    /// `<data_dir>/swatlas.lock`, held while we run (see `lock_data_dir`).
+    _lock: Option<File>,
+}
+
+/// Hold `<dir>/swatlas.lock` while running: two processes on one data directory (the desktop app
+/// and swatlas-server, say) would each record the listening history into it, twice, and overwrite
+/// each other's saves. `None`: the filesystem can't lock, so we run without it.
+fn lock_data_dir(dir: &Path) -> Result<Option<File>, String> {
+    let path = dir.join("swatlas.lock");
+    let file = std::fs::create_dir_all(dir)
+        .and_then(|()| OpenOptions::new().create(true).truncate(false).write(true).open(&path))
+        .map_err(|e| format!("could not open {}: {e}", path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(TryLockError::WouldBlock) => Err(format!(
+            "Shortwave Atlas is already running with {} (the desktop app or swatlas-server). Close it, \
+             or turn on [server] in the desktop app for remote access",
+            dir.display()
+        )),
+        Err(TryLockError::Error(e)) => {
+            tracing::warn!("could not lock {}: {e}", path.display());
+            Ok(None)
+        }
+    }
 }
 
 fn invalid(message: impl Into<String>) -> ApiError {
@@ -82,13 +107,17 @@ impl Atlas {
     /// Load stations and, from `data_dir`, the listener's own (`user-stations.json`), the saved
     /// QTH (`qth.json`), scans (`scans/`), favorites (`favorites.json`) and the listening history
     /// (`listening.jsonl`); then start the rig, the update checks and the listening tracker. `None` keeps all of them in memory (tests). Needs a tokio runtime. `updater` is the desktop shell's, or a
-    /// `ManifestUpdater`.
+    /// `ManifestUpdater`. Fails if another process holds `data_dir` (`lock_data_dir`).
     pub fn start(
         config: AppConfig,
         config_path: Option<PathBuf>,
         data_dir: Option<PathBuf>,
         updater: Arc<dyn Updater>,
     ) -> Result<Arc<Self>, String> {
+        let lock = match &data_dir {
+            Some(d) => lock_data_dir(d)?,
+            None => None,
+        };
         let qth_file = data_dir.as_ref().map(|d| d.join("qth.json"));
         if let Some(p) = &config.stations {
             tracing::warn!("`stations = {}` is no longer used; see `eibi_dir`", p.display());
@@ -135,6 +164,7 @@ impl Atlas {
             net_listening,
             net_favorites,
             me: me.clone(),
+            _lock: lock,
         });
         Self::spawn_tracker(Arc::downgrade(&atlas));
         Ok(atlas)
@@ -624,11 +654,7 @@ pub(crate) mod tests {
         let madrid = Qth { name: "Madrid".into(), lat: 40.4, lon: -3.7 };
         atlas.call(Call::SetQth(madrid.clone())).await.unwrap();
         assert_eq!(atlas.qth(), madrid);
-        // a new instance picks the saved QTH up
         assert!(dir.join("qth.json").is_file());
-        let again = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
-        assert_eq!(again.qth(), madrid);
-        let _ = std::fs::remove_dir_all(dir);
 
         // the dial follows the QTH's ITU region and the sim's coverage
         let dial = atlas.call(Call::Dial).await.unwrap();
@@ -639,6 +665,16 @@ pub(crate) mod tests {
 
         let bad = Qth { name: "x".into(), lat: 91.0, lon: 0.0 };
         assert!(atlas.call(Call::SetQth(bad)).await.is_err());
+
+        // one instance per data directory; the next one picks the saved QTH up
+        let Err(e) = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()) else {
+            panic!("a second instance started on the same directory")
+        };
+        assert!(e.contains("already running"), "{e}");
+        drop(atlas);
+        let again = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
+        assert_eq!(again.qth(), madrid);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
@@ -748,6 +784,7 @@ pub(crate) mod tests {
         assert_eq!(atlas.rig.state().freq_hz, Some(9_500_000));
 
         // a new instance reads them back; deleting removes the file
+        drop(atlas);
         let again = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
         assert_eq!(again.call(Call::Scans).await.unwrap().as_array().unwrap().len(), 3);
         again.call(Call::DeleteScan { id: id.clone() }).await.unwrap();
@@ -793,6 +830,7 @@ pub(crate) mod tests {
         assert_eq!((heard["total"].as_u64(), heard["heard"].as_array().map(Vec::len)), (Some(0), Some(0)));
 
         // kept across a restart
+        drop(atlas);
         let again = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
         let list = again.call(Call::Favorites).await.unwrap();
         let labels: Vec<&str> =
@@ -945,6 +983,7 @@ pub(crate) mod tests {
         // shutting down saves it; a new instance reads it back, and clearing asks nothing more
         atlas.shutdown().await;
         assert!(dir.join("listening.jsonl").is_file());
+        drop(atlas);
         let again = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
         let s = again.call(Call::Stats(q)).await.unwrap();
         assert_eq!((s["clear"]["all"].as_u64(), s["recent"].as_array().map(Vec::len)), (Some(1), Some(1)));

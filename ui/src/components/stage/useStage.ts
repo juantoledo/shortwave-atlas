@@ -23,6 +23,7 @@ import { altitudeAt, angleDeg, clamp, easeInOut, frameAltitude, frameWithHome, f
 import { SIGNAL_DB } from '../scan';
 import { ARC_MS, COOL, HOME_ALT, LOCK_ALT, mkPin, mkPulse, netQthRing, netRings, NO_FX, NO_SCAN_FX, siteRings, PING_MS, PING_PX_PER_DEG, qthRing, REDUCE, ROUTE_MS, route, sonarRing, SPIN, START_ALT, type Arc, type Fx, type Path, type Pin, type Ring, type ScanFx } from './fx';
 import type { MapMode } from '../../hooks/useDisplay';
+import { keep, loadKept, readPov } from '../../hooks/usePersisted';
 import type { Candidate } from '../../types/generated/Candidate';
 import type { Qth } from '../../types/generated/Qth';
 import type { ScanPing } from '../../types/generated/ScanPing';
@@ -38,6 +39,9 @@ const SCAN_ALT = 2.8, FINALE_MS = 4000, MAX_PINGS = 30, MAX_ARCS = 8, HANDS_OFF_
 const FOLLOW_MS = 6000, FOLLOW_SPAN_MS = 15_000, FOLLOW_MIN_DEG = 10;
 /** How fast the turn eases in and out (ms; out quicker, so a hovered dot stays put). */
 const SPIN_IN_MS = 800, SPIN_OUT_MS = 250;
+/** How often where the camera rests is kept. */
+const KEEP_MS = 2000;
+const round4 = (x: number) => Math.round(x * 1e4) / 1e4;
 /** A station chosen this soon after another one (tuning through them) flies once, to the last. */
 const SETTLE_MS = 150;
 /** The S-meter's smoothing. */
@@ -97,6 +101,8 @@ export interface StageInput {
   /** The user dragged, clicked or zoomed the view. */
   onInteract: () => void;
   sites: SiteDot[];
+  /** Which view this is (each keeps where its camera rested). */
+  mode: MapMode;
   /** The S-meter while the rig is on (dB over S9). */
   strengthDb: number | null;
   /** While a band scan runs: its last steps measured, and the noise floor so far. */
@@ -117,7 +123,6 @@ export interface ViewProps extends StageInput {
   onSite: (id: number) => void;
   /** Tooltip text for a site: country name and "n of m on the air". */
   siteLabel: (s: SiteDot) => { country: string; onAir: string };
-  mode: MapMode;
   onMode: (m: MapMode) => void;
 }
 
@@ -143,7 +148,7 @@ export interface Stage {
   hover(on: boolean): void;
 }
 
-export function useStage({ sel, net, listening, qth, frame: framing, paused, onInteract, sites, strengthDb, scan, finale }: StageInput): Stage {
+export function useStage({ sel, net, listening, qth, frame: framing, paused, onInteract, sites, mode, strengthDb, scan, finale }: StageInput): Stage {
   const cam = useRef<Camera | null>(null);
   const [ready, setReady] = useState(false);
   const [fx, setFx] = useState<Fx>(NO_FX);
@@ -191,13 +196,46 @@ export function useStage({ sel, net, listening, qth, frame: framing, paused, onI
   );
   const fit = useCallback((alt: number) => cam.current!.fit(alt), []);
 
+  // Where the camera last rested is kept on this device, per view (an altitude means another
+  // thing on each), and the view starts there, held still as if just let go; else over the QTH,
+  // turning. A turn's drift is never kept.
+  const camKey = `swatlas.camera.${mode}`;
   const attach = useCallback((c: Camera) => {
     cam.current = c;
-    const q = qthRef.current;
-    c.set({ lat: q.lat, lon: q.lon, alt: c.fit(START_ALT) });
-    spin.current = REDUCE ? 0 : SPIN;
+    const kept = loadKept(camKey, null, readPov);
+    if (kept) {
+      const [lo, hi] = c.range();
+      c.set({ lat: kept.lat, lon: kept.lon, alt: clamp(kept.alt, lo, hi) });
+      touched.current = performance.now();
+    } else {
+      const q = qthRef.current;
+      c.set({ lat: q.lat, lon: q.lon, alt: c.fit(START_ALT) });
+      spin.current = REDUCE ? 0 : SPIN;
+    }
     setReady(true);
-  }, []);
+  }, [camKey]);
+  useEffect(() => {
+    if (!ready) return;
+    let last = '';
+    const save = () => {
+      const c = cam.current;
+      if (!c || flying.current || spin.current || spinNow.current) return;
+      let p: Pov;
+      try { p = c.pov(); } catch { return; } // the view is gone already
+      const pov = { lat: round4(p.lat), lon: round4(p.lon), alt: round4(p.alt) };
+      const s = JSON.stringify(pov);
+      if (s === last) return;
+      last = s;
+      keep(camKey, pov);
+    };
+    const id = setInterval(save, KEEP_MS);
+    window.addEventListener('pagehide', save);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('pagehide', save);
+      save(); // the other view takes over
+    };
+  }, [ready, camKey]);
 
   /** Stop turning at once (not eased). */
   const stopSpin = useCallback(() => {

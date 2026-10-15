@@ -38,6 +38,10 @@ struct AudioStreams {
     tasks: Mutex<HashMap<u32, JoinHandle<()>>>,
 }
 
+/// PCM per channel message: each costs the webview a script and a fetch, and the player
+/// plays 40 ms buffers anyway (`ui/src/audio/player.ts`).
+const AUDIO_BATCH_MS: usize = 40;
+
 #[derive(serde::Serialize)]
 struct AudioStream {
     id: u32,
@@ -57,8 +61,9 @@ async fn audio_open(
     let mut sub =
         atlas.audio.subscribe().map_err(|e| ApiError { kind: ErrorKind::Conflict, message: e.to_string() })?;
     let (id, rate) = (streams.next.fetch_add(1, Ordering::Relaxed), sub.rate);
+    let batch = rate as usize * 2 * AUDIO_BATCH_MS / 1000;
     let task = tauri::async_runtime::spawn(async move {
-        while let Some(block) = sub.next_block().await {
+        while let Some(block) = sub.next_batch(batch).await {
             if on_block.send(InvokeResponseBody::Raw(block.to_vec())).is_err() {
                 return;
             }

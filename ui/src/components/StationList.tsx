@@ -9,10 +9,11 @@
 // last heard (nothing about the schedule there). It fills its panel: the controls are fixed,
 // the rows scroll in their own box and load the next page when you reach the end.
 
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useEffect, useId, useMemo, useRef, type KeyboardEvent, type RefObject } from 'react';
 import { useNames } from '../catalog/names';
 import type { Filters } from '../hooks/useCore';
 import type { NetSearch } from '../hooks/useNetSearch';
+import { readBool, usePersisted } from '../hooks/usePersisted';
 import { fmtStamp, sLabel, useT } from '../i18n';
 import { queryHz } from '../keys/keymap';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
@@ -88,12 +89,12 @@ interface Props {
 }
 
 /** A labelled filter dropdown; options that would give no rows are greyed out. */
-function Filter({ label, all, value, opts, onChange }: { label: string; all: string; value: string; opts: DropOpt[]; onChange: (v: string) => void }) {
+function Filter({ label, all, value, opts, onChange, className }: { label: string; all: string; value: string; opts: DropOpt[]; onChange: (v: string) => void; className?: string }) {
   const id = useId();
   return (
     <div className="flt">
       <span className="flt-lab" id={id}>{label}</span>
-      <Dropdown labelledBy={id} all={all} lit={value !== ''} value={value} opts={opts.map((o) => ({ ...o, disabled: o.n === 0 }))} onChange={onChange} />
+      <Dropdown labelledBy={id} all={all} lit={value !== ''} className={className} value={value} opts={opts.map((o) => ({ ...o, disabled: o.n === 0 }))} onChange={onChange} />
     </div>
   );
 }
@@ -236,7 +237,8 @@ export function StationList(p: Props) {
   const countryOf = (itu: string | null) => (itu ? netCountry.get(itu) ?? names.country(itu) : '');
   const sources: DropOpt[] = (p.meta?.sources ?? []).map((s) => ({ value: s.id, label: s.kind === 'user' ? t.sourceMine : s.name, n: count(p.facets?.sources, s.id) }));
   const mineSrc = useMemo(() => userSources(p.meta), [p.meta]);
-  const [showFilters, setShowFilters] = useState(false);
+  // the filter drawer, open or shut as this device left it
+  const [showFilters, setShowFilters] = usePersisted('swatlas.filtersOpen', false, readBool);
   const picked = net ? 1 + f.countries.length : f.bands.length + f.langs.length + f.regions.length + f.countries.length + f.sources.length;
   const filtered = net || picked > 0 || f.site !== null || f.scan !== null || f.q !== '';
   const heardList = !net && f.lens === 'heard' && f.scan === null;
@@ -356,7 +358,7 @@ export function StationList(p: Props) {
         </button>
       </div>
       <div className={'filters' + (showFilters ? ' open' : '')} role="group" aria-label={t.filters}>
-        <Filter label={t.band} all={t.allBands} value={f.bands[0] ?? ''} opts={bands} onChange={(v) => set({ bands: v ? [v] : [] })} />
+        <Filter label={t.band} all={t.allBands} value={f.bands[0] ?? ''} opts={bands} className={net ? 'net' : undefined} onChange={(v) => set({ bands: v ? [v] : [] })} />
         {/* on NET only the text and the country apply; the others stay set for the radio bands */}
         {!net && <Filter label={t.language} all={t.allLanguages} value={f.langs[0] ?? ''} opts={langs} onChange={(v) => set({ langs: v ? [v] : [] })} />}
         {!net && <Filter label={t.region} all={t.allRegions} value={f.regions[0] ?? ''} opts={regions} onChange={(v) => set({ regions: v ? [v as Region] : [] })} />}

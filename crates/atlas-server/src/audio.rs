@@ -123,13 +123,39 @@ pub struct Subscription {
     rx: mpsc::Receiver<Bytes>,
     id: u64,
     hub: Weak<AudioHub>,
+    /// The stream ended while a batch was gathered (`next_batch` returned what it had).
+    ended: bool,
 }
 
 impl Subscription {
     /// The next block, or `None` when the stream ended (the capture stopped, the audio was
     /// reconfigured, or nothing arrived for `AUDIO_STALL`).
     pub async fn next_block(&mut self) -> Option<Bytes> {
+        if self.ended {
+            return None;
+        }
         tokio::time::timeout(AUDIO_STALL, self.rx.recv()).await.ok().flatten()
+    }
+
+    /// Blocks joined until at least `min_bytes` (the end of the stream sends what is left), or
+    /// `None` when it ended. Fewer, larger messages for a transport that pays per message.
+    pub async fn next_batch(&mut self, min_bytes: usize) -> Option<Bytes> {
+        let first = self.next_block().await?;
+        if first.len() >= min_bytes {
+            return Some(first);
+        }
+        let mut batch = Vec::with_capacity(min_bytes + first.len());
+        batch.extend_from_slice(&first);
+        while batch.len() < min_bytes {
+            match self.next_block().await {
+                Some(b) => batch.extend_from_slice(&b),
+                None => {
+                    self.ended = true;
+                    break;
+                }
+            }
+        }
+        Some(batch.into())
     }
 }
 
@@ -207,7 +233,7 @@ impl AudioHub {
         inner.next_id += 1;
         inner.subs.push((id, tx));
         let rate = if inner.net.is_some() { NET_RATE } else { inner.choice.rate };
-        Ok(Subscription { rate, rx, id, hub: Arc::downgrade(self) })
+        Ok(Subscription { rate, rx, id, hub: Arc::downgrade(self), ended: false })
     }
 
     /// Tune to an internet station instead of the rig, for every listener. Its stream is fetched
@@ -612,6 +638,21 @@ mod tests {
         assert_eq!(AudioHub::chunk(16_000, &t), 1_280);
         assert_eq!(AudioHub::queue_blocks(&t), 13); // rounded up
         assert_eq!(AudioHub::queue_blocks(&AudioTuning { block_ms: 100, queue_ms: 100, ..t }), 2);
+    }
+
+    #[tokio::test]
+    async fn batches_join_blocks_and_flush_at_the_end() {
+        let (tx, rx) = mpsc::channel(8);
+        let mut sub = Subscription { rate: 16_000, rx, id: 0, hub: Weak::new(), ended: false };
+        for b in [&[1u8, 2][..], &[3, 4], &[5, 6, 7, 8], &[9, 10], &[11, 12]] {
+            tx.send(Bytes::copy_from_slice(b)).await.unwrap();
+        }
+        drop(tx);
+        assert_eq!(sub.next_batch(4).await.as_deref(), Some(&[1, 2, 3, 4][..]));
+        assert_eq!(sub.next_batch(4).await.as_deref(), Some(&[5, 6, 7, 8][..]), "a big block goes as is");
+        assert_eq!(sub.next_batch(6).await.as_deref(), Some(&[9, 10, 11, 12][..]), "the rest at the end");
+        assert_eq!(sub.next_batch(6).await, None);
+        assert_eq!(sub.next_block().await, None);
     }
 
     fn station(uuid: &str, url: &str) -> NetStream {

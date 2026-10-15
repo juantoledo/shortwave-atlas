@@ -93,6 +93,15 @@ pub fn trim(list: &mut Vec<NetSession>) -> bool {
     over > 0
 }
 
+/// Keep the first session of each id (two processes recording into one file write some twice);
+/// how many went.
+pub fn dedupe(list: &mut Vec<NetSession>) -> usize {
+    let n = list.len();
+    let mut seen = HashSet::new();
+    list.retain(|s| seen.insert(s.id.clone()));
+    n - list.len()
+}
+
 /// Forget the sessions that ended before `before`, or all of them (`None`); how many went.
 pub fn clear_before(list: &mut Vec<NetSession>, before: Option<i64>) -> usize {
     let n = list.len();
@@ -286,6 +295,9 @@ mod tests {
         assert_eq!((list.len(), bad), (2, 1));
         assert_eq!(list[0], s);
         assert!(to_line(&s).starts_with(r#"{"v":1,"id":"1781049600-a""#));
+        let mut twice = list.clone();
+        assert_eq!(dedupe(&mut twice), 1);
+        assert_eq!(twice, std::slice::from_ref(&s));
         let mut list = list;
         list[1].end = T0 + 500;
         assert_eq!(clear_before(&mut list, Some(T0 + 100)), 1);

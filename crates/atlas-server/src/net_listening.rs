@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use atlas_core::net::NetPlaying;
-use atlas_core::net_listening::{clear_before, parse_lines, to_line, trim, NetSession, NetTracker};
+use atlas_core::net_listening::{clear_before, dedupe, parse_lines, to_line, trim, NetSession, NetTracker};
 
 use crate::files::write_atomic;
 
@@ -39,6 +39,14 @@ impl NetListeningService {
         }
         list.sort_by_key(|s| s.start);
         trim(&mut list);
+        let twice = dedupe(&mut list);
+        if let (true, Some(p)) = (twice > 0, &file) {
+            tracing::warn!("dropped {twice} sessions recorded twice in {}", p.display());
+            let text: String = list.iter().map(to_line).collect();
+            if let Err(e) = write_atomic(p, &text) {
+                tracing::warn!("could not save the internet listening history to {}: {e}", p.display());
+            }
+        }
         Arc::new(Self { file, inner: Mutex::new(Inner { list, tracker: NetTracker::default() }) })
     }
 
@@ -140,8 +148,12 @@ mod tests {
         svc.close();
         assert_eq!(svc.with(|l, open| (l.len(), open.is_some())), (1, false));
 
+        // the same session written again (by a second process) is dropped, and the file rewritten
+        let text = std::fs::read_to_string(&file).unwrap();
+        std::fs::write(&file, format!("{text}{text}")).unwrap();
         let again = NetListeningService::new(Some(file.clone()));
         assert_eq!(again.with(|l, _| l.iter().map(|s| s.uuid.clone()).collect::<Vec<_>>()), ["u1"]);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
         assert_eq!(again.clear(None), Ok(1));
         assert_eq!(NetListeningService::new(Some(file)).with(|l, _| l.len()), 0);
         let _ = std::fs::remove_dir_all(dir);

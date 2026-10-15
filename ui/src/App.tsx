@@ -32,6 +32,7 @@ import { makeNames, NamesProvider } from './catalog/names';
 import { NO_FILTERS, useCandidates, useCore, useDial, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
 import { PHONE, useMedia } from './hooks/useMedia';
 import { useFavorites } from './hooks/useFavorites';
+import { findSite, oneOf, readFilters, readSiteRef, readString, usePersisted, type SiteRef } from './hooks/usePersisted';
 import { useDisplay } from './hooks/useDisplay';
 import { useBandScans, useScan } from './hooks/useScan';
 import { useUpdate } from './hooks/useUpdate';
@@ -82,11 +83,13 @@ export function App() {
   const display = useDisplay();
   const welcome = useWelcome();
   const [sheet, setSheet] = useState<SheetState>(null);
-  const [view, setViewRaw] = useState<View>('globe');
+  // the view, the list's filters, the station picked and the camera come back on this device
+  // (usePersisted)
+  const [view, setViewRaw] = usePersisted<View>('swatlas.view', 'globe', oneOf('globe', 'station', 'browse'));
   // Stats over the middle of the window, its tab and period
-  const [page, setPage] = useState<'main' | 'stats'>('main');
-  const [statsTab, setStatsTab] = useState<StatsTab>('overview');
-  const [statsPeriod, setStatsPeriod] = useState<Period>('week');
+  const [page, setPage] = usePersisted<'main' | 'stats'>('swatlas.page', 'main', oneOf('main', 'stats'));
+  const [statsTab, setStatsTab] = usePersisted<StatsTab>('swatlas.statsTab', 'overview', oneOf('overview', 'collection', 'propagation', 'hunt'));
+  const [statsPeriod, setStatsPeriod] = usePersisted<Period>('swatlas.statsPeriod', 'week', oneOf('day', 'week', 'month', 'year', 'all'));
   /** Another view (the phone's bottom tabs, a list action) leaves Stats. */
   const setView = useCallback((v: View) => { setPage('main'); setViewRaw(v); }, []);
   const [dockOpen, setDockOpen] = useState(false);
@@ -130,7 +133,7 @@ export function App() {
   const mine = useUserStations(api, onError, generation, reloadOverview);
   const bandScans = useBandScans(scan, win.w.band?.id ?? null);
   const { listening, reload: reloadListening } = useListening(api);
-  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [filters, setFilters] = usePersisted<Filters>('swatlas.filters', NO_FILTERS, readFilters);
   // the lenses change with the logbook, the favorites and the listening history (a session
   // starting or ending), and every list with the catalog
   const sessionKey = filters.lens === 'listened' ? listening?.now?.session.id ?? null : null;
@@ -154,15 +157,16 @@ export function App() {
     return (itu: string | null) => (itu ? m.get(itu) ?? names.country(itu) : '');
   }, [netCountries, t.locale, names]);
   // internet radio turned off while the list was on NET: back to the radio bands
+  // (known once `info` is: a NET list kept from the last run waits for it)
   useEffect(() => {
-    if (!netEnabled) setFilters((f) => leaveNet(f));
-  }, [netEnabled]);
+    if (info && !netEnabled) setFilters((f) => leaveNet(f));
+  }, [info, netEnabled]);
   const cands = useCandidates(api, on ? freqHz : null, `${qth?.lat},${qth?.lon},${now.getTime()},${generation}`);
 
   // Keep the chosen station while it is still a candidate; otherwise take the best one. It is
   // kept by source and key (`keyOf`), which hold when the catalog changes and the ids do not.
   const [sel, setSel] = useState<Candidate | null>(null);
-  const [wanted, setWanted] = useState<string | null>(null);
+  const [wanted, setWanted] = usePersisted<string | null>('swatlas.station', null, readString);
   // the globe's listened sites, while the list is on Listened
   const lensListened = filters.lens === 'listened' && page === 'main';
   const { stats: allTime } = useStats(api, 'all', lensListened);
@@ -196,10 +200,30 @@ export function App() {
   const siteName = filters.site === null ? null : sites.find((s) => s.id === filters.site)?.name ?? null;
   const scanSel = filters.scan === null ? null : scan.scans.find((s) => s.id === filters.scan) ?? null;
   const scanName = scanSel && `${names.dialBand(bandOf(scanSel))} · ${fmtStamp(t, scanSel.started)}`;
-  // the scan the list was narrowed to was deleted
+  // the scan the list was narrowed to was deleted (or, kept from the last run, is gone)
   useEffect(() => {
-    if (filters.scan !== null && !scan.scans.some((s) => s.id === filters.scan)) setFilters((f) => ({ ...f, scan: null }));
-  }, [filters.scan, scan.scans]);
+    if (scan.loaded && filters.scan !== null && !scan.scans.some((s) => s.id === filters.scan)) setFilters((f) => ({ ...f, scan: null }));
+  }, [filters.scan, scan.scans, scan.loaded]);
+  // The transmitter site the list is narrowed to, kept by what it is (its id changes with the
+  // catalog): found again whenever the sites come in, and the list unnarrowed if it isn't there.
+  const [siteRef, setSiteRef] = usePersisted<SiteRef | null>('swatlas.site', null, readSiteRef);
+  const siteRefNow = useRef(siteRef);
+  siteRefNow.current = siteRef;
+  const sitesIn = useRef(false);
+  useEffect(() => {
+    if (!overview) return;
+    const ref = siteRefNow.current;
+    const id = ref ? findSite(sites, ref)?.id ?? null : null;
+    if (ref && id === null) setSiteRef(null);
+    setFilters((f) => (f.site === id ? f : { ...f, site: id }));
+    sitesIn.current = true;
+  }, [sites]);
+  // the list narrowed to another site, or to none
+  useEffect(() => {
+    if (!sitesIn.current) return;
+    const s = filters.site === null ? null : sites.find((x) => x.id === filters.site);
+    setSiteRef(s ? { name: s.name, lat: s.lat, lon: s.lon } : null);
+  }, [filters.site]);
   const siteLabel = useCallback((s: SiteDot) => (s.id >= NET_DOT_ID
     ? { country: t.netBand, onAir: t.netDotCount(s.total) }
     : { country: names.country(s.itu), onAir: t.siteOnAir(s.on, s.total) }), [names, t]);
@@ -696,6 +720,7 @@ export function App() {
             onError={onError}
             onApplied={reloadInfo}
             net={netEnabled}
+            onNetOn={toNetBand}
           />
         )}
         {sheet?.kind === 'scans' && (
