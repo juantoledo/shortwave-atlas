@@ -16,6 +16,9 @@ import type { ImportReport } from '../types/generated/ImportReport';
 import type { Info } from '../types/generated/Info';
 import type { ListeningNow } from '../types/generated/ListeningNow';
 import type { Logged } from '../types/generated/Logged';
+import type { NetCountry } from '../types/generated/NetCountry';
+import type { NetPage } from '../types/generated/NetPage';
+import type { NetQuery } from '../types/generated/NetQuery';
 import type { Overview } from '../types/generated/Overview';
 import type { Qth } from '../types/generated/Qth';
 import type { RigChoice } from '../types/generated/RigChoice';
@@ -106,4 +109,9 @@ export class Api {
   hearingStation = (args: StationKey) => this.transport.call({ cmd: 'hearing_station', args }) as Promise<null>;
   /** Unix seconds, or `null` for everything; resolves to how many sessions went. */
   clearListening = (before: number | null) => this.transport.call({ cmd: 'clear_listening', args: { before } }) as Promise<number>;
+
+  /** The NET band: internet stations from radio-browser.info (refused while internet radio is off). */
+  netSearch = (args: NetQuery) => this.transport.call({ cmd: 'net_search', args }) as Promise<NetPage>;
+  netCountries = () => this.transport.call({ cmd: 'net_countries' }) as Promise<NetCountry[]>;
+  setNet = (enabled: boolean) => this.transport.call({ cmd: 'set_net', args: { enabled } }) as Promise<null>;
 }

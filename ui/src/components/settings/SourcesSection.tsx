@@ -1,5 +1,6 @@
-// Sources: where the stations come from (EiBi's schedule, and the listener's own), and the
-// listener's stations to a file and back: export, and import merged with theirs or instead of them.
+// Sources: where the stations come from (EiBi's schedule, and the listener's own), the switch for
+// internet radio (the NET band, from radio-browser.info), and the listener's stations to a file and
+// back: export, and import merged with theirs or instead of them.
 
 import { useRef, useState } from 'react';
 import type { Api } from '../../api/client';
@@ -17,10 +18,14 @@ interface Props {
   api: Api;
   meta: CatalogMeta | null;
   mine: UserStationsApi;
+  /** Internet radio (the NET band) is on. */
+  net: boolean;
   onError: (e: unknown) => void;
+  /** A setting changed: read the app info again. */
+  onApplied: () => void;
 }
 
-export function SourcesSection({ api, meta, mine, onError }: Props) {
+export function SourcesSection({ api, meta, mine, net, onError, onApplied }: Props) {
   const t = useT();
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<{ name: string; json: string; n: number | null } | null>(null);
@@ -28,6 +33,17 @@ export function SourcesSection({ api, meta, mine, onError }: Props) {
   // the desktop webview saves to Downloads without a word: say so
   const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [netBusy, setNetBusy] = useState(false);
+  const setNet = async (on: boolean) => {
+    setNetBusy(true);
+    try {
+      await api.setNet(on);
+      onApplied();
+    } catch (e) {
+      onError(e);
+    }
+    setNetBusy(false);
+  };
 
   const exportFile = async () => {
     try {
@@ -75,6 +91,18 @@ export function SourcesSection({ api, meta, mine, onError }: Props) {
           {s.kind === 'schedule' && !s.current && <p className="note warn">{t.seasonStale(s.season ?? '')}</p>}
         </div>
       ))}
+
+      <div className="src">
+        <b>{t.netSource}</b>
+        <div className="seg" role="radiogroup" aria-label={t.netSource}>
+          {[true, false].map((on) => (
+            <button key={String(on)} type="button" role="radio" aria-checked={net === on} disabled={netBusy} onClick={() => setNet(on)}>
+              {on ? t.netOn : t.netOff}
+            </button>
+          ))}
+        </div>
+        <p className="note">{t.netSourceNote}</p>
+      </div>
 
       <div className="field">
         <span>{t.stationsFile}</span>

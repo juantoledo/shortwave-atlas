@@ -705,6 +705,14 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 .dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #5b6c7f; }
 .dot.on { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 8px rgba(255, 179, 63, 0.7); }
 .btn.more { width: 100%; margin: 10px 0 4px; }
+/* the NET band: internet stations, not on the rig's dial; a click opens their details */
+.net-row { grid-template-columns: 60px minmax(0, 1fr) auto; }
+.net-rf { justify-self: start; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 4px; font: 500 10.5px var(--font-mono); letter-spacing: 0.12em; color: var(--dim); }
+.net-row.dead .rn { opacity: 0.6; }
+.net-row[aria-expanded="true"] { background: rgba(140, 185, 230, 0.06); }
+.net-more { padding: 0 6px 10px 78px; }
+.net-more p { margin: 4px 0 0; font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
+.net-foot { margin: 12px 0 6px; }
 .flag { display: inline-block; width: 1.25em; height: 0.94em; margin-right: 0.4em; vertical-align: -0.1em; border-radius: 2px; object-fit: cover; box-shadow: 0 0 0 1px rgba(140, 185, 230, 0.25); }
 svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: none; }
 

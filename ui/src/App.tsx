@@ -38,6 +38,8 @@ import { useUpdate } from './hooks/useUpdate';
 import { useUserStations } from './hooks/useUserStations';
 import { useWelcome } from './hooks/useWelcome';
 import { useFreqHeat, useListening, useStats } from './hooks/useStats';
+import { useNetCountries, useNetSearch } from './hooks/useNetSearch';
+import { isNet, leaveNet } from './components/net';
 import { fmtStamp, I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
 import { stepIndex, type Action } from './keys/keymap';
@@ -131,7 +133,16 @@ export function App() {
   // the history can be cleared)
   const heat = useFreqHeat(api, `${listening?.now?.session.id ?? ''}|${page}`);
   const lensKey = useMemo(() => ({}), [scan.logged, favs.views, generation, sessionKey]);
-  const search = useStationSearch(api, filters, lensKey);
+  // the NET band (internet stations) has its own search; the schedule's doesn't run meanwhile
+  const netEnabled = info?.net ?? false;
+  const netActive = isNet(filters, netEnabled);
+  const search = useStationSearch(netActive ? null : api, filters, lensKey);
+  const netSearch = useNetSearch(api, filters, netActive);
+  const netCountries = useNetCountries(api, netActive);
+  // internet radio turned off while the list was on NET: back to the radio bands
+  useEffect(() => {
+    if (!netEnabled) setFilters((f) => leaveNet(f));
+  }, [netEnabled]);
   const cands = useCandidates(api, on ? freqHz : null, `${qth?.lat},${qth?.lon},${now.getTime()},${generation}`);
 
   // Keep the chosen station while it is still a candidate; otherwise take the best one. It is
@@ -164,7 +175,7 @@ export function App() {
   const siteLabel = useCallback((s: SiteDot) => ({ country: names.country(s.itu), onAir: t.siteOnAir(s.on, s.total) }), [names, t]);
   // the globe's callbacks are stable, so it only renders again when what it shows changes
   const pickSite = useCallback((id: number) => {
-    setFilters((f) => ({ ...f, site: f.site === id ? null : id }));
+    setFilters((f) => ({ ...leaveNet(f), site: f.site === id ? null : id }));
     setView('browse');
   }, []);
 
@@ -194,11 +205,11 @@ export function App() {
   // Stats: open and close; leave it for the list on a country, or for the globe's Listened sites
   const toggleStats = () => setPage((p) => (p === 'stats' ? 'main' : 'stats'));
   const statsCountry = (itu: string) => {
-    setFilters((f) => ({ ...f, countries: [itu], lens: 'all', scan: null, site: null }));
+    setFilters((f) => ({ ...leaveNet(f), countries: [itu], lens: 'all', scan: null, site: null }));
     setView(phone ? 'browse' : view);
   };
   const statsGlobe = () => {
-    setFilters((f) => ({ ...f, lens: 'listened', scan: null }));
+    setFilters((f) => ({ ...leaveNet(f), lens: 'listened', scan: null }));
     setView('globe');
   };
   useEffect(() => {
@@ -269,7 +280,7 @@ export function App() {
   // the station list narrowed to a scan, or showing the favorites
   const showScan = (id: string) => {
     setSheet(null);
-    setFilters((f) => ({ ...f, scan: id, lens: 'all' }));
+    setFilters((f) => ({ ...leaveNet(f), scan: id, lens: 'all' }));
     if (phone) setView('browse');
   };
   // the listener's own stations: the form, and where it opens from
@@ -294,7 +305,7 @@ export function App() {
   };
   const toggleFavorites = () => {
     const to = filters.lens === 'favorites' ? 'all' : 'favorites';
-    setFilters((f) => ({ ...f, lens: to }));
+    setFilters((f) => ({ ...leaveNet(f), lens: to }));
     if (phone && to === 'favorites') setView('browse');
   };
 
@@ -363,8 +374,9 @@ export function App() {
   // Heard is what the scans heard: no schedule count there
   const heardList = filters.lens === 'heard' && filters.scan === null;
   const counting = search.loading && !search.rows.length && !search.heard.length;
-  const count = counting ? '…' : heardList ? t.heardCount(search.total) : t.resultCount(search.total, search.onAir);
-  const shortCount = counting ? '' : search.total.toLocaleString(t.locale);
+  const netCount = netSearch.loading && !netSearch.items.length ? '…' : t.netCount(netSearch.items.length, netSearch.more);
+  const count = netActive ? netCount : counting ? '…' : heardList ? t.heardCount(search.total) : t.resultCount(search.total, search.onAir);
+  const shortCount = netActive ? `${netSearch.items.length}${netSearch.more ? '+' : ''}` : counting ? '' : search.total.toLocaleString(t.locale);
 
   return (
     <I18nProvider value={t}>
@@ -447,6 +459,7 @@ export function App() {
             onTuneHz={tune}
             onMore={search.more}
             searchRef={searchRef}
+            net={{ enabled: netEnabled, active: netActive, search: netSearch, countries: netCountries }}
           />
         </section>
 
@@ -563,6 +576,7 @@ export function App() {
             onClose={() => setSheet(null)}
             onError={onError}
             onApplied={reloadInfo}
+            net={netEnabled}
           />
         )}
         {sheet?.kind === 'scans' && (

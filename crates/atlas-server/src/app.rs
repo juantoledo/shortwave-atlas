@@ -23,9 +23,10 @@ use serde_json::Value;
 use tokio::sync::OnceCell;
 
 use crate::audio::{backend, sound_cards, AudioHub};
-use crate::config::{save_audio, save_rig, save_update, AppConfig};
+use crate::config::{save_audio, save_net, save_rig, save_update, AppConfig};
 use crate::favorites::FavoriteService;
 use crate::listening::ListeningService;
+use crate::net::NetService;
 use crate::scan::{Context, ScanService};
 use crate::update::{InstallRefused, UpdateService, Updater};
 use crate::user_stations::UserStationService;
@@ -55,6 +56,8 @@ pub struct Atlas {
     pub user_stations: Arc<UserStationService>,
     /// The listening history, recorded from the rig's states.
     pub listening: Arc<ListeningService>,
+    /// The NET band: internet stations from radio-browser.info, off until turned on.
+    pub net: Arc<NetService>,
     /// Ourselves, for the background install task.
     me: Weak<Atlas>,
 }
@@ -102,6 +105,7 @@ impl Atlas {
         let scan = ScanService::new(data_dir.as_ref().map(|d| d.join("scans")), stations.clone());
         let favorites = FavoriteService::new(data_dir.as_ref().map(|d| d.join("favorites.json")), stations.clone());
         let listening = ListeningService::new(data_dir.as_ref().map(|d| d.join("listening.jsonl")));
+        let net = Arc::new(NetService::new(config.net.enabled));
         let atlas = Arc::new_cyclic(|me| Self {
             rig,
             audio,
@@ -117,6 +121,7 @@ impl Atlas {
             favorites,
             user_stations,
             listening,
+            net,
             me: me.clone(),
         });
         Self::spawn_tracker(Arc::downgrade(&atlas));
@@ -263,6 +268,14 @@ impl Atlas {
         Ok(())
     }
 
+    fn set_net(&self, enabled: bool) -> Result<(), ApiError> {
+        self.net.set_enabled(enabled);
+        if let Some(path) = &self.config_path {
+            save_net(path, enabled).map_err(|e| ApiError::internal(format!("Changed, but could not save: {e}")))?;
+        }
+        Ok(())
+    }
+
     /// Check the request against the rig's dial, take the rig from the poller and start sweeping.
     async fn start_scan(&self, req: ScanRequest) -> Result<ScanStatus, ApiError> {
         let coverage = self.rig.coverage().await;
@@ -309,6 +322,7 @@ impl Atlas {
             audio_max_ahead_ms: audio.tuning.max_ahead_ms,
             configured: self.config_path.as_ref().is_some_and(|p| p.is_file()),
             os: Os::CURRENT,
+            net: self.net.enabled(),
         }
     }
 
@@ -478,6 +492,12 @@ impl Atlas {
                 Ok(n) => json(serde_json::to_value(n)),
                 Err(e) => Err(ApiError::internal(format!("Could not clear the listening history: {e}"))),
             },
+            Call::NetSearch(q) => json(serde_json::to_value(self.net.search(&q).await?)),
+            Call::NetCountries => json(serde_json::to_value(atlas_core::net::countries())),
+            Call::SetNet { enabled } => {
+                self.set_net(enabled)?;
+                Ok(Value::Null)
+            }
         }
     }
 
@@ -958,6 +978,59 @@ pub(crate) mod tests {
         assert_eq!((saved.update.check, saved.update.channel), (false, Channel::Beta));
         let s = atlas.call(Call::UpdateStatus).await.unwrap();
         assert_eq!((s["check"].as_bool(), s["channel"].as_str()), (Some(false), Some("beta")));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn net_band_is_opt_in_and_leaves_rig_and_history_alone() {
+        use atlas_core::net::NetQuery;
+        use atlas_core::stats::{Period, StatsQuery};
+        use std::sync::Mutex;
+
+        let dir = std::env::temp_dir().join(format!("swatlas-net-app-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("swatlas.toml");
+        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), Some(dir.clone()), no_updates()).unwrap();
+        let asked = Arc::new(Mutex::new(vec![]));
+        atlas.net.replace_fetch(crate::net::tests::fake(asked.clone()));
+
+        // off by default: no NET band, and nothing is sent
+        assert_eq!(atlas.call(Call::Info).await.unwrap()["net"], false);
+        let q = NetQuery { country: Some("ARG".into()), ..Default::default() };
+        let e = atlas.call(Call::NetSearch(q.clone())).await.unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Conflict);
+        assert!(asked.lock().unwrap().is_empty());
+
+        let snapshot = || async {
+            let stats = atlas.call(Call::Stats(StatsQuery { period: Period::All, tz_offset_min: 0 })).await.unwrap();
+            (
+                atlas.call(Call::State).await.unwrap()["freq_hz"].clone(),
+                atlas.call(Call::Listening).await.unwrap(),
+                atlas.call(Call::ListenedFreqs).await.unwrap(),
+                stats["totals"].clone(),
+                stats["recent"].clone(),
+            )
+        };
+        let before = snapshot().await;
+
+        // on, and saved
+        atlas.call(Call::SetNet { enabled: true }).await.unwrap();
+        assert_eq!(atlas.call(Call::Info).await.unwrap()["net"], true);
+        let saved: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(saved.net.enabled);
+        let page = atlas.call(Call::NetSearch(q)).await.unwrap();
+        assert_eq!(
+            (page["items"][0]["name"].as_str(), page["items"][0]["itu"].as_str()),
+            (Some("La 100 - 99.9 FM"), Some("ARG"))
+        );
+        atlas.track(now_secs());
+        assert_eq!(snapshot().await, before, "a NET search tunes nothing and records nothing");
+
+        // off again: refused, and saved
+        atlas.call(Call::SetNet { enabled: false }).await.unwrap();
+        assert_eq!(atlas.call(Call::NetSearch(NetQuery::default())).await.unwrap_err().kind, ErrorKind::Conflict);
+        let saved: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(!saved.net.enabled);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

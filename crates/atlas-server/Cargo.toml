@@ -7,8 +7,8 @@ publish.workspace = true
 
 [features]
 default = ["update-check"]
-# HTTPS for `ManifestUpdater` (rustls + ring, which needs a C compiler for the target: the
-# Windows/macOS cross-check turns it off).
+# HTTPS (`http.rs`) for `ManifestUpdater` and the NET band (rustls + ring, which needs a C
+# compiler for the target: the Windows/macOS cross-check turns it off).
 update-check = ["dep:reqwest", "dep:rustls"]
 
 [dependencies]

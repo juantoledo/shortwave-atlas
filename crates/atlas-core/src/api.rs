@@ -7,6 +7,7 @@ use ts_rs::TS;
 use crate::audio::{AudioChoice, AudioHint, AudioStatus, AudioTuning};
 use crate::favorites::FavoriteRequest;
 use crate::geo::LatLon;
+use crate::net::NetQuery;
 use crate::platform::Os;
 use crate::rig::{CommandError, RigCommand, RigState};
 use crate::scan::ScanRequest;
@@ -166,6 +167,15 @@ pub enum Call {
         #[ts(type = "number | null")]
         before: Option<i64>,
     },
+    /// Internet stations from the radio-browser.info directory, the NET band (result:
+    /// `NetPage`). Refused while internet radio is off.
+    NetSearch(NetQuery),
+    /// Countries the NET band's search can filter by (result: `NetCountry[]`).
+    NetCountries,
+    /// Turn internet radio (the NET band) on or off, and save it.
+    SetNet {
+        enabled: bool,
+    },
 }
 
 /// Argument of `Call::SetUpdatePrefs`.
@@ -246,6 +256,8 @@ pub struct Info {
     pub configured: bool,
     /// Where the core runs (the UI words hints, ports and devices for it).
     pub os: Os,
+    /// Internet radio is on: the station list offers the NET band (`Call::NetSearch`).
+    pub net: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -379,6 +391,13 @@ mod tests {
             (r#"{"cmd":"clear_listening","args":{"before":null}}"#, Call::ClearListening { before: None }),
             (r#"{"cmd":"clear_listening","args":{"before":5}}"#, Call::ClearListening { before: Some(5) }),
             (r#"{"cmd":"export_user_stations"}"#, Call::ExportUserStations),
+            (
+                r#"{"cmd":"net_search","args":{"q":"rri","country":"ROU","offset":0,"limit":50}}"#,
+                Call::NetSearch(NetQuery { q: "rri".into(), country: Some("ROU".into()), offset: 0, limit: 50 }),
+            ),
+            (r#"{"cmd":"net_search","args":{}}"#, Call::NetSearch(NetQuery::default())),
+            (r#"{"cmd":"set_net","args":{"enabled":true}}"#, Call::SetNet { enabled: true }),
+            (r#"{"cmd":"net_countries"}"#, Call::NetCountries),
             (r#"{"cmd":"delete_user_station","args":{"id":"x"}}"#, Call::DeleteUserStation { id: "x".into() }),
             (
                 r#"{"cmd":"import_user_stations","args":{"json":"{}","replace":true}}"#,

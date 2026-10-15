@@ -363,6 +363,57 @@ pub fn flag(itu: &str) -> Option<&'static str> {
     country(itu).and_then(|c| c.flag)
 }
 
+/// Where several EiBi codes share a flag, the one that stands for the ISO 3166 country (Alaska,
+/// Hawaii and Guantánamo are `us` too, but `US` is the United States).
+const ISO_PRIMARY: &[(&str, &str)] = &[
+    ("ao", "AGL"),
+    ("aq", "ATA"),
+    ("cl", "CHL"),
+    ("co", "CLM"),
+    ("ec", "EQA"),
+    ("es", "E"),
+    ("gs", "SGA"),
+    ("jp", "J"),
+    ("ki", "KIR"),
+    ("mu", "MAU"),
+    ("ps", "PSE"),
+    ("pt", "POR"),
+    ("ru", "RUS"),
+    ("sj", "SVB"),
+    ("tf", "KER"),
+    ("us", "USA"),
+    ("za", "AFS"),
+];
+
+/// Shared flags with no code standing for the ISO country.
+const ISO_NONE: &[&str] = &["um"];
+
+/// The ISO 3166-1 alpha-2 code (`AR`) for an EiBi code, if it stands for a whole ISO country:
+/// the internet directory knows countries by these.
+pub fn iso_of_itu(itu: &str) -> Option<String> {
+    let f = flag(itu).filter(|f| f.len() == 2)?;
+    let primary = match ISO_PRIMARY.iter().find(|(k, _)| *k == f) {
+        Some((_, p)) => *p == itu,
+        None => !ISO_NONE.contains(&f),
+    };
+    primary.then(|| f.to_ascii_uppercase())
+}
+
+/// The EiBi code for an ISO 3166-1 alpha-2 code (any case), if there is one.
+pub fn itu_of_iso(iso: &str) -> Option<&'static str> {
+    let f = iso.to_ascii_lowercase();
+    if f.len() != 2 {
+        return None;
+    }
+    if let Some((_, p)) = ISO_PRIMARY.iter().find(|(k, _)| *k == f) {
+        return Some(p);
+    }
+    if ISO_NONE.contains(&f.as_str()) {
+        return None;
+    }
+    COUNTRIES.iter().find(|c| c.flag == Some(f.as_str())).map(|c| c.itu)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,6 +433,49 @@ mod tests {
         assert_eq!(flag("NOPE"), None);
         assert_eq!(country("B").map(|c| c.es), Some("Brasil"));
         assert_eq!(country("KRE").map(|c| c.region), Some(Region::As));
+    }
+
+    #[test]
+    fn iso_codes_both_ways() {
+        assert_eq!(iso_of_itu("ARG").as_deref(), Some("AR"));
+        assert_eq!(iso_of_itu("D").as_deref(), Some("DE"));
+        assert_eq!(iso_of_itu("USA").as_deref(), Some("US"));
+        assert_eq!(iso_of_itu("ALS"), None, "Alaska is part of US, not its own country");
+        assert_eq!(iso_of_itu("ASC"), None, "no alpha-2 flag");
+        assert_eq!(iso_of_itu("CLA"), None);
+        assert_eq!(iso_of_itu("WAK"), None);
+        assert_eq!(itu_of_iso("ar"), Some("ARG"));
+        assert_eq!(itu_of_iso("US"), Some("USA"));
+        assert_eq!(itu_of_iso("GB"), Some("G"));
+        assert_eq!(itu_of_iso("UM"), None);
+        assert_eq!(itu_of_iso("ZZ"), None);
+        assert_eq!(itu_of_iso("USA"), None);
+    }
+
+    #[test]
+    fn every_shared_flag_has_a_rule() {
+        use std::collections::HashMap;
+        let mut by_flag: HashMap<&str, Vec<&str>> = HashMap::new();
+        for c in COUNTRIES {
+            if let Some(f) = c.flag.filter(|f| f.len() == 2) {
+                by_flag.entry(f).or_default().push(c.itu);
+            }
+        }
+        for (f, itus) in &by_flag {
+            let rule = ISO_PRIMARY.iter().find(|(k, _)| k == f);
+            if itus.len() > 1 {
+                assert!(rule.is_some() || ISO_NONE.contains(f), "{f} is shared by {itus:?}: add it to ISO_PRIMARY");
+            }
+            if let Some((_, p)) = rule {
+                assert!(itus.contains(p), "{f}: {p} does not have that flag");
+            }
+        }
+        // the two directions agree: one code per ISO country
+        for c in COUNTRIES {
+            if let Some(iso) = iso_of_itu(c.itu) {
+                assert_eq!(itu_of_iso(&iso), Some(c.itu), "{}", c.itu);
+            }
+        }
     }
 
     #[test]

@@ -47,27 +47,8 @@ impl ManifestUpdater {
     }
 }
 
-#[cfg(feature = "update-check")]
 async fn fetch(url: &str) -> Result<String, String> {
-    use std::sync::OnceLock;
-    static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
-    let http = HTTP.get_or_init(|| {
-        // reqwest is built without a crypto provider of its own: use ring, like Tauri's updater
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        reqwest::Client::builder()
-            .user_agent(concat!("swatlas/", env!("CARGO_PKG_VERSION")))
-            .timeout(Duration::from_secs(30))
-            .build()
-            .expect("HTTP client")
-    });
-    async { http.get(url).send().await?.error_for_status()?.text().await }
-        .await
-        .map_err(|e| format!("could not read {url}: {e}"))
-}
-
-#[cfg(not(feature = "update-check"))]
-async fn fetch(_: &str) -> Result<String, String> {
-    Err("built without update checks".into())
+    crate::http::get(url, Duration::from_secs(30)).await
 }
 
 #[async_trait]

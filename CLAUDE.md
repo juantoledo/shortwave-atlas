@@ -20,6 +20,10 @@ See README.md for layout and commands.
   `assets/sync_eibi.py` (weekly workflow). Never edit those files: fixes go in `site_overrides.csv`
   or `utility_patterns.txt`. Parsing is `atlas_core::eibi`; `cargo test` checks it against
   `data/eibi/parity.json`. New EiBi country codes need a row in `atlas_core::country`.
+- The NET band (internet radio from radio-browser.info: `atlas_core::net`, `atlas-server/src/net.rs`)
+  is a source shown only as a band. Its rows come from `Call::NetSearch`, off unless `[net] enabled`,
+  never from the schedule `Catalog`; nothing in it tunes the rig, records listening or saves a
+  stream. Use the directory's data (public domain), never its server code (AGPL).
 - Shared types are generated: `cargo test` writes `ui/src/types/generated/` (ts-rs). Commit them
   and never edit them by hand.
 - Logic that doesn't touch IO goes in `atlas-core`, with unit tests. The UI only keeps animation

@@ -1,7 +1,9 @@
 // The station list: four lenses (the whole schedule, what the scans heard, the favorites, what
 // the listening history has), search, filters with counts (the listener's own stations are a source to filter by), a
 // transmitter picked on the globe or a scan to go through, and
-// pages. Signals and favorites the schedule has no row for come first; in Heard they share one
+// pages. With internet radio on, the band filter also offers NET: internet stations from
+// radio-browser.info, searched by text and country, which open their details instead of tuning.
+// Signals and favorites the schedule has no row for come first; in Heard they share one
 // list with the logged stations, sorted as asked, each with its best reading and when it was
 // last heard (nothing about the schedule there). It fills its panel: the controls are fixed,
 // the rows scroll in their own box and load the next page when you reach the end.
@@ -9,6 +11,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useNames } from '../catalog/names';
 import type { Filters } from '../hooks/useCore';
+import type { NetSearch } from '../hooks/useNetSearch';
 import { fmtStamp, sLabel, useT } from '../i18n';
 import { queryHz } from '../keys/keymap';
 import type { CatalogMeta } from '../types/generated/CatalogMeta';
@@ -17,6 +20,8 @@ import type { Favorite } from '../types/generated/Favorite';
 import type { HeardRow } from '../types/generated/HeardRow';
 import type { Lens } from '../types/generated/Lens';
 import type { Logged } from '../types/generated/Logged';
+import type { NetCountry } from '../types/generated/NetCountry';
+import type { NetStation } from '../types/generated/NetStation';
 import type { OffSchedule } from '../types/generated/OffSchedule';
 import type { Region } from '../types/generated/Region';
 import type { Sort } from '../types/generated/Sort';
@@ -24,6 +29,7 @@ import type { StationRow } from '../types/generated/StationRow';
 import { MineBadge } from './Dossier';
 import { Dropdown, type DropOpt } from './Dropdown';
 import { Flag } from './Flag';
+import { lensFilters, NET_BAND, netCountryOpts, streamLabel } from './net';
 import { userSources } from './sources';
 
 const REGIONS: Region[] = ['am', 'eu', 'af', 'me', 'as', 'oc', 'other'];
@@ -65,6 +71,8 @@ interface Props {
   onTuneHz: (hz: number) => void;
   onMore: () => void;
   searchRef: RefObject<HTMLInputElement | null>;
+  /** The NET band: offered while internet radio is on; `active` = the list shows it. */
+  net: { enabled: boolean; active: boolean; search: NetSearch; countries: NetCountry[] };
 }
 
 /** A labelled filter dropdown; options that would give no rows are greyed out. */
@@ -164,6 +172,33 @@ function OffItem({ o, p }: { o: OffSchedule; p: Props }) {
 
 const offKey = (o: OffSchedule) => `${o.freq_hz}-${o.favorite ?? ''}`;
 
+/** An internet station: NET where the kHz would be, and a click opens its details (it tunes
+ *  nothing, so it works with the rig off too). */
+function NetItem({ s, country, open, onToggle }: { s: NetStation; country: string; open: boolean; onToggle: () => void }) {
+  const t = useT();
+  const line = [country, s.langs.join(', '), s.tags.slice(0, 3).join(', ')].filter(Boolean).join(' · ');
+  return (
+    <li>
+      <button className={'row net-row' + (s.ok ? '' : ' dead')} type="button" aria-expanded={open} onClick={onToggle}>
+        <span className="rf net-rf" title={t.netBadgeTitle}>{t.netBadge}</span>
+        <span className="rn">
+          <b><Flag flag={s.flag} title={country} />{s.name}</b>
+          <em>{line}</em>
+        </span>
+        <span className="sval">{streamLabel(s)}</span>
+      </button>
+      {open && (
+        <div className="net-more">
+          {s.homepage && <p><a className="link" href={s.homepage} target="_blank" rel="noreferrer">{t.netHomepage}: {s.homepage.replace(/^https?:\/\//, '').replace(/\/$/, '')}</a></p>}
+          {s.tags.length > 3 && <p>{s.tags.join(', ')}</p>}
+          <p>{s.ok ? t.netCheckOk : t.netCheckFailed} · {t.netVotes(s.votes)}</p>
+          <p>{t.netListenSoon}</p>
+        </div>
+      )}
+    </li>
+  );
+}
+
 export function StationList(p: Props) {
   const t = useT();
   const names = useNames();
@@ -171,24 +206,31 @@ export function StationList(p: Props) {
   const set = (patch: Partial<Filters>) => p.onFilters({ ...f, ...patch });
   const count = (m: Record<string, number> | undefined, k: string) => m?.[k] ?? 0;
 
+  const net = p.net.active;
   const bands: DropOpt[] = [
     ...(p.meta?.bands ?? []).map((b) => ({ value: b.id, label: names.band(b.id), hint: t.bandRange(b.lo_khz, b.hi_khz), n: count(p.facets?.bands, b.id) })),
     { value: 'oob', label: names.band('oob'), n: count(p.facets?.bands, 'oob') },
+    ...(p.net.enabled ? [{ value: NET_BAND, label: t.netBand, hint: t.netBandHint }] : []),
   ];
   const langs = ranked((p.meta?.langs ?? []).map((l) => ({ value: l.code, label: names.lang(l.code), n: count(p.facets?.langs, l.code) })));
   const regions: DropOpt[] = REGIONS.map((r) => ({ value: r, label: names.region(r), n: count(p.facets?.regions, r) }));
-  const countries = ranked((p.meta?.countries ?? []).map((c) => ({ value: c.itu, label: names.country(c.itu), n: count(p.facets?.countries, c.itu) })));
+  const netCountries = useMemo(() => netCountryOpts(p.net.countries, t.locale), [p.net.countries, t.locale]);
+  const netCountry = useMemo(() => new Map(netCountries.map((c) => [c.value, c.label])), [netCountries]);
+  const countries = net ? netCountries
+    : ranked((p.meta?.countries ?? []).map((c) => ({ value: c.itu, label: names.country(c.itu), n: count(p.facets?.countries, c.itu) })));
+  const [openNet, setOpenNet] = useState<string | null>(null);
   const sources: DropOpt[] = (p.meta?.sources ?? []).map((s) => ({ value: s.id, label: s.kind === 'user' ? t.sourceMine : s.name, n: count(p.facets?.sources, s.id) }));
   const mineSrc = useMemo(() => userSources(p.meta), [p.meta]);
   const [showFilters, setShowFilters] = useState(false);
-  const picked = f.bands.length + f.langs.length + f.regions.length + f.countries.length + f.sources.length;
-  const filtered = picked > 0 || f.site !== null || f.scan !== null || f.q !== '';
-  const heardList = f.lens === 'heard' && f.scan === null;
+  const picked = net ? 1 + f.countries.length : f.bands.length + f.langs.length + f.regions.length + f.countries.length + f.sources.length;
+  const filtered = net || picked > 0 || f.site !== null || f.scan !== null || f.q !== '';
+  const heardList = !net && f.lens === 'heard' && f.scan === null;
   const sortLabel = { freq: t.sortFreq, strongest: t.sortStrongest, recent: t.sortRecent };
   const sortId = useId();
   const lensLabel = { all: t.lensAll, heard: t.lensHeard, favorites: t.lensFav, listened: t.lensListened };
   const lensTitle = { all: t.lensAllTitle, heard: t.lensHeardTitle, favorites: t.lensFavTitle, listened: t.lensListenedTitle };
-  const empty = filtered ? t.noResults
+  const empty = net && p.net.search.failed ? t.netUnreachable
+    : filtered ? t.noResults
     : f.lens === 'heard' ? t.heardEmpty
     : f.lens === 'favorites' ? t.favEmpty
     : f.lens === 'listened' ? t.listenedEmpty
@@ -196,10 +238,10 @@ export function StationList(p: Props) {
 
   const box = useRef<HTMLDivElement>(null), end = useRef<HTMLDivElement>(null);
   const more = useRef(p.onMore);
-  more.current = p.onMore;
+  more.current = net ? p.net.search.loadMore : p.onMore;
   const asked = useRef(-1);
-  const loaded = p.rows.length + p.heard.length;
-  const hasMore = loaded < p.total;
+  const loaded = net ? p.net.search.items.length : p.rows.length + p.heard.length;
+  const hasMore = net ? p.net.search.more : loaded < p.total;
   // next page when the end of the list comes into view (once per length)
   useEffect(() => {
     const b = box.current, e = end.current;
@@ -233,6 +275,7 @@ export function StationList(p: Props) {
   const onSearchKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.nativeEvent.isComposing) return;
     if (e.key === 'ArrowDown') rowButtons()[0]?.focus();
+    else if (e.key === 'Enter' && net) rowButtons()[0]?.focus();
     else if (e.key === 'Enter') {
       const hz = e.shiftKey ? queryHz(f.q) : null;
       if (!p.on) return;
@@ -269,7 +312,7 @@ export function StationList(p: Props) {
     <>
       <div className="tabs lenses" role="tablist" aria-label={t.lenses}>
         {LENSES.map((l) => (
-          <button key={l} type="button" role="tab" aria-selected={f.lens === l} title={lensTitle[l]} onClick={() => set({ lens: l })}>
+          <button key={l} type="button" role="tab" aria-selected={net ? l === 'all' : f.lens === l} title={lensTitle[l]} onClick={() => p.onFilters(lensFilters(f, l))}>
             {l === 'favorites' && <span aria-hidden="true">★</span>}{lensLabel[l]}
           </button>
         ))}
@@ -298,19 +341,20 @@ export function StationList(p: Props) {
       </div>
       <div className={'filters' + (showFilters ? ' open' : '')} role="group" aria-label={t.filters}>
         <Filter label={t.band} all={t.allBands} value={f.bands[0] ?? ''} opts={bands} onChange={(v) => set({ bands: v ? [v] : [] })} />
-        <Filter label={t.language} all={t.allLanguages} value={f.langs[0] ?? ''} opts={langs} onChange={(v) => set({ langs: v ? [v] : [] })} />
-        <Filter label={t.region} all={t.allRegions} value={f.regions[0] ?? ''} opts={regions} onChange={(v) => set({ regions: v ? [v as Region] : [] })} />
+        {/* on NET only the text and the country apply; the others stay set for the radio bands */}
+        {!net && <Filter label={t.language} all={t.allLanguages} value={f.langs[0] ?? ''} opts={langs} onChange={(v) => set({ langs: v ? [v] : [] })} />}
+        {!net && <Filter label={t.region} all={t.allRegions} value={f.regions[0] ?? ''} opts={regions} onChange={(v) => set({ regions: v ? [v as Region] : [] })} />}
         <Filter label={t.country} all={t.allCountries} value={f.countries[0] ?? ''} opts={countries} onChange={(v) => set({ countries: v ? [v] : [] })} />
-        <Filter label={t.source} all={t.allSources} value={f.sources[0] ?? ''} opts={sources} onChange={(v) => set({ sources: v ? [v] : [] })} />
+        {!net && <Filter label={t.source} all={t.allSources} value={f.sources[0] ?? ''} opts={sources} onChange={(v) => set({ sources: v ? [v] : [] })} />}
       </div>
       {filtered && (
         <div className="active-filters">
-          {f.scan !== null && (
+          {!net && f.scan !== null && (
             <button className="chip scan-filter" type="button" title={t.clearFilter} onClick={() => set({ scan: null })}>
               {t.scanFilter(p.scanName ?? '')} <span aria-hidden="true">✕</span>
             </button>
           )}
-          {f.site !== null && (
+          {!net && f.site !== null && (
             <button className="chip" type="button" title={t.clearFilter} onClick={() => set({ site: null })}>
               {t.siteFilter(p.siteName ?? '')} <span aria-hidden="true">✕</span>
             </button>
@@ -319,7 +363,13 @@ export function StationList(p: Props) {
         </div>
       )}
       <div className="rows" ref={box} onKeyDown={onRowsKey}>
-        {heardList ? (
+        {net ? (
+          <ul className="list">
+            {p.net.search.items.map((s) => (
+              <NetItem key={s.uuid} s={s} country={(s.itu && netCountry.get(s.itu)) || (s.itu ? names.country(s.itu) : '')} open={openNet === s.uuid} onToggle={() => setOpenNet((o) => (o === s.uuid ? null : s.uuid))} />
+            ))}
+          </ul>
+        ) : heardList ? (
           <ul className="list">
             {p.heard.map((h) => h.kind === 'station'
               ? <StationItem key={`s${h.row.id}`} r={h.row} p={p} log={h.log} mine={mineSrc.has(h.row.source)} />
@@ -341,11 +391,15 @@ export function StationList(p: Props) {
             </ul>
           </>
         )}
-        {!p.loading && p.total === 0 && p.off.length === 0 && <p className="empty-d">{empty}</p>}
+        {net
+          ? !p.net.search.loading && p.net.search.items.length === 0 && <p className="empty-d">{empty}</p>
+          : !p.loading && p.total === 0 && p.off.length === 0 && <p className="empty-d">{empty}</p>}
         <div ref={end} />
-        {hasMore && (
-          <button className="btn more" type="button" onClick={p.onMore}>{t.showMore(Math.min(100, p.total - loaded))}</button>
+        {hasMore && (net
+          ? <button className="btn more" type="button" disabled={p.net.search.loading} onClick={p.net.search.loadMore}>{t.netMore}</button>
+          : <button className="btn more" type="button" onClick={p.onMore}>{t.showMore(Math.min(100, p.total - loaded))}</button>
         )}
+        {net && <p className="note net-foot">{t.netFoot}</p>}
       </div>
     </>
   );
