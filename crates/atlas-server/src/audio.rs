@@ -13,7 +13,7 @@
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -428,7 +428,9 @@ fn run_capture(hub: Weak<AudioHub>, generation: u64, choice: AudioChoice, stop: 
     };
     let end = |why: String, failure| with_hub(&|h| h.ended(generation, why.clone(), failure));
     let (tx, rx) = sync_channel::<Event>(64);
-    let (_stream, name, fmt) = match open(&choice, tx) {
+    // the sample buffers go back to the callback once read, so it needn't allocate
+    let (back, spare) = sync_channel::<Vec<f32>>(64);
+    let (_stream, name, fmt) = match open(&choice, tx, spare) {
         Ok(opened) => opened,
         Err((why, failure)) => return end(why, failure),
     };
@@ -476,6 +478,7 @@ fn run_capture(hub: Weak<AudioHub>, generation: u64, choice: AudioChoice, stop: 
                     let block = Bytes::from(std::mem::replace(&mut pcm, Vec::with_capacity(chunk * 2)));
                     with_hub(&|h| h.fan_out(generation, block.clone()));
                 }
+                let _ = back.try_send(samples);
             }
             Ok(Event::Error(e)) => match e.kind() {
                 // the stream goes on
@@ -500,6 +503,7 @@ fn run_capture(hub: Weak<AudioHub>, generation: u64, choice: AudioChoice, stop: 
 fn open(
     choice: &AudioChoice,
     tx: SyncSender<Event>,
+    spare: Receiver<Vec<f32>>,
 ) -> Result<(cpal::Stream, String, CaptureFormat), (String, CaptureFailure)> {
     let fail = |what: &str, e: cpal::Error| (format!("{}: {what}: {e}", choice.device), failure_of(&e));
     let host = cpal::default_host();
@@ -530,10 +534,10 @@ fn open(
     let config =
         cpal::StreamConfig { channels: fmt.channels, sample_rate: fmt.rate, buffer_size: cpal::BufferSize::Default };
     let stream = match fmt.format {
-        SampleKind::F32 => build::<f32>(dev, config, tx),
-        SampleKind::I16 => build::<i16>(dev, config, tx),
-        SampleKind::I32 => build::<i32>(dev, config, tx),
-        SampleKind::U16 => build::<u16>(dev, config, tx),
+        SampleKind::F32 => build::<f32>(dev, config, tx, spare),
+        SampleKind::I16 => build::<i16>(dev, config, tx, spare),
+        SampleKind::I32 => build::<i32>(dev, config, tx, spare),
+        SampleKind::U16 => build::<u16>(dev, config, tx, spare),
         SampleKind::Other => unreachable!("pick_capture_format never picks it"),
     }
     .map_err(|e| fail("opening it", e))?;
@@ -543,16 +547,29 @@ fn open(
 
 /// An input stream that sends its samples, as f32, and its errors to `tx`. A full channel
 /// (the capture thread is behind) drops the samples rather than blocking the audio thread.
-fn build<T>(dev: &cpal::Device, config: cpal::StreamConfig, tx: SyncSender<Event>) -> Result<cpal::Stream, cpal::Error>
+/// The callback runs on the OS's real-time audio thread: it fills buffers the capture thread
+/// hands back (`spare`), or the one it kept from a drop, and allocates only until they go round.
+fn build<T>(
+    dev: &cpal::Device,
+    config: cpal::StreamConfig,
+    tx: SyncSender<Event>,
+    spare: Receiver<Vec<f32>>,
+) -> Result<cpal::Stream, cpal::Error>
 where
     T: SizedSample + Send + 'static,
     f32: FromSample<T>,
 {
     let errors = tx.clone();
+    let mut kept: Option<Vec<f32>> = None;
     dev.build_input_stream::<T, _, _>(
         config,
         move |data: &[T], _: &cpal::InputCallbackInfo| {
-            let _ = tx.try_send(Event::Data(data.iter().map(|&s| s.to_sample::<f32>()).collect()));
+            let mut buf = kept.take().or_else(|| spare.try_recv().ok()).unwrap_or_default();
+            buf.clear();
+            buf.extend(data.iter().map(|&s| s.to_sample::<f32>()));
+            if let Err(TrySendError::Full(Event::Data(buf))) = tx.try_send(Event::Data(buf)) {
+                kept = Some(buf);
+            }
         },
         move |e| {
             let _ = errors.try_send(Event::Error(e));

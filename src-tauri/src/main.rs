@@ -64,7 +64,7 @@ async fn audio_open(
     let batch = rate as usize * 2 * AUDIO_BATCH_MS / 1000;
     let task = tauri::async_runtime::spawn(async move {
         while let Some(block) = sub.next_batch(batch).await {
-            if on_block.send(InvokeResponseBody::Raw(block.to_vec())).is_err() {
+            if on_block.send(InvokeResponseBody::Raw(Vec::from(block))).is_err() {
                 return;
             }
         }
