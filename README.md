@@ -225,8 +225,11 @@ conventional commit messages. Every release ships with checksums, SBOMs and buil
 - Station schedules: [EiBi](http://www.eibispace.de/) by Eike Bierwirth, free to use and
   redistribute; mirrored weekly from [radiomap](https://github.com/juantoledo/radiomap).
 - Flags: [flag-icons](https://github.com/lipis/flag-icons) (MIT).
+- Fonts: Big Shoulders Display, IBM Plex Sans and Mono, and Goldman (SIL Open Font License), via
+  [Fontsource](https://fontsource.org/).
 
-The globe rasters in `ui/src/assets/globe/` are built by `assets/make_globe_rasters.py`.
+The globe rasters in `ui/src/assets/globe/` are built by `assets/make_globe_rasters.py` (relief and
+lights), then `npm --prefix ui run globe-base` (the base layer, `base.webp`).
 
 ## Status
 Early, and in active use. As of 0.6: the EiBi catalog with search and filters, remote access from a

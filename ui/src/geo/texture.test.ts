@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { textureProjection } from './texture';
+import { textureProjection } from './baseLayer';
+import { textureWidthFor } from './texture';
 
 describe('globe texture projection', () => {
   // three-globe maps lon -180..180 to u 0..1 and lat 90..-90 to v 0..1
@@ -17,5 +18,14 @@ describe('globe texture projection', () => {
 
   it('is linear in longitude and latitude', () => {
     near(p([-70.67, -33.45]), [((-70.67 + 180) / 360) * 4096, ((90 + 33.45) / 180) * 2048]);
+  });
+});
+
+describe('texture width', () => {
+  it('is halved on a phone, either way up, and full elsewhere', () => {
+    expect(textureWidthFor(390)).toBe(2048);
+    expect(textureWidthFor(599)).toBe(2048);
+    expect(textureWidthFor(768)).toBe(4096);
+    expect(textureWidthFor(1080)).toBe(4096);
   });
 });

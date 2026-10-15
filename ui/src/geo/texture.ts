@@ -1,23 +1,26 @@
-// Globe texture drawn at runtime: the "receiver at night" look, in detail.
+// The globe texture: the "receiver at night" look, in detail.
 //
-// Two static layers, built once and uploaded once:
-//   base:   ocean gradient, graticule, coastal glow, land, shaded relief, country borders,
-//           coastlines (Natural Earth 50m via world-atlas);
-//   lights: city lights (NASA Black Marble) tinted amber.
+// Two static layers, loaded once and uploaded once:
+//   base:   ocean, graticule, coastal glow, land, shaded relief, borders and coastlines, drawn
+//           ahead of time from Natural Earth 50m (baseLayer.ts, ui/scripts/make_globe_base.ts);
+//   lights: city lights (NASA Black Marble) tinted amber, here.
 // The night shading, the lights it reveals and the grey line are drawn by the globe's shader
 // from the sun's direction (night.ts), so the terminator moves continuously at no cost; the flat
-// map paints them on a copy (flatTexture.ts). Both views share one build (`shared`).
+// map paints them on a copy (flatTexture.ts). Both views share one load (`shared`).
 
-import { geoEquirectangular, geoGraticule10, geoPath, type GeoProjection } from 'd3-geo';
-import { feature, mesh } from 'topojson-client';
-import type { GeometryCollection, Topology } from 'topojson-specification';
+import baseUrl from '../assets/globe/base.webp';
 import lightsUrl from '../assets/globe/lights.jpg';
-import reliefUrl from '../assets/globe/relief.jpg';
 
-/** Equirectangular projection onto a w×h texture, matching three-globe's UV mapping. */
-export function textureProjection(w: number, h: number): GeoProjection {
-  return geoEquirectangular().scale(w / (2 * Math.PI)).translate([w / 2, h / 2]).precision(0.1);
+/** The textures' width for a screen whose shorter side is `screenMin` CSS px: 4096, or 2048 on
+ *  a phone (either way up; PHONE's breakpoint), where the globe is a few hundred px across and the
+ *  full size would hold ~85 MB of GPU memory. */
+export function textureWidthFor(screenMin: number): number {
+  return screenMin < 600 ? 2048 : 4096;
 }
+
+/** `textureWidthFor` this device: one width for both views, so they share one load. */
+export const textureWidth = (): number =>
+  typeof screen === 'undefined' ? 4096 : textureWidthFor(Math.min(screen.width, screen.height));
 
 /** The warm tint of the city lights. */
 const LIGHT_TINT = 'rgb(255,196,120)';
@@ -38,54 +41,14 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-type World = Topology<{ countries: GeometryCollection; land: GeometryCollection }>;
-
-function buildBase(w: number, h: number, world: World, relief: HTMLImageElement): HTMLCanvasElement {
+/** The drawn base layer at w×h: the image itself at its own size (no copy to hold), else
+ *  scaled onto a canvas. */
+function scaled(img: HTMLImageElement, w: number, h: number): HTMLImageElement | HTMLCanvasElement {
+  if (img.naturalWidth === w && img.naturalHeight === h) return img;
   const c = canvas(w, h);
   const g = c.getContext('2d')!;
-  const k = w / 4096; // line widths are tuned for a 4096 px wide texture
-  const path = geoPath(textureProjection(w, h), g);
-  const land = feature(world, world.objects.land);
-  const borders = mesh(world, world.objects.countries, (a, b) => a !== b);
-
-  // ocean: a little lighter toward the equator
-  const og = g.createLinearGradient(0, 0, 0, h);
-  og.addColorStop(0, '#08131f'); og.addColorStop(0.5, '#0b1d31'); og.addColorStop(1, '#08131f');
-  g.fillStyle = og; g.fillRect(0, 0, w, h);
-
-  g.beginPath(); path(geoGraticule10());
-  g.lineWidth = 0.8 * k; g.strokeStyle = 'rgba(130,180,230,0.07)'; g.stroke();
-
-  // coastal glow: a wide blurred halo around the land, like a lit shelf
-  g.save();
-  g.beginPath(); path(land);
-  if (typeof g.filter === 'string') {
-    g.filter = `blur(${Math.round(6 * k)}px)`;
-    g.lineWidth = 14 * k; g.strokeStyle = 'rgba(90,160,230,0.16)'; g.stroke();
-  } else {
-    // no canvas filters (older WebKit): stack soft strokes instead
-    for (const [lw, a] of [[22, 0.03], [15, 0.04], [9, 0.05], [5, 0.06]]) {
-      g.lineWidth = lw * k; g.strokeStyle = `rgba(90,160,230,${a})`; g.stroke();
-    }
-  }
-  g.restore();
-
-  g.beginPath(); path(land);
-  g.fillStyle = '#183350'; g.fill();
-
-  // shaded relief, clipped to land. Under 'overlay' a dark base is scaled by 2×relief,
-  // so 128 grey (flat) leaves it as is, lit slopes brighten and shadows darken.
-  g.save();
-  g.beginPath(); path(land); g.clip();
-  g.globalCompositeOperation = 'overlay';
-  g.drawImage(relief, 0, 0, w, h);
-  g.restore();
-
-  g.beginPath(); path(borders);
-  g.lineWidth = 1.1 * k; g.lineJoin = 'round'; g.strokeStyle = 'rgba(150,200,250,0.22)'; g.stroke();
-
-  g.beginPath(); path(land);
-  g.lineWidth = 2 * k; g.strokeStyle = 'rgba(150,205,255,0.62)'; g.stroke();
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(img, 0, 0, w, h);
   return c;
 }
 
@@ -103,7 +66,7 @@ const built = new Map<number, Promise<GlobeTexture>>();
 
 /** The texture's static layers, as canvases for `CanvasTexture`s. */
 export class GlobeTexture {
-  private constructor(readonly base: HTMLCanvasElement, readonly lights: HTMLCanvasElement) {}
+  private constructor(readonly base: HTMLImageElement | HTMLCanvasElement, readonly lights: HTMLCanvasElement) {}
 
   /** `create`, once per width: switching between the globe and the flat map builds nothing again. */
   static shared(width: number): Promise<GlobeTexture> {
@@ -116,15 +79,11 @@ export class GlobeTexture {
     return p;
   }
 
-  /** Load the map data and rasters (lazily, they are ~2 MB) and build the layers. */
+  /** Load the two rasters (lazily, ~0.8 MB) and make the layers. */
   static async create(width: number): Promise<GlobeTexture> {
-    const [world, relief, lights] = await Promise.all([
-      import('world-atlas/countries-50m.json').then((m) => m.default as unknown as World),
-      loadImage(reliefUrl),
-      loadImage(lightsUrl),
-    ]);
+    const [base, lights] = await Promise.all([loadImage(baseUrl), loadImage(lightsUrl)]);
     const w = width, h = width / 2;
-    return new GlobeTexture(buildBase(w, h, world, relief), buildLights(w, h, lights));
+    return new GlobeTexture(scaled(base, w, h), buildLights(w, h, lights));
   }
 }
 

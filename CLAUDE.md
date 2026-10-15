@@ -42,8 +42,10 @@ See README.md for layout and commands.
   Windows console). The Windows and macOS sidecars come from `assets/sidecars/build.py` (pinned
   versions; never commit the binaries).
 - UI strings go in `ui/src/i18n/en.ts` and `es.ts` (same keys; a test enforces it).
-- The globe texture is drawn at runtime (`ui/src/geo/texture.ts`). Its two rasters are generated
-  by `assets/make_globe_rasters.py`; regenerate them rather than editing the JPEGs.
+- The globe texture's base layer is drawn ahead of time: `ui/src/geo/baseLayer.ts`, run by
+  `npm --prefix ui run globe-base` into `ui/src/assets/globe/base.webp` (rerun it after changing
+  that file or `relief.jpg`). `relief.jpg` and `lights.jpg` come from `assets/make_globe_rasters.py`;
+  regenerate them all rather than editing the images.
 
 ## Commands
 - `cargo test` (core, rig and server; the real-rigctld test skips without `rigctld`)

@@ -8,21 +8,24 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "globe-base": "node --experimental-strip-types scripts/make_globe_base.ts"
   },
   "dependencies": {
+    "@fontsource/big-shoulders-display": "^5.3.0",
+    "@fontsource/goldman": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
     "@tauri-apps/api": "^2.12.3",
     "@tauri-apps/plugin-opener": "^2.7.1",
-    "d3-geo": "^3.1.1",
     "flag-icons": "^7.5.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-globe.gl": "^2.38.0",
-    "three": "^0.186.1",
-    "topojson-client": "^3.1.0",
-    "world-atlas": "^2.0.2"
+    "three": "^0.186.1"
   },
   "devDependencies": {
+    "@napi-rs/canvas": "1.0.9",
     "@types/d3-geo": "^3.1.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -30,8 +33,11 @@
     "@types/topojson-client": "^3.1.5",
     "@types/topojson-specification": "^1.0.5",
     "@vitejs/plugin-react": "^6.1.2",
+    "d3-geo": "^3.1.1",
+    "topojson-client": "^3.1.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
-    "vitest": "^5.0.4"
+    "vitest": "^5.0.4",
+    "world-atlas": "^2.0.2"
   }
 }

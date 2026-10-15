@@ -10,10 +10,10 @@
 
 import { Component, memo, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import GlobeGL, { type GlobeMethods } from 'react-globe.gl';
-import { BufferAttribute, BufferGeometry, CanvasTexture, Line, LineBasicMaterial, MeshPhongMaterial, SRGBColorSpace } from 'three';
+import { BufferAttribute, BufferGeometry, CanvasTexture, Line, LineBasicMaterial, MeshPhongMaterial, SRGBColorSpace, Texture } from 'three';
 import { angleDeg, fitAltitude, greatCircle, sunVec, type LatLon } from '../geo/geo';
 import { applyNight, type Night } from '../geo/night';
-import { GlobeTexture, makeStars } from '../geo/texture';
+import { GlobeTexture, makeStars, textureWidth } from '../geo/texture';
 import { FlatView } from './FlatMap';
 import { Controls } from './stage/Controls';
 import { MAX_ALT, MIN_ALT, REDUCE, ringColor, ringNow, siteAltitude, siteColor, siteRadius, siteTip, TOWER_MS, ARC_IN_MS, type Pin, type Ring } from './stage/fx';
@@ -24,8 +24,6 @@ import type { SiteDot } from '../types/generated/SiteDot';
 
 /** How often the sun moves (a uniform: this costs nothing). */
 const SUN_MS = 1000;
-/** Texture width; capped by the GPU's limit. */
-const TEXTURE_WIDTH = 4096;
 
 /** A 1×1 ocean-coloured image: three-globe only reports "ready" after loading an image. */
 function placeholder(): string {
@@ -66,7 +64,7 @@ function GlobeView(props: ViewProps) {
   const placeholderUrl = useMemo(placeholder, []);
   // our own material (three-globe's default), so the drawn texture can be swapped in
   const material = useMemo(() => new MeshPhongMaterial({ color: 0x000000 }), []);
-  const texture = useRef<{ tex: CanvasTexture; night: Night } | null>(null);
+  const texture = useRef<{ tex: Texture; night: Night } | null>(null);
   /** The route's line, drawn on as `routeProgress` goes. */
   const routing = useRef<Line | null>(null);
   const handlers = useRef({ onQth: props.onQth, onSite: props.onSite, siteLabel: props.siteLabel });
@@ -95,9 +93,11 @@ function GlobeView(props: ViewProps) {
   /** Swap the placeholder for the drawn texture, shaded for day and night by the sun. */
   const loadTexture = useCallback(async (g: GlobeMethods) => {
     const caps = g.renderer().capabilities;
-    const gt = await GlobeTexture.shared(Math.min(TEXTURE_WIDTH, caps.maxTextureSize));
+    const gt = await GlobeTexture.shared(Math.min(textureWidth(), caps.maxTextureSize));
     if (texture.current || !globe.current) return;
-    const tex = new CanvasTexture(gt.base);
+    // the base layer is the loaded image itself (or a canvas, scaled down for a small GPU)
+    const tex = new Texture(gt.base);
+    tex.needsUpdate = true;
     tex.colorSpace = SRGBColorSpace;
     tex.anisotropy = caps.getMaxAnisotropy();
     const lights = new CanvasTexture(gt.lights);
