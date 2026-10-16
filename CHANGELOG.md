@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.2](https://github.com/juantoledo/shortwave-atlas/compare/v0.12.1...v0.12.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* **ui:** stop the flat map crashing the GPU process ([8d1a019](https://github.com/juantoledo/shortwave-atlas/commit/8d1a0199a9d6bb762fff728a2eb6a5a1ccbcd1ed))
+* **ui:** stop the flat map crashing the GPU process ([54c5ed4](https://github.com/juantoledo/shortwave-atlas/commit/54c5ed449f42851f6b42a87296fee1de12c675e2))
+
 ## [0.12.1](https://github.com/juantoledo/shortwave-atlas/compare/v0.12.0...v0.12.1) (2026-10-15)
 
 
