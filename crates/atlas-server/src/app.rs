@@ -679,6 +679,20 @@ pub(crate) mod tests {
         FakeUpdater::new(Packaging::Server, None)
     }
 
+    /// Start again on `dir` after dropping an `Atlas`: a background task may hold the last `Arc`
+    /// (and so `swatlas.lock`) a moment longer, so wait for it rather than fail.
+    async fn restart(dir: &Path) -> Arc<Atlas> {
+        for _ in 0..100 {
+            match Atlas::start(AppConfig::default(), None, Some(dir.to_path_buf()), no_updates()) {
+                Err(e) if e.contains("already running") => {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await
+                }
+                r => return r.unwrap(),
+            }
+        }
+        panic!("{} stayed locked", dir.display())
+    }
+
     #[tokio::test]
     async fn lookup_and_qth_round_trip() {
         let dir = std::env::temp_dir().join(format!("swatlas-test-{}", std::process::id()));
@@ -711,7 +725,7 @@ pub(crate) mod tests {
         };
         assert!(e.contains("already running"), "{e}");
         drop(atlas);
-        let again = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
+        let again = restart(&dir).await;
         assert_eq!(again.qth(), madrid);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -824,7 +838,7 @@ pub(crate) mod tests {
 
         // a new instance reads them back; deleting removes the file
         drop(atlas);
-        let again = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
+        let again = restart(&dir).await;
         assert_eq!(again.call(Call::Scans).await.unwrap().as_array().unwrap().len(), 3);
         again.call(Call::DeleteScan { id: id.clone() }).await.unwrap();
         assert!(!scans.join(format!("{id}.json")).exists());
@@ -878,7 +892,7 @@ pub(crate) mod tests {
 
         // kept across a restart
         drop(atlas);
-        let again = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
+        let again = restart(&dir).await;
         let list = again.call(Call::Favorites).await.unwrap();
         let labels: Vec<&str> =
             list.as_array().unwrap().iter().map(|v| v["favorite"]["label"].as_str().unwrap()).collect();
@@ -1031,7 +1045,7 @@ pub(crate) mod tests {
         atlas.shutdown().await;
         assert!(dir.join("listening.jsonl").is_file());
         drop(atlas);
-        let again = Atlas::start(AppConfig::default(), None, Some(dir.clone()), no_updates()).unwrap();
+        let again = restart(&dir).await;
         let s = again.call(Call::Stats(q)).await.unwrap();
         assert_eq!((s["clear"]["all"].as_u64(), s["recent"].as_array().map(Vec::len)), (Some(1), Some(1)));
         assert_eq!(again.call(Call::ClearListening { before: Some(0) }).await.unwrap(), 0);
