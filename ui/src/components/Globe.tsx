@@ -67,7 +67,7 @@ function GlobeView(props: ViewProps) {
   const placeholderUrl = useMemo(placeholder, []);
   // our own material (three-globe's default), so the drawn texture can be swapped in
   const material = useMemo(() => new MeshPhongMaterial({ color: 0x000000 }), []);
-  const texture = useRef<{ tex: Texture; night: Night } | null>(null);
+  const texture = useRef<{ tex: Texture; night: Night; off: () => void } | null>(null);
   /** The route's line, drawn on as `routeProgress` goes. */
   const routing = useRef<Line | null>(null);
   const handlers = useRef({ onQth: props.onQth, onSite: props.onSite, siteLabel: props.siteLabel });
@@ -89,6 +89,7 @@ function GlobeView(props: ViewProps) {
     if (texture.current) {
       texture.current.tex.dispose();
       texture.current.night.dispose();
+      texture.current.off();
       texture.current = null;
     }
   }, []);
@@ -109,7 +110,12 @@ function GlobeView(props: ViewProps) {
     material.map = tex;
     const night = applyNight(material, lights);
     night.setSun(sunVec(new Date()));
-    texture.current = { tex, night };
+    // a GPU reset blanks the layers' canvases: once painted again, they go up again
+    const off = gt.onRestored(() => {
+      tex.needsUpdate = true;
+      lights.needsUpdate = true;
+    });
+    texture.current = { tex, night, off };
   }, [material]);
 
   const onReady = useCallback(() => {

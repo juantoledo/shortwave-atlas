@@ -222,7 +222,15 @@ export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boole
     const key = `${pw}x${ph}@${dpr} ${mx} ${my} ${worldW} ${texGen.current}`;
     let b = base.current;
     if (!b || b.key !== key) {
-      const bc = b?.c ?? document.createElement('canvas');
+      let bc = b?.c;
+      if (!bc) {
+        bc = document.createElement('canvas');
+        // a GPU reset hands it back blank: scale the map onto it again
+        bc.addEventListener('contextrestored', () => {
+          if (base.current) base.current.key = '';
+          dirty.current = true;
+        });
+      }
       if (bc.width !== pw || bc.height !== ph) {
         bc.width = pw;
         bc.height = ph;
@@ -231,9 +239,10 @@ export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boole
       bg.setTransform(dpr, 0, 0, dpr, 0, 0);
       bg.clearRect(0, 0, w, h);
       bg.imageSmoothingEnabled = true;
-      bg.imageSmoothingQuality = 'high';
+      bg.imageSmoothingQuality = 'low'; // never more: see geo/flatTexture.ts
+      const map = tex.current?.image(worldW * dpr);
       for (const dx of copies(mx, mx + worldW, worldW, w)) {
-        if (tex.current) bg.drawImage(tex.current.canvas, mx + dx, my, worldW, worldH);
+        if (map) bg.drawImage(map, mx + dx, my, worldW, worldH);
         else { bg.fillStyle = OCEAN; bg.fillRect(mx + dx, my, worldW, worldH); }
       }
       base.current = b = { c: bc, key };
@@ -345,30 +354,35 @@ export function FlatView(props: ViewProps & { failedMsg: string; noGlobe?: boole
     dirty.current = true;
   }, [size, offset, setCam]);
 
-  // The map and its day and night, painted again as the sun moves.
-  useEffect(() => {
-    let live = true;
-    GlobeTexture.shared(TEXTURE_WIDTH).then((gt) => {
-      if (!live) return;
-      const ft = new FlatTexture(gt);
-      ft.update(sunVec(new Date()));
-      tex.current = ft;
-      texGen.current++;
-      dirty.current = true;
-    }).catch((e) => console.warn('flat map texture:', e));
-    return () => { live = false; };
+  // The map and its day and night, painted again as the sun moves, and after a GPU reset blanked
+  // its canvases.
+  const paint = useCallback(() => {
+    if (!tex.current) return;
+    tex.current.update(sunVec(new Date()));
+    texGen.current++;
+    dirty.current = true;
   }, []);
   useEffect(() => {
+    let live = true, off: (() => void) | undefined;
+    GlobeTexture.shared(TEXTURE_WIDTH).then((gt) => {
+      if (!live) return;
+      const ft = (tex.current = new FlatTexture(gt));
+      paint();
+      off = ft.onRestored(paint);
+    }).catch((e) => console.warn('flat map texture:', e));
+    return () => { live = false; off?.(); };
+  }, [paint]);
+  useEffect(() => {
     if (paused) return;
-    const paint = () => {
-      tex.current?.update(sunVec(new Date()));
-      texGen.current++;
-      dirty.current = true;
-    };
     paint();
     const id = setInterval(paint, SUN_MS);
     return () => clearInterval(id);
-  }, [paused]);
+  }, [paused, paint]);
+  useEffect(() => {
+    const c = canvas.current!, redraw = () => { dirty.current = true; };
+    c.addEventListener('contextrestored', redraw);
+    return () => c.removeEventListener('contextrestored', redraw);
+  }, []);
 
   // The pins' elements, in their layer while they show.
   useEffect(() => {

@@ -42,31 +42,49 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 /** The drawn base layer at w×h: the image itself at its own size (no copy to hold), else
- *  scaled onto a canvas. */
+ *  scaled onto a canvas (`paintBase`). */
 function scaled(img: HTMLImageElement, w: number, h: number): HTMLImageElement | HTMLCanvasElement {
-  if (img.naturalWidth === w && img.naturalHeight === h) return img;
-  const c = canvas(w, h);
+  return img.naturalWidth === w && img.naturalHeight === h ? img : canvas(w, h);
+}
+
+function paintBase(c: HTMLCanvasElement, img: HTMLImageElement) {
   const g = c.getContext('2d')!;
   g.imageSmoothingQuality = 'high';
-  g.drawImage(img, 0, 0, w, h);
-  return c;
+  g.drawImage(img, 0, 0, c.width, c.height);
 }
 
 /** City lights tinted amber, on transparent black (added with 'lighter'). */
-function buildLights(w: number, h: number, lights: HTMLImageElement): HTMLCanvasElement {
-  const c = canvas(w, h);
+function paintLights(c: HTMLCanvasElement, lights: HTMLImageElement) {
   const g = c.getContext('2d')!;
-  g.drawImage(lights, 0, 0, w, h);
+  g.globalCompositeOperation = 'copy';
+  g.drawImage(lights, 0, 0, c.width, c.height);
   g.globalCompositeOperation = 'multiply';
-  g.fillStyle = LIGHT_TINT; g.fillRect(0, 0, w, h);
-  return c;
+  g.fillStyle = LIGHT_TINT; g.fillRect(0, 0, c.width, c.height);
+  g.globalCompositeOperation = 'source-over';
 }
 
 const built = new Map<number, Promise<GlobeTexture>>();
 
 /** The texture's static layers, as canvases for `CanvasTexture`s. */
 export class GlobeTexture {
-  private constructor(readonly base: HTMLImageElement | HTMLCanvasElement, readonly lights: HTMLCanvasElement) {}
+  private readonly restored = new Set<() => void>();
+
+  private constructor(readonly base: HTMLImageElement | HTMLCanvasElement, readonly lights: HTMLCanvasElement, paint: () => void) {
+    paint();
+    // A GPU reset (its process crashing, a driver update, waking from sleep) empties every canvas
+    // the GPU holds, and the browser hands each one back blank: paint ours again, then say so.
+    const again = () => {
+      paint();
+      for (const f of this.restored) f();
+    };
+    for (const c of [base, lights]) if (c instanceof HTMLCanvasElement) c.addEventListener('contextrestored', again);
+  }
+
+  /** `f` runs each time the layers are painted again after a GPU reset; returns its removal. */
+  onRestored(f: () => void): () => void {
+    this.restored.add(f);
+    return () => this.restored.delete(f);
+  }
 
   /** `create`, once per width: switching between the globe and the flat map builds nothing again. */
   static shared(width: number): Promise<GlobeTexture> {
@@ -83,7 +101,11 @@ export class GlobeTexture {
   static async create(width: number): Promise<GlobeTexture> {
     const [base, lights] = await Promise.all([loadImage(baseUrl), loadImage(lightsUrl)]);
     const w = width, h = width / 2;
-    return new GlobeTexture(scaled(base, w, h), buildLights(w, h, lights));
+    const b = scaled(base, w, h), l = canvas(w, h);
+    return new GlobeTexture(b, l, () => {
+      if (b instanceof HTMLCanvasElement) paintBase(b, base);
+      paintLights(l, lights);
+    });
   }
 }
 

@@ -5,13 +5,18 @@
 // The night is worked out on a small grid and smoothed up (it changes slowly across the map):
 // one layer of shade and grey-line tint over the base, then the city lights, masked where it is
 // lit, added ('lighter').
+//
+// Shrinking a canvas this size smoothed 'medium' or 'high' (which builds its mipmaps on each draw)
+// crashes Chrome's GPU process (D3D11) within seconds when done every frame, and that blanks every
+// canvas on the page. So the map keeps its own mipmaps, halved with 'low' (bilinear at exactly
+// half: a 2×2 average), and each frame draws the one at hand with 'low' (`image`).
 
 import { RAD, type Vec3 } from './geo';
 import { nightPixel } from './shade';
 import type { GlobeTexture } from './texture';
 
-/** The night grid's width (half as tall), and the masked lights' width. */
-const NIGHT_W = 720, LIGHTS_W = 2048;
+/** The night grid's width (half as tall), the masked lights' width and the smallest mipmap's. */
+const NIGHT_W = 720, LIGHTS_W = 2048, MIP_W = 512;
 
 function canvas(w: number, h: number) {
   const c = document.createElement('canvas');
@@ -21,8 +26,9 @@ function canvas(w: number, h: number) {
 }
 
 export class FlatTexture {
-  /** The map as it looks now: equirectangular, -180..180 east, 90..-90 down. */
-  readonly canvas: HTMLCanvasElement;
+  /** The map as it looks now: equirectangular, -180..180 east, 90..-90 down; then each half the
+   *  one before, down to `MIP_W`. */
+  private readonly levels: HTMLCanvasElement[];
   private readonly shade = canvas(NIGHT_W, NIGHT_W / 2);
   private readonly mask = canvas(NIGHT_W, NIGHT_W / 2);
   private readonly lit: HTMLCanvasElement;
@@ -33,7 +39,8 @@ export class FlatTexture {
   private readonly maskData: ImageData;
 
   constructor(private readonly tex: GlobeTexture) {
-    this.canvas = canvas(tex.base.width, tex.base.height);
+    this.levels = [canvas(tex.base.width, tex.base.height)];
+    for (let c = this.levels[0]; c.width > MIP_W; ) this.levels.push((c = canvas(c.width / 2, c.height / 2)));
     const lw = Math.min(LIGHTS_W, tex.lights.width);
     this.lit = canvas(lw, lw / 2);
     const w = NIGHT_W, h = NIGHT_W / 2;
@@ -49,6 +56,15 @@ export class FlatTexture {
     }
   }
 
+  /** The map to draw `w` px wide, with 'low' smoothing: the smallest mipmap that is no narrower,
+   *  so it shrinks by less than half. */
+  image(w: number): HTMLCanvasElement {
+    const ls = this.levels;
+    let i = ls.length - 1;
+    while (i > 0 && ls[i].width < w) i--;
+    return ls[i];
+  }
+
   /** Paint the map for the sun along `sun` (a unit vector, `sunVec`). */
   update(sun: Vec3): void {
     const w = NIGHT_W, h = NIGHT_W / 2, n = w * h;
@@ -60,12 +76,13 @@ export class FlatTexture {
 
     const lg = this.lit.getContext('2d')!, lw = this.lit.width, lh = this.lit.height;
     lg.globalCompositeOperation = 'copy';
+    lg.imageSmoothingQuality = 'low'; // halved at most (see above)
     lg.drawImage(this.tex.lights, 0, 0, lw, lh);
     lg.globalCompositeOperation = 'destination-in';
     lg.imageSmoothingQuality = 'high';
     lg.drawImage(this.mask, 0, 0, lw, lh);
 
-    const g = this.canvas.getContext('2d')!, cw = this.canvas.width, ch = this.canvas.height;
+    const top = this.levels[0], g = top.getContext('2d')!, cw = top.width, ch = top.height;
     g.globalCompositeOperation = 'copy';
     g.drawImage(this.tex.base, 0, 0);
     g.globalCompositeOperation = 'source-over';
@@ -74,5 +91,24 @@ export class FlatTexture {
     g.globalCompositeOperation = 'lighter';
     g.drawImage(this.lit, 0, 0, cw, ch);
     g.globalCompositeOperation = 'source-over';
+
+    for (let i = 1; i < this.levels.length; i++) {
+      const c = this.levels[i], mg = c.getContext('2d')!;
+      mg.globalCompositeOperation = 'copy';
+      mg.imageSmoothingQuality = 'low';
+      mg.drawImage(this.levels[i - 1], 0, 0, c.width, c.height);
+    }
+  }
+
+  /** `f` runs when a GPU reset left the map's canvases blank, to `update` again; returns its
+   *  removal. */
+  onRestored(f: () => void): () => void {
+    const own = [...this.levels, this.shade, this.mask, this.lit];
+    for (const c of own) c.addEventListener('contextrestored', f);
+    const off = this.tex.onRestored(f);
+    return () => {
+      for (const c of own) c.removeEventListener('contextrestored', f);
+      off();
+    };
   }
 }
