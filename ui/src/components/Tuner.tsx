@@ -8,8 +8,10 @@
 // screens until expanded.
 // Tuned to an internet station (the NET band), the same faceplate becomes an internet receiver:
 // the station's name in the readout, its stream where the modes were, the NET favorites as
-// memory channels on the band dial (the arrows and the knob step through them), a buffer meter
-// for the S-meter, and a line for the rig waiting to come back.
+// memory channels on the band dial (the arrows and the knob step through them), the audio held
+// for the S-meter, the stream's buffer as a funnel in the whole dial's place (its sections pick
+// the size: NetFunnel), a chip while the stream connects or fills it, and a line for the rig
+// waiting to come back.
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNames } from '../catalog/names';
@@ -18,7 +20,8 @@ import { sLabel, useT } from '../i18n';
 import { altName, isMac } from '../keys/keymap';
 import type { Band } from '../types/generated/Band';
 import { Flag } from './Flag';
-import { bufferSegs } from './net';
+import type { NetPhase } from './net';
+import { NetFunnel } from './NetFunnel';
 import type { FreqHeat } from '../types/generated/FreqHeat';
 import type { Mode } from '../types/generated/Mode';
 import type { RxRange } from '../types/generated/RxRange';
@@ -141,6 +144,15 @@ export interface NetFace {
   stream: string;
   /** Audio held ahead; `null` while nobody listens. */
   bufferMs: number | null;
+  /** What the buffer fills to before it plays (the automatic one grows). */
+  bufferTargetMs: number;
+  /** Most it holds before the oldest goes. */
+  bufferMaxMs: number;
+  /** The listener's buffer size, or `null` for automatic. */
+  bufferSetting: number | null;
+  /** Connecting, buffering, stopped: the faceplate's chip. */
+  phase: NetPhase;
+  onBuffer: (ms: number | null) => void;
   /** The NET favorites, in channel order. */
   channels: { uuid: string; label: string }[];
   /** The station tuned. */
@@ -257,8 +269,12 @@ export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans,
   );
 
   if (net) {
-    const segs = bufferSegs(net.bufferMs ?? 0, METER_SEGS);
     const n = net.channels.length;
+    const ph = net.phase;
+    const phaseText = ph.kind === 'connecting' ? t.netConnectingShort
+      : ph.kind === 'buffering' ? t.netBuffering(ph.pct)
+      : ph.kind === 'failed' ? t.netStoppedShort
+      : null;
     return (
       <section className="rx net" aria-label={t.receiver}>
         <div className="rx-main">
@@ -271,6 +287,7 @@ export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans,
             <div className="net-chips" aria-label={t.netStream}>
               {net.stream && <span className="chip">{net.stream}</span>}
               <span className="chip"><Flag flag={net.flag} title={net.country} />{net.country}</span>
+              {phaseText && <span className={'chip net-state ' + ph.kind}>{phaseText}</span>}
             </div>
             <button
               className="icon-btn dock-more"
@@ -313,9 +330,6 @@ export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans,
             <div className="dial-side">
               <div className="sm" aria-label={t.netBufferMeter}>
                 <span className="lab">{t.netBuffer}</span>
-                <div className="segs">
-                  {Array.from({ length: METER_SEGS }, (_, i) => <i key={i} className={i < segs ? 'on' : ''} />)}
-                </div>
                 <span className="sval">{net.bufferMs === null ? '--' : `${(net.bufferMs / 1000).toFixed(1)} s`}</span>
               </div>
               {spans.length > 1 && (
@@ -329,8 +343,16 @@ export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans,
                 </div>
               )}
             </div>
-            <div className="dial net-wait">
-              <p>
+            <div className="dial net-funnel">
+              <NetFunnel
+                heldMs={net.bufferMs}
+                targetMs={net.bufferTargetMs}
+                maxMs={net.bufferMaxMs}
+                setting={net.bufferSetting}
+                flowing={ph.kind === 'playing'}
+                onBuffer={net.onBuffer}
+              />
+              <p className="net-wait">
                 {net.rig ? t.netRigWaiting(net.rig) : t.netRigIdle}
                 <button className="link" type="button" onClick={net.onBackToRig}>⟲ {t.netBackToRig}</button>
               </p>

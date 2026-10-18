@@ -40,7 +40,7 @@ import { useNetFavorites } from './hooks/useNetFavorites';
 import { NetDossier } from './components/NetDossier';
 import type { NetFace } from './components/Tuner';
 import type { NetPin } from './components/stage/useStage';
-import { audioCell, dimSites, favFilter, isNet, leaveNet, mixesNet, NET_BAND, NET_DOT_ID, NET_RATE, netCountryOpts, netSiteDots, stepChannel, streamLabel } from './components/net';
+import { audioCell, dimSites, favFilter, isNet, leaveNet, mixesNet, NET_BAND, NET_DOT_ID, NET_RATE, netCountryOpts, netPhase, netSiteDots, stepChannel, streamLabel } from './components/net';
 import { useNetNow } from './hooks/useNetNow';
 import { fmtKhz, fmtStamp, I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
@@ -156,7 +156,7 @@ export function App() {
   const netSearch = useNetSearch(api, filters, (netActive && filters.lens !== 'favorites') || netMixed);
   const netCountries = useNetCountries(api, netActive || netEnabled);
   const netOverview = useNetOverview(api, netActive);
-  const { netNow, setNetNow } = useNetNow(api, netEnabled);
+  const { netNow, setNetNow, reloadNetNow } = useNetNow(api, netEnabled);
   const netFavs = useNetFavorites(api, netEnabled, onError);
   const netFavUuids = useMemo(() => new Set(netFavs.list.map((f) => f.uuid)), [netFavs.list]);
   const netCountryName = useMemo(() => {
@@ -392,6 +392,8 @@ export function App() {
   const audioKeys = useRef<AudioKeys>(null);
   // the audio panel plays: the map's tuned point beats
   const [audioOn, setAudioOn] = useState(false);
+  // Listen pressed on an internet station: ask how its stream is doing now, not at the next poll
+  useEffect(() => { if (audioOn) reloadNetNow(); }, [audioOn, reloadNetNow]);
   // an internet station instead of the rig: tuned, as a radio station is; Listen (the audio
   // panel) plays it, and while listening another one switches at once
   const tuneNet = (uuid: string) => {
@@ -423,7 +425,12 @@ export function App() {
     flag: netNow.station.flag,
     country: netCountryName(netNow.station.itu),
     stream: streamLabel(netNow.station),
-    bufferMs: netNow.state.state === 'playing' || netNow.state.state === 'connecting' ? netNow.buffer_ms : null,
+    bufferMs: ['playing', 'connecting', 'buffering'].includes(netNow.state.state) ? netNow.buffer_ms : null,
+    bufferTargetMs: netNow.buffer_target_ms,
+    bufferMaxMs: netNow.buffer_max_ms,
+    bufferSetting: netNow.buffer_setting_ms,
+    phase: netPhase(netNow, audioOn),
+    onBuffer: (ms) => { api?.setNetBuffer(ms).then(reloadNetNow, onError); },
     channels: netFavs.list.map((f) => ({ uuid: f.uuid, label: f.label || f.name })),
     uuid: netNow.station.uuid,
     rig: on && freqHz !== null ? `${fmtKhz(freqHz)} kHz${rig.mode ? ` ${rig.mode}` : ''}` : '',

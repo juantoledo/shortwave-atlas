@@ -32,10 +32,24 @@ pub const DEFAULT_LIMIT: u32 = 50;
 pub const MAX_LIMIT: u32 = 200;
 /// Sample rate of the PCM a stream is decoded to (mono, 16-bit, like the rig's).
 pub const NET_RATE: u32 = 32_000;
-/// Stream audio held before it starts, and again after it ran dry: rides out network bursts.
-pub const NET_PREBUFFER_MS: u32 = 1500;
-/// Most stream audio held; past this the oldest goes (the source runs fast).
-pub const NET_BUFFER_MAX_MS: u32 = 5000;
+/// The stream buffers the listener can pick (audio held before it starts, and again after it ran
+/// dry), and the levels the automatic one climbs through each time the stream runs dry.
+pub const NET_BUFFER_STEPS_MS: [u32; 5] = [1_000, 2_000, 4_000, 8_000, 16_000];
+/// Where the automatic buffer starts, for every new stream.
+pub const NET_BUFFER_AUTO_START_MS: u32 = 2_000;
+/// Held past the buffer's size at most (at least the size again); past that the oldest goes (the
+/// source runs fast).
+pub const NET_BUFFER_HEADROOM_MS: u32 = 3_000;
+
+/// Most audio a buffer of `target_ms` holds; past this the oldest goes.
+pub fn net_buffer_max_ms(target_ms: u32) -> u32 {
+    target_ms + target_ms.max(NET_BUFFER_HEADROOM_MS)
+}
+
+/// A stream buffer the listener may pick: one of `NET_BUFFER_STEPS_MS`, or `None` (automatic).
+pub fn net_buffer_ok(ms: Option<u32>) -> bool {
+    ms.is_none_or(|ms| NET_BUFFER_STEPS_MS.contains(&ms))
+}
 
 /// Argument of `Call::NetSearch`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -198,8 +212,11 @@ pub struct NetStream {
 pub enum NetState {
     /// Tuned, and nobody is listening: nothing is fetched.
     Tuned,
+    /// Listened to: fetching the stream and filling the buffer before it plays.
     Connecting,
     Playing,
+    /// It played, then ran dry: filling the buffer again.
+    Buffering,
     Failed {
         message: String,
     },
@@ -213,6 +230,12 @@ pub struct NetNow {
     pub state: NetState,
     /// Stream audio held ahead (the jitter buffer), in milliseconds.
     pub buffer_ms: u32,
+    /// What the buffer fills to before it plays, in milliseconds (the automatic one grows).
+    pub buffer_target_ms: u32,
+    /// Most the buffer holds before the oldest goes, in milliseconds.
+    pub buffer_max_ms: u32,
+    /// The listener's buffer: one of `NET_BUFFER_STEPS_MS`, or `None` (automatic).
+    pub buffer_setting_ms: Option<u32>,
     /// Where it is shown on the map.
     pub place: Option<NetPlace>,
     /// From the listener, as the crow flies (there is no radio path).
@@ -320,28 +343,58 @@ pub fn parse_click(json: &str) -> Option<String> {
     (v.get("ok").and_then(Value::as_bool) == Some(true)).then(|| text(&v, "url")).flatten()
 }
 
-/// Paces a stream's PCM (16-bit mono) at real time: holds `NET_PREBUFFER_MS` before it starts and
-/// again after running dry, and at most `NET_BUFFER_MAX_MS`, dropping the oldest past that.
+/// Paces a stream's PCM (16-bit mono) at real time: holds its size (`target_ms`) before it starts
+/// and again after running dry, and at most `NET_BUFFER_HEADROOM_MS` (or the size again) more,
+/// dropping the oldest past that. The automatic one starts at `NET_BUFFER_AUTO_START_MS` and goes
+/// up a step of `NET_BUFFER_STEPS_MS` each time the stream runs dry; it never shrinks, and a new
+/// stream starts over.
 pub struct JitterBuffer {
     buf: VecDeque<u8>,
+    rate: u32,
     block: usize,
+    target_ms: u32,
     prebuffer: usize,
     max: usize,
+    auto: bool,
     playing: bool,
+    underruns: u32,
 }
 
 impl JitterBuffer {
-    /// For PCM at `rate`, handed out `block_ms` at a time.
-    pub fn new(rate: u32, block_ms: u32) -> Self {
-        let bytes = |ms: u32| (rate as usize * 2 * ms as usize / 1000) & !1;
-        let block = bytes(block_ms).max(2);
-        Self {
+    /// For PCM at `rate`, handed out `block_ms` at a time, holding `setting` milliseconds before it
+    /// plays (`None`: automatic).
+    pub fn new(rate: u32, block_ms: u32, setting: Option<u32>) -> Self {
+        let mut jb = Self {
             buf: VecDeque::new(),
-            block,
-            prebuffer: bytes(NET_PREBUFFER_MS).max(block),
-            max: bytes(NET_BUFFER_MAX_MS).max(2 * block),
+            rate,
+            block: 0,
+            target_ms: 0,
+            prebuffer: 0,
+            max: 0,
+            auto: true,
             playing: false,
-        }
+            underruns: 0,
+        };
+        jb.block = jb.bytes(block_ms).max(2);
+        jb.set(setting);
+        jb
+    }
+
+    fn bytes(&self, ms: u32) -> usize {
+        (self.rate as usize * 2 * ms as usize / 1000) & !1
+    }
+
+    fn size(&mut self, ms: u32) {
+        self.target_ms = ms;
+        self.prebuffer = self.bytes(ms).max(self.block);
+        self.max = self.bytes(net_buffer_max_ms(ms)).max(2 * self.block);
+    }
+
+    /// Another size, while it plays: a fixed one, or automatic (`None`), which goes on from the
+    /// size it has so the audio held stays.
+    pub fn set(&mut self, setting: Option<u32>) {
+        self.auto = setting.is_none();
+        self.size(setting.unwrap_or(self.target_ms.max(NET_BUFFER_AUTO_START_MS)));
     }
 
     pub fn push(&mut self, pcm: &[u8]) {
@@ -361,7 +414,12 @@ impl JitterBuffer {
             self.playing = true;
         }
         if self.buf.len() < self.block {
+            // ran dry: the automatic buffer goes up a step
             self.playing = false;
+            self.underruns += 1;
+            if let Some(&next) = NET_BUFFER_STEPS_MS.iter().find(|&&s| s > self.target_ms).filter(|_| self.auto) {
+                self.size(next);
+            }
             return None;
         }
         Some(self.buf.drain(..self.block).collect())
@@ -372,9 +430,29 @@ impl JitterBuffer {
         self.buf.len()
     }
 
-    /// Audio held, in milliseconds (16-bit mono at `NET_RATE`).
+    /// Audio held, in milliseconds.
     pub fn held_ms(&self) -> u32 {
-        (self.buf.len() as u64 * 1000 / (u64::from(NET_RATE) * 2)) as u32
+        (self.buf.len() as u64 * 1000 / (u64::from(self.rate) * 2)) as u32
+    }
+
+    /// What it fills to before it plays, in milliseconds.
+    pub fn target_ms(&self) -> u32 {
+        self.target_ms
+    }
+
+    /// Most it holds before the oldest goes, in milliseconds.
+    pub fn max_ms(&self) -> u32 {
+        (self.max as u64 * 1000 / (u64::from(self.rate) * 2)) as u32
+    }
+
+    /// Sized automatically (not picked by the listener).
+    pub fn auto(&self) -> bool {
+        self.auto
+    }
+
+    /// Times the stream ran dry while it played.
+    pub fn underruns(&self) -> u32 {
+        self.underruns
     }
 
     /// Handing blocks out (not filling up).
@@ -742,28 +820,84 @@ mod tests {
 
     #[test]
     fn jitter_buffer_paces_the_stream() {
-        // 1000 Hz, 100 ms blocks: 200 bytes a block, 3000 to start, 10000 at most
-        let mut jb = JitterBuffer::new(1000, 100);
-        jb.push(&[1; 2800]);
+        // 1000 Hz, 100 ms blocks, 2 s: 200 bytes a block, 4000 to start, 10000 at most
+        let mut jb = JitterBuffer::new(1000, 100, Some(2_000));
+        jb.push(&[1; 3800]);
         assert_eq!(jb.pop(), None, "still filling up");
         jb.push(&[2; 200]);
         assert_eq!(jb.pop().map(|b| b.len()), Some(200));
         assert!(jb.playing());
-        for _ in 0..14 {
+        for _ in 0..19 {
             assert!(jb.pop().is_some());
         }
         assert_eq!(jb.held(), 0);
         assert_eq!(jb.pop(), None, "ran dry: fills up again");
         assert!(!jb.playing());
+        assert_eq!((jb.underruns(), jb.target_ms()), (1, 2_000), "a fixed size stays");
         jb.push(&[3; 1000]);
         assert_eq!(jb.pop(), None);
         // a fast source: the oldest goes, in whole samples
         jb.push(&[4; 12_000]);
         assert_eq!(jb.held(), 10_000);
         assert_eq!(jb.pop().unwrap()[0], 4);
-        let mut jb = JitterBuffer::new(NET_RATE, 20);
+        let mut jb = JitterBuffer::new(NET_RATE, 20, None);
         jb.push(&vec![0; NET_RATE as usize]);
         assert_eq!(jb.held_ms(), 500);
+    }
+
+    /// Fill `jb` to its size, play it and let it run dry.
+    fn run_dry(jb: &mut JitterBuffer) {
+        jb.push(&vec![0; jb.prebuffer]);
+        while jb.pop().is_some() {}
+    }
+
+    #[test]
+    fn the_automatic_buffer_grows_each_time_it_runs_dry() {
+        let mut jb = JitterBuffer::new(1000, 100, None);
+        assert!(jb.auto());
+        assert_eq!(jb.target_ms(), NET_BUFFER_AUTO_START_MS);
+        assert_eq!(jb.max, 10_000, "2 s, and 3 s of headroom");
+        let mut sizes = vec![];
+        for _ in 0..4 {
+            run_dry(&mut jb);
+            sizes.push(jb.target_ms());
+        }
+        assert_eq!(sizes, [4_000, 8_000, 16_000, 16_000], "up to the last step");
+        assert_eq!((jb.underruns(), jb.max), (4, 64_000), "16 s, and as much again");
+        assert_eq!(jb.pop(), None, "fills up to the new size first");
+    }
+
+    #[test]
+    fn the_buffer_changes_while_it_plays() {
+        let mut jb = JitterBuffer::new(1000, 100, None);
+        run_dry(&mut jb);
+        assert_eq!(jb.target_ms(), 4_000);
+        // picked by the listener: it stays where they put it
+        jb.set(Some(1_000));
+        assert!(!jb.auto());
+        assert_eq!((jb.target_ms(), jb.max), (1_000, 8_000));
+        run_dry(&mut jb);
+        assert_eq!(jb.target_ms(), 1_000);
+        // automatic again: from where it is, or where it starts
+        jb.set(Some(8_000));
+        jb.set(None);
+        assert_eq!(jb.target_ms(), 8_000, "it does not shrink");
+        let mut jb = JitterBuffer::new(1000, 100, Some(1_000));
+        jb.set(None);
+        assert_eq!(jb.target_ms(), NET_BUFFER_AUTO_START_MS);
+    }
+
+    #[test]
+    fn buffer_choices() {
+        assert!(net_buffer_ok(None));
+        assert!(NET_BUFFER_STEPS_MS.iter().all(|&ms| net_buffer_ok(Some(ms))));
+        assert!(!net_buffer_ok(Some(1_500)));
+        assert!(!net_buffer_ok(Some(0)));
+        assert!(NET_BUFFER_STEPS_MS.contains(&NET_BUFFER_AUTO_START_MS));
+        assert_eq!((net_buffer_max_ms(2_000), net_buffer_max_ms(16_000)), (5_000, 32_000));
+        for ms in NET_BUFFER_STEPS_MS {
+            assert_eq!(JitterBuffer::new(NET_RATE, 20, Some(ms)).max_ms(), net_buffer_max_ms(ms));
+        }
     }
 
     fn gaz() -> Gazetteer {
@@ -809,6 +943,9 @@ mod tests {
             station: st[0].clone(),
             state: NetState::Tuned,
             buffer_ms: 0,
+            buffer_target_ms: NET_BUFFER_AUTO_START_MS,
+            buffer_max_ms: 5_000,
+            buffer_setting_ms: None,
             place: None,
             route: None,
             sun: None,

@@ -16,6 +16,8 @@ import type { NetStation } from '../types/generated/NetStation';
 export const NET_BAND = 'net';
 /** Sample rate of an internet station's audio (`atlas_core::net::NET_RATE`). */
 export const NET_RATE = 32_000;
+/** The stream buffers the listener can pick (`atlas_core::net::NET_BUFFER_STEPS_MS`). */
+export const NET_BUFFER_STEPS_MS = [1_000, 2_000, 4_000, 8_000, 16_000] as const;
 
 /** The list shows internet stations: NET is picked and internet radio is on. */
 export function isNet(f: Filters, enabled: boolean): boolean {
@@ -68,9 +70,22 @@ export function stepChannel<T extends { uuid: string }>(list: readonly T[], uuid
   return list[(((i + dir) % n) + n) % n];
 }
 
-/** Segments lit on the buffer meter (`segs` of them for 0..5 s held). */
-export function bufferSegs(ms: number, segs: number): number {
-  return Math.round(Math.min(segs, Math.max(0, (ms / 5000) * segs)));
+/** What the faceplate says about the stream: reaching it, filling its buffer (how far, of what it
+ *  fills to before playing), stopped, or nothing to say (playing, or tuned and not listened to).
+ *  Listening while the server still says tuned is the moment before it starts: connecting. */
+export type NetPhase =
+  | { kind: 'tuned' | 'playing' | 'failed' | 'connecting' }
+  | { kind: 'buffering'; pct: number };
+export function netPhase(n: NetNow, listening: boolean): NetPhase {
+  const st = n.state.state;
+  if (st === 'failed' || st === 'playing') return { kind: st };
+  if (st === 'tuned') return { kind: listening ? 'connecting' : 'tuned' };
+  return n.buffer_ms <= 0 ? { kind: 'connecting' } : { kind: 'buffering', pct: bufferPct(n) };
+}
+
+/** How full the buffer is of what it fills to before playing, 1..99 % while it fills. */
+export function bufferPct(n: Pick<NetNow, 'buffer_ms' | 'buffer_target_ms'>): number {
+  return Math.min(99, Math.max(1, Math.round((n.buffer_ms / Math.max(1, n.buffer_target_ms)) * 100)));
 }
 
 /** Countries with internet stations as globe dots (ids apart from the transmitter sites'); a

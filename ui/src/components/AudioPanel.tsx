@@ -11,7 +11,7 @@ import { AudioPlayer, type PlayerBuffer, type PlayerStatus } from '../audio/play
 import { cwDelta, SP_H, Waterfall, WF_H, WF_W } from '../audio/waterfall';
 import { useT, type Messages } from '../i18n';
 import type { NetNow } from '../types/generated/NetNow';
-import { canListen } from './net';
+import { bufferPct, canListen } from './net';
 
 const ROW_MS = 50;
 
@@ -56,6 +56,7 @@ function netLine(t: Messages, n: NetNow): string {
     case 'tuned':
     case 'playing': return '';
     case 'connecting': return t.netConnecting;
+    case 'buffering': return t.netBuffering(bufferPct(n));
     case 'failed': return t.netFailed(n.state.message);
   }
 }

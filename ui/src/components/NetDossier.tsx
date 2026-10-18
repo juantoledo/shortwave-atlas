@@ -8,7 +8,7 @@ import { compass, fmtKm, fmtSecs, hhmm, useT, type Messages } from '../i18n';
 import type { NetNow } from '../types/generated/NetNow';
 import { Flag } from './Flag';
 import { FlagBackdrop } from './FlagBackdrop';
-import { streamLabel } from './net';
+import { bufferPct, streamLabel } from './net';
 
 const DIRECTORY_URL = 'https://www.radio-browser.info/';
 
@@ -17,6 +17,7 @@ function Head({ t, n }: { t: Messages; n: NetNow }) {
   const sub = st.state === 'tuned' ? t.netStateTuned
     : st.state === 'connecting' ? t.netConnecting
     : st.state === 'playing' ? t.netStatePlaying
+    : st.state === 'buffering' ? t.netBuffering(bufferPct(n))
     : t.netFailed(st.message);
   return (
     <div className="d-head">

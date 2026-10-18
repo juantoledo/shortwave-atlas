@@ -14,6 +14,7 @@ use atlas_core::bands::{Dial, ItuRegion};
 use atlas_core::hunt::{hunt, usual, ListeningNow};
 use atlas_core::lens::{self, Known};
 use atlas_core::listening::Ctx;
+use atlas_core::net::{net_buffer_ok, NET_BUFFER_STEPS_MS};
 use atlas_core::net_listening::net_stats;
 use atlas_core::platform::Os;
 use atlas_core::rig::RigCommand;
@@ -26,7 +27,7 @@ use serde_json::Value;
 use tokio::sync::OnceCell;
 
 use crate::audio::{backend, sound_cards, AudioHub};
-use crate::config::{save_audio, save_net, save_rig, save_update, AppConfig};
+use crate::config::{save_audio, save_net, save_net_buffer, save_rig, save_update, AppConfig};
 use crate::favorites::FavoriteService;
 use crate::listening::ListeningService;
 use crate::net::NetService;
@@ -137,6 +138,13 @@ impl Atlas {
         let rig = Rig::from_config(&config.rig, stations.clone(), qth.clone());
         let rig_config = RwLock::new(config.rig.clone());
         let audio = AudioHub::new(config.audio.choice());
+        match config.net.buffer_ms {
+            ms if net_buffer_ok(ms) => audio.set_net_buffer(ms),
+            Some(ms) => {
+                tracing::warn!("[net] buffer_ms = {ms} is not one of {:?}: sized automatically", NET_BUFFER_STEPS_MS)
+            }
+            None => {}
+        }
         let update = UpdateService::new(updater, &config.update, config.update_locked.clone());
         update.spawn_checks();
         let scan = ScanService::new(data_dir.as_ref().map(|d| d.join("scans")), stations.clone());
@@ -342,6 +350,18 @@ impl Atlas {
         }
         if let Some(path) = &self.config_path {
             save_net(path, enabled).map_err(|e| ApiError::internal(format!("Changed, but could not save: {e}")))?;
+        }
+        Ok(())
+    }
+
+    /// Size the internet stream's buffer (the one playing at once), and save it.
+    fn set_net_buffer(&self, ms: Option<u32>) -> Result<(), ApiError> {
+        if !net_buffer_ok(ms) {
+            return Err(invalid(format!("The stream buffer is automatic or one of {NET_BUFFER_STEPS_MS:?} ms")));
+        }
+        self.audio.set_net_buffer(ms);
+        if let Some(path) = &self.config_path {
+            save_net_buffer(path, ms).map_err(|e| ApiError::internal(format!("Changed, but could not save: {e}")))?;
         }
         Ok(())
     }
@@ -622,6 +642,10 @@ impl Atlas {
                 Ok(Value::Null)
             }
             Call::NetNow => json(serde_json::to_value(self.net_now())),
+            Call::SetNetBuffer { ms } => {
+                self.set_net_buffer(ms)?;
+                Ok(Value::Null)
+            }
             Call::NetFavorites => json(serde_json::to_value(self.net_favorites.views())),
             Call::AddNetFavorite { uuid, label } => {
                 // the station tuned is known already; another is asked of the directory
@@ -1336,6 +1360,49 @@ pub(crate) mod tests {
         assert_eq!(atlas.call(Call::NetSearch(NetQuery::default())).await.unwrap_err().kind, ErrorKind::Conflict);
         let saved: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!(!saved.net.enabled);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[tokio::test]
+    async fn the_stream_buffer_is_picked_and_saved() {
+        let dir = std::env::temp_dir().join(format!("swatlas-net-buffer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("swatlas.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        let atlas = Atlas::start(AppConfig::default(), Some(path.clone()), None, no_updates()).unwrap();
+        atlas.net.replace_fetch(crate::net::tests::fake(Default::default()));
+        atlas.call(Call::SetNet { enabled: true }).await.unwrap();
+        let now = atlas.call(Call::NetTune { uuid: "0a1b2c3d".into() }).await.unwrap();
+        assert_eq!((now["buffer_setting_ms"].clone(), now["buffer_target_ms"].as_u64()), (Value::Null, Some(2_000)));
+
+        atlas.call(Call::SetNetBuffer { ms: Some(8_000) }).await.unwrap();
+        let now = atlas.call(Call::NetNow).await.unwrap();
+        assert_eq!((now["buffer_setting_ms"].as_u64(), now["buffer_target_ms"].as_u64()), (Some(8_000), Some(8_000)));
+        let saved: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved.net.buffer_ms, Some(8_000));
+        let e = atlas.call(Call::SetNetBuffer { ms: Some(1_500) }).await.unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Invalid);
+        assert_eq!(atlas.call(Call::NetNow).await.unwrap()["buffer_setting_ms"], 8_000, "unchanged");
+
+        // the saved size is the one a new start uses; one that is not offered is automatic
+        let started = |ms| {
+            Atlas::start(
+                AppConfig { net: crate::config::NetConfig { enabled: true, buffer_ms: ms }, ..Default::default() },
+                None,
+                None,
+                no_updates(),
+            )
+            .unwrap()
+        };
+        for (ms, setting) in [(Some(16_000), Value::from(16_000)), (Some(3), Value::Null)] {
+            let a = started(ms);
+            a.net.replace_fetch(crate::net::tests::fake(Default::default()));
+            let now = a.call(Call::NetTune { uuid: "0a1b2c3d".into() }).await.unwrap();
+            assert_eq!(now["buffer_setting_ms"], setting);
+        }
+
+        atlas.call(Call::SetNetBuffer { ms: None }).await.unwrap();
+        let saved: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved.net.buffer_ms, None);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

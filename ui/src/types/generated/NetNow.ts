@@ -14,6 +14,18 @@ export type NetNow = { station: NetStation, state: NetState,
  */
 buffer_ms: number, 
 /**
+ * What the buffer fills to before it plays, in milliseconds (the automatic one grows).
+ */
+buffer_target_ms: number, 
+/**
+ * Most the buffer holds before the oldest goes, in milliseconds.
+ */
+buffer_max_ms: number, 
+/**
+ * The listener's buffer: one of `NET_BUFFER_STEPS_MS`, or `None` (automatic).
+ */
+buffer_setting_ms: number | null, 
+/**
  * Where it is shown on the map.
  */
 place: NetPlace | null, 

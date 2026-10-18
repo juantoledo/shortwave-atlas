@@ -123,6 +123,8 @@ export class Api {
   /** Back to the rig. */
   netStop = () => this.transport.call({ cmd: 'net_stop' }) as Promise<null>;
   netNow = () => this.transport.call({ cmd: 'net_now' }) as Promise<NetNow | null>;
+  /** The internet stream's buffer: a size in ms (`NET_BUFFER_STEPS_MS`), or `null` for automatic; saved. */
+  setNetBuffer = (ms: number | null) => this.transport.call({ cmd: 'set_net_buffer', args: { ms } }) as Promise<null>;
   netStats = (args: StatsQuery) => this.transport.call({ cmd: 'net_stats', args }) as Promise<NetStats>;
   netFavorites = () => this.transport.call({ cmd: 'net_favorites' }) as Promise<NetFavorite[]>;
   addNetFavorite = (uuid: string, label: string | null) =>

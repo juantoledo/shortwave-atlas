@@ -30,18 +30,20 @@ const STALL: Duration = Duration::from_secs(15);
 /// Stream chunks in flight between the reader and the decoder.
 const CHUNKS: usize = 64;
 
-/// Start playing `stream` into `hub` for the hub's `generation`.
+/// Start playing `stream` into `hub` for the hub's `generation`, holding `buffer` milliseconds
+/// ahead (`None`: sized automatically).
 pub(crate) fn start(
     hub: Weak<AudioHub>,
     generation: u64,
     stream: NetStream,
     block_ms: u32,
+    buffer: Option<u32>,
 ) -> Result<Capture, OpenError> {
     let rt = tokio::runtime::Handle::try_current()
         .map_err(|_| OpenError::Spawn(std::io::Error::other("no async runtime")))?;
     let (tx, rx) = mpsc::channel::<Bytes>(CHUNKS);
     let stop = Arc::new(AtomicBool::new(false));
-    let jitter = Arc::new(Mutex::new(JitterBuffer::new(NET_RATE, block_ms)));
+    let jitter = Arc::new(Mutex::new(JitterBuffer::new(NET_RATE, block_ms, buffer)));
     let held = jitter.clone();
 
     let (url, h) = (stream.url.clone(), hub.clone());
@@ -58,7 +60,19 @@ pub(crate) fn start(
         let mut tick = tokio::time::interval(Duration::from_millis(u64::from(block_ms.max(1))));
         loop {
             tick.tick().await;
-            let block = jb.lock().expect("jitter buffer").pop();
+            let block = {
+                let mut j = jb.lock().expect("jitter buffer");
+                let before = j.target_ms();
+                let block = j.pop();
+                if j.target_ms() != before {
+                    tracing::info!(
+                        "internet station ran dry ({} times): buffering {} ms now",
+                        j.underruns(),
+                        j.target_ms()
+                    );
+                }
+                block
+            };
             if let Some(b) = block {
                 let Some(hub) = h.upgrade() else { return };
                 hub.fan_out(generation, Bytes::from(b));
