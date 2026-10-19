@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.1](https://github.com/juantoledo/shortwave-atlas/compare/v0.14.0...v0.14.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **scan:** show a scan's own stations in the list, and tell a deaf scan ([c4cc001](https://github.com/juantoledo/shortwave-atlas/commit/c4cc0014196b5b941007644174fd8e292cba54ef))
+* **update:** render the release notes, not their Markdown ([c80c71c](https://github.com/juantoledo/shortwave-atlas/commit/c80c71c876f4b3a632b20b45fae450bba88a64cb))
+
 ## [0.14.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.13.0...v0.14.0) (2026-10-19)
 
 
