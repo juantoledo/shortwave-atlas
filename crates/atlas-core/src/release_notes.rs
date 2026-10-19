@@ -12,22 +12,40 @@ use ts_rs::TS;
 #[ts(export)]
 pub enum NoteBlock {
     /// `level` 1-6, as in Markdown.
-    Heading { level: u8, text: Vec<NoteSpan> },
-    Para { text: Vec<NoteSpan> },
+    Heading {
+        level: u8,
+        text: Vec<NoteSpan>,
+    },
+    Para {
+        text: Vec<NoteSpan>,
+    },
     /// Nested lists are flattened into one.
-    List { items: Vec<Vec<NoteSpan>> },
+    List {
+        items: Vec<Vec<NoteSpan>>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export)]
 pub enum NoteSpan {
-    Text { text: String },
-    Strong { text: String },
-    Em { text: String },
-    Code { text: String },
+    Text {
+        text: String,
+    },
+    Strong {
+        text: String,
+    },
+    Em {
+        text: String,
+    },
+    Code {
+        text: String,
+    },
     /// Always an `http://` or `https://` address.
-    Link { text: String, url: String },
+    Link {
+        text: String,
+        url: String,
+    },
 }
 
 impl NoteSpan {
@@ -228,7 +246,11 @@ fn section(md: &str, version: &str) -> Vec<NoteBlock> {
         NoteBlock::Heading { level: ..=2, text } => {
             let mut words = String::new();
             for s in text {
-                let (NoteSpan::Text { text: t } | NoteSpan::Strong { text: t } | NoteSpan::Em { text: t } | NoteSpan::Code { text: t } | NoteSpan::Link { text: t, .. }) = s;
+                let (NoteSpan::Text { text: t }
+                | NoteSpan::Strong { text: t }
+                | NoteSpan::Em { text: t }
+                | NoteSpan::Code { text: t }
+                | NoteSpan::Link { text: t, .. }) = s;
                 words.push_str(t);
             }
             words.split(|c: char| c.is_whitespace() || "[]()".contains(c)).any(|w| w.trim_start_matches('v') == version)
@@ -337,7 +359,12 @@ mod tests {
         assert_eq!(
             parse("one\ntwo *three* `four`"),
             vec![NoteBlock::Para {
-                text: vec![text("one two "), NoteSpan::Em { text: "three".into() }, text(" "), NoteSpan::Code { text: "four".into() }],
+                text: vec![
+                    text("one two "),
+                    NoteSpan::Em { text: "three".into() },
+                    text(" "),
+                    NoteSpan::Code { text: "four".into() }
+                ],
             }]
         );
         // nested and loose lists flatten into one
@@ -369,7 +396,10 @@ mod tests {
         assert_eq!(parse("[x](/relative)"), vec![NoteBlock::Para { text: vec![text("x")] }]);
         assert_eq!(parse("a <b onclick=x>b</b> c"), vec![NoteBlock::Para { text: vec![text("a b c")] }]);
         assert_eq!(parse("<!-- hidden -->\n\nshown"), vec![NoteBlock::Para { text: vec![text("shown")] }]);
-        assert_eq!(parse("<https://example.com>"), vec![NoteBlock::Para { text: vec![link("https://example.com", "https://example.com")] }]);
+        assert_eq!(
+            parse("<https://example.com>"),
+            vec![NoteBlock::Para { text: vec![link("https://example.com", "https://example.com")] }]
+        );
         assert_eq!(
             parse("```\nlet x = 1;\n```"),
             vec![NoteBlock::Para { text: vec![NoteSpan::Code { text: "let x = 1;".into() }] }]
