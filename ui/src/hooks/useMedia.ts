@@ -21,3 +21,7 @@ export function useMedia(query: string): boolean {
 export const COARSE = '(pointer: coarse)';
 /** The phone layout (bottom tabs): keep in step with styles.css. */
 export const PHONE = '(max-width: 599px)';
+/** Three columns; the tabbed side column's narrow width; a short window (styles.css, as PHONE). */
+export const WIDE = '(min-width: 1280px)';
+export const NARROW = '(max-width: 899px)';
+export const SHORT = '(max-height: 700px)';

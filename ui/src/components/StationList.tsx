@@ -12,7 +12,7 @@
 // Each row shows its kind, radio or internet. It fills its panel: the controls are fixed,
 // the rows scroll in their own box and load the next page when you reach the end.
 
-import { memo, useCallback, useEffect, useId, useMemo, useRef, type KeyboardEvent, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useNames } from '../catalog/names';
 import type { Filters } from '../hooks/useCore';
 import type { NetSearch } from '../hooks/useNetSearch';
@@ -75,6 +75,9 @@ interface Props {
   scanDb: Record<number, number>;
   onPick: (r: StationRow) => void;
   onPickOff: (o: OffSchedule) => void;
+  /** A double-click (or Shift+Enter) on a row: tune it and listen. */
+  onPlay: (r: StationRow) => void;
+  onPlayOff: (o: OffSchedule) => void;
   /** Add a station of one's own where a row off the schedule is. */
   onAddOff: (o: OffSchedule) => void;
   /** Shift+Enter on a kHz query: tune there exactly. */
@@ -94,6 +97,8 @@ interface Props {
     favs: readonly NetFavorite[];
     favUuids: ReadonlySet<string>;
     onTune: (uuid: string) => void;
+    /** Tune it and listen. */
+    onPlay: (uuid: string) => void;
   };
 }
 
@@ -134,7 +139,15 @@ interface ItemProps {
   /** In Favorites: what the favorite adds to the row (its label, its mode). */
   note?: string;
   onPick: (r: StationRow) => void;
+  onPlay: (r: StationRow) => void;
 }
+
+/** A row's keys besides its click: Shift+Enter plays it (Enter alone tunes, the button's own). */
+const playKey = (play: () => void) => (e: KeyboardEvent<HTMLButtonElement>) => {
+  if (e.key !== 'Enter' || !e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
+  e.preventDefault();
+  play();
+};
 
 /** What kind of row: a station on the dial, or an internet one. */
 function RowKind({ kind }: { kind: 'radio' | 'net' }) {
@@ -162,7 +175,7 @@ function RowKind({ kind }: { kind: 'radio' | 'net' }) {
 
 /** A catalog row. Memoized, with props of its own: the list re-renders with the app, and a long
  *  one would otherwise render every row each time. */
-const StationItem = memo(function StationItem({ r, on, current, lg, fav, scanned, db, freshSince, log, mine, note, onPick }: ItemProps) {
+const StationItem = memo(function StationItem({ r, on, current, lg, fav, scanned, db, freshSince, log, mine, note, onPick, onPlay }: ItemProps) {
   const t = useT();
   const names = useNames();
   const country = names.country(r.itu);
@@ -173,7 +186,7 @@ const StationItem = memo(function StationItem({ r, on, current, lg, fav, scanned
   const first = fresh && log.first >= freshSince!;
   return (
     <li>
-      <button className={'row' + (log ? ' heard-row' : '') + (fresh ? ' fresh' : '') + (first ? ' first' : '') + (missed ? ' missed' : '')} type="button" aria-current={on && current} disabled={!on} title={missed ? t.scanMissedRow : undefined} onClick={() => onPick(r)}>
+      <button className={'row' + (log ? ' heard-row' : '') + (fresh ? ' fresh' : '') + (first ? ' first' : '') + (missed ? ' missed' : '')} type="button" aria-current={on && current} disabled={!on} title={missed ? t.scanMissedRow : t.rowPlayHint} onClick={() => onPick(r)} onDoubleClick={() => onPlay(r)} onKeyDown={playKey(() => onPlay(r))}>
         <span className="rf">{r.freq_hz / 1000}</span>
         <span className="rn">
           <b>
@@ -213,7 +226,7 @@ function OffItem({ o, p }: { o: OffSchedule; p: Props }) {
   const t = useT();
   return (
     <li className="off-li">
-      <button className="row off-row" type="button" disabled={!p.on} onClick={() => p.onPickOff(o)}>
+      <button className="row off-row" type="button" disabled={!p.on} title={t.rowPlayHint} onClick={() => p.onPickOff(o)} onDoubleClick={() => p.onPlayOff(o)} onKeyDown={playKey(() => p.onPlayOff(o))}>
         <span className="rf">{o.freq_hz / 1000}</span>
         <span className="rn">
           <b className={o.label || o.station ? undefined : 'v-unidentified'}>
@@ -239,14 +252,14 @@ function OffItem({ o, p }: { o: OffSchedule; p: Props }) {
 const offKey = (o: OffSchedule) => `${o.freq_hz}-${o.favorite ?? ''}`;
 
 /** An internet station: NET where the kHz would be; a click tunes the receiver to it (it tunes
- *  nothing on the rig, so it works with the rig off too). */
-function NetItem({ name, flag, country, line, stream, tuned, fav, onTune }: {
-  name: string; flag: string | null; country: string; line: string; stream: string; tuned: boolean; fav: boolean; onTune: () => void;
+ *  nothing on the rig, so it works with the rig off too), a double-click plays it too. */
+function NetItem({ name, flag, country, line, stream, tuned, fav, onTune, onPlay }: {
+  name: string; flag: string | null; country: string; line: string; stream: string; tuned: boolean; fav: boolean; onTune: () => void; onPlay: () => void;
 }) {
   const t = useT();
   return (
     <li>
-      <button className="row net-row" type="button" aria-current={tuned} onClick={onTune}>
+      <button className="row net-row" type="button" aria-current={tuned} title={t.rowPlayHint} onClick={onTune} onDoubleClick={onPlay} onKeyDown={playKey(onPlay)}>
         <span className="rf net-rf" title={t.netBadgeTitle}>{t.netBadge}</span>
         <span className="rn">
           <b>
@@ -267,6 +280,43 @@ function NetItem({ name, flag, country, line, stream, tuned, fav, onTune }: {
 
 const stationLine = (s: NetStation, country: string) =>
   [country, s.langs.join(', '), s.tags.slice(0, 3).join(', ')].filter(Boolean).join(' · ');
+
+/** How long a NET wait goes before the list says the directory is slow. */
+const SLOW_MS = 4000;
+/** The skeleton's name and line widths, row by row (a list of equal bars reads as a table). */
+const SKEL_W = [[62, 44], [48, 70], [74, 38], [55, 60], [68, 46], [42, 64], [58, 52], [50, 40]];
+
+/** True once `on` has held for `ms`. */
+function useAfter(on: boolean, ms: number): boolean {
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    setLate(false);
+    if (!on) return;
+    const id = setTimeout(() => setLate(true), ms);
+    return () => clearTimeout(id);
+  }, [on, ms]);
+  return late;
+}
+
+/** Rows to come, shaped like the real ones, while a list's first page loads. */
+function SkeletonRows({ net }: { net: boolean }) {
+  return (
+    <ul className={'list skel' + (net ? ' net' : '')} aria-hidden="true">
+      {SKEL_W.map(([a, b], i) => (
+        <li key={i}>
+          <span className="row skel-row">
+            <i className="skel-b skel-f" />
+            <span className="rn">
+              <i className="skel-b" style={{ width: a + '%' }} />
+              <i className="skel-b skel-sub" style={{ width: b + '%' }} />
+            </span>
+            <i className="skel-dot" />
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export function StationList(p: Props) {
   const t = useT();
@@ -324,6 +374,7 @@ export function StationList(p: Props) {
       tuned={p.net.tuned === s.uuid}
       fav={p.net.favUuids.has(s.uuid)}
       onTune={() => p.net.onTune(s.uuid)}
+      onPlay={() => p.net.onPlay(s.uuid)}
     />
   );
   // Favorites only uses the text: the other filters stay set, hidden, for the other lenses
@@ -347,6 +398,14 @@ export function StationList(p: Props) {
   const asked = useRef(-1);
   const loaded = favView ? p.favorites.length : net ? p.net.search.items.length : p.rows.length + p.heard.length;
   const hasMore = favView ? loaded < p.total : net ? p.net.search.more : loaded < p.total;
+  // loading: a bar over the list, skeleton rows while it is empty, the rows shown dimmed while
+  // they are replaced; NET also says when the directory is slow
+  const busy = net && !favView ? p.net.search.loading : p.loading;
+  const shownCount = favView ? loaded + netFavRows.length : net ? loaded : loaded + p.off.length + netMix.length;
+  const netWaiting = net && !favView && (p.net.search.loading || p.net.search.loadingMore);
+  const slow = useAfter(netWaiting, SLOW_MS);
+  // a radio search of words: the internet stations it will show are on their way
+  const netMixWaiting = p.net.mixed && p.net.search.loading && netMix.length === 0;
   // next page when the end of the list comes into view (once per length)
   useEffect(() => {
     const b = box.current, e = end.current;
@@ -380,6 +439,9 @@ export function StationList(p: Props) {
   const pickNow = useRef(p.onPick);
   pickNow.current = p.onPick;
   const onPick = useCallback((r: StationRow) => pickNow.current(r), []);
+  const playNow = useRef(p.onPlay);
+  playNow.current = p.onPlay;
+  const onPlay = useCallback((r: StationRow) => playNow.current(r), []);
   const item = (r: StationRow, log?: Logged, fav?: Favorite) => {
     // Favorites ignores the scan filter
     const scanned = f.scan !== null && !fav;
@@ -398,6 +460,7 @@ export function StationList(p: Props) {
         mine={mineSrc.has(r.source)}
         note={fav ? favNote(fav, r) : undefined}
         onPick={onPick}
+        onPlay={onPlay}
       />
     );
   };
@@ -496,7 +559,10 @@ export function StationList(p: Props) {
           <button className="link" type="button" onClick={() => p.onFilters(favView ? { ...f, q: '' } : { ...f, q: '', bands: [], langs: [], regions: [], countries: [], sources: [], site: null, scan: null })}>{t.clearFilters}</button>
         </div>
       )}
-      <div className="rows" ref={box} onKeyDown={onRowsKey}>
+      <div className="list-bar" data-on={busy} data-net={net && !favView ? '' : undefined} aria-hidden="true" />
+      {slow && <p className="note net-slow" role="status">{t.netSlow}</p>}
+      <div className={'rows' + (busy && shownCount > 0 ? ' stale' : '')} ref={box} onKeyDown={onRowsKey} aria-busy={busy}>
+        {busy && shownCount === 0 && <SkeletonRows net={net && !favView} />}
         {favView ? (
           <>
             <ul className="list">
@@ -519,6 +585,7 @@ export function StationList(p: Props) {
                       tuned={p.net.tuned === v.uuid}
                       fav
                       onTune={() => p.net.onTune(v.uuid)}
+                      onPlay={() => p.net.onPlay(v.uuid)}
                     />
                   ))}
                 </ul>
@@ -538,6 +605,12 @@ export function StationList(p: Props) {
         ) : (
           <>
             {/* a search of words: the internet stations it finds first, a few of them */}
+            {netMixWaiting && (
+              <>
+                <h4 className="h list-h"><span>{t.netHead}</span></h4>
+                <p className="net-searching" role="status">{t.netSearching}</p>
+              </>
+            )}
             {netMix.length > 0 && (
               <>
                 <h4 className="h list-h"><span>{t.netHead}</span><span>{netMix.length}{netMixMore && '+'}</span></h4>
@@ -567,11 +640,20 @@ export function StationList(p: Props) {
         {favView
           ? !p.loading && p.total === 0 && netFavRows.length === 0 && <p className="empty-d">{empty}</p>
           : net
-          ? !p.net.search.loading && p.net.search.items.length === 0 && <p className="empty-d">{empty}</p>
-          : !p.loading && p.total === 0 && p.off.length === 0 && netMix.length === 0 && <p className="empty-d">{empty}</p>}
+          ? !p.net.search.loading && p.net.search.items.length === 0 && (
+            <>
+              <p className="empty-d">{empty}</p>
+              {p.net.search.failed && <button className="btn net-retry" type="button" onClick={p.net.search.retry}>⟲ {t.retry}</button>}
+            </>
+          )
+          : !p.loading && p.total === 0 && p.off.length === 0 && netMix.length === 0 && !netMixWaiting && <p className="empty-d">{empty}</p>}
         <div ref={end} />
         {hasMore && (net && !favView
-          ? <button className="btn more" type="button" disabled={p.net.search.loading} onClick={p.net.search.loadMore}>{t.netMore}</button>
+          ? (
+            <button className={'btn more net' + (p.net.search.loadingMore ? ' loading' : '')} type="button" disabled={p.net.search.loading || p.net.search.loadingMore} onClick={p.net.search.loadMore}>
+              {p.net.search.loadingMore ? t.netLoadingMore : t.netMore}
+            </button>
+          )
           : <button className="btn more" type="button" onClick={p.onMore}>{t.showMore(Math.min(100, p.total - loaded))}</button>
         )}
         {(net || netFavRows.length > 0 || netMix.length > 0) && <p className="note net-foot">{t.netFoot}</p>}

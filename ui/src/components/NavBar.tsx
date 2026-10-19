@@ -1,7 +1,10 @@
 // Switching views where the layout cannot show them all: tabs in the side panel's header
 // (tablets, small windows) and a bottom tab bar on phones. CSS decides which one shows.
+// A side panel's header also folds the panel to a rail (hooks/folds.ts); folded, the header is
+// the rail, and its title or tabs open it again.
 
 import { useT } from '../i18n';
+import { FoldButton } from './FoldButton';
 
 export type View = 'globe' | 'station' | 'browse';
 
@@ -35,18 +38,35 @@ interface HeadProps {
   /** Right of the title (the result count). */
   aside?: string;
   count?: string;
+  /** Folded to a rail, and the button that folds it (none where the layout can't). */
+  folded: boolean;
+  onFold: () => void;
+  /** The panel's id, which the fold button controls. */
+  panelId: string;
 }
 
 /** A side panel's header: its title, or the Station/Stations tabs when the two share a column. */
-export function PanelHead({ own, onView, aside, count }: HeadProps) {
+export function PanelHead({ own, onView, aside, count, folded, onFold, panelId }: HeadProps) {
   const t = useT();
+  const title = own === 'station' ? t.station : t.stations;
+  const label = folded ? t.expandPanel(title) : t.collapsePanel(title);
   return (
     <header className="panel-head">
       <h2 className="h panel-title">
-        <span>{own === 'station' ? t.station : t.stations}</span>
-        {aside && <span aria-live="polite">{aside}</span>}
+        {folded ? (
+          <button className="panel-rail" type="button" aria-expanded={false} aria-controls={panelId} title={label} onClick={onFold}>
+            <span>{title}</span>
+            {count && <small>{count}</small>}
+          </button>
+        ) : (
+          <span>{title}</span>
+        )}
+        {aside && <span className="panel-aside" aria-live="polite">{aside}</span>}
       </h2>
       <ViewTabs className="panel-tabs" views={['station', 'browse']} current={own} onView={onView} count={count} />
+      {/* the list folds to the left, the station to the right (styles.css turns the list's below
+          three columns, where it shares the right-hand column) */}
+      <FoldButton className="panel-fold" edge={own === 'browse' ? 'left' : 'right'} expanded={!folded} label={label} onClick={onFold} controls={panelId} />
     </header>
   );
 }

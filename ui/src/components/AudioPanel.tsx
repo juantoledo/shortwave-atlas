@@ -1,6 +1,6 @@
 // Rig audio and the audio waterfall, in the desktop app and the remote browser: the dock's
 // right-hand cell. The waterfall box is always there (empty until you listen), so the dock
-// does not jump; `audio-x` parts fold away on phones until the dock is expanded.
+// does not jump; `audio-x` parts fold away while the cell is folded (hooks/folds.ts; its chevron unfolds it).
 // The same stream carries an internet station instead of the rig while the receiver is tuned to
 // one (the NET band): Listen plays whatever it is tuned to. With the rig's audio off it offers
 // Listen while an internet station is tuned, and invites to set the rig's audio up otherwise.
@@ -11,6 +11,7 @@ import { AudioPlayer, type PlayerBuffer, type PlayerStatus } from '../audio/play
 import { cwDelta, SP_H, Waterfall, WF_H, WF_W } from '../audio/waterfall';
 import { useT, type Messages } from '../i18n';
 import type { NetNow } from '../types/generated/NetNow';
+import { FoldButton } from './FoldButton';
 import { bufferPct, canListen } from './net';
 
 const ROW_MS = 50;
@@ -18,6 +19,8 @@ const ROW_MS = 50;
 /** What the keyboard can do to the audio (App's shortcuts). */
 export interface AudioKeys {
   toggle: () => void;
+  /** Start listening if it isn't and there is something to hear; true if it is now. */
+  listen: () => boolean;
   mute: () => void;
   volume: (d: number) => void;
 }
@@ -48,6 +51,9 @@ interface Props {
   onSetUp: () => void;
   /** Listening started or stopped (the map's point beats meanwhile). */
   onListening: (on: boolean) => void;
+  /** Unfolded: the volume, the span and the waterfall show. */
+  expanded: boolean;
+  onExpand: () => void;
 }
 
 /** What the panel says about the internet station: connecting, or why it stopped. */
@@ -61,7 +67,7 @@ function netLine(t: Messages, n: NetNow): string {
   }
 }
 
-export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onTune, keys, rigAudio, net, onSetUp, onListening }: Props) {
+export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onTune, keys, rigAudio, net, onSetUp, onListening, expanded, onExpand }: Props) {
   const t = useT();
   const spans = [...new Set([3000, 4000, rate / 2])].filter((s) => s <= rate / 2);
   const [span, setSpan] = useState(spans[0]);
@@ -76,7 +82,7 @@ export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onT
   useEffect(() => {
     if (!player) return;
     const wf = new Waterfall(wfRef.current!, spRef.current!, player.analyser);
-    // drawn only while it shows (it folds away on phones, or scrolls out of sight)
+    // drawn only while it shows (it folds away, or scrolls out of sight)
     let shown = true;
     const io = typeof IntersectionObserver === 'undefined' ? null
       : new IntersectionObserver(([e]) => { shown = e.isIntersecting; });
@@ -123,7 +129,13 @@ export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onT
     } else setVolume(unmuted.current || 0.8);
   };
   useEffect(() => () => { if (keys) keys.current = null; }, [keys]);
-  if (keys) keys.current = { toggle, mute, volume: (d) => setVolume((v) => Math.round(Math.min(1, Math.max(0, v + d)) * 100) / 100) };
+  const listen = () => {
+    if (player) return true;
+    if (!listenable) return false;
+    toggle();
+    return true;
+  };
+  if (keys) keys.current = { toggle, listen, mute, volume: (d) => setVolume((v) => Math.round(Math.min(1, Math.max(0, v + d)) * 100) / 100) };
 
   const isCW = !net && (mode === 'CW' || mode === 'CWR') && !!cwPitch;
   const toneAt = (clientX: number) => {
@@ -152,6 +164,7 @@ export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onT
             {spans.map((s) => <option key={s} value={s}>{s / 1000} kHz</option>)}
           </select>
         </label>
+        <FoldButton className="dock-more" edge="bottom" expanded={expanded} label={expanded ? t.lessAudio : t.moreAudio} onClick={onExpand} />
         <span className="audio-st">{netNote || statusText(t, status)}</span>
       </div>
       <div

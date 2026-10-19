@@ -214,7 +214,11 @@ export function useStationSearch(api: Api | null, filters: Filters, refresh: unk
 
   useEffect(() => {
     setSt((s) => ({ ...s, loading: true }));
-    const t = setTimeout(() => { load(PAGE_ROWS).catch(() => {}); }, SEARCH_DEBOUNCE_MS);
+    // a first page that fails ends the wait (the list's loading bar stops); the core's status says why
+    const t = setTimeout(() => {
+      const my = seq.current + 1;
+      load(PAGE_ROWS).catch(() => { if (my === seq.current) setSt((s) => ({ ...s, loading: false })); });
+    }, SEARCH_DEBOUNCE_MS);
     const r = setInterval(() => { load(Math.max(PAGE_ROWS, shown.current)).catch(() => {}); }, ON_AIR_REFRESH_MS);
     return () => {
       clearTimeout(t);
