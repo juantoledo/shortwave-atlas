@@ -45,3 +45,4 @@ channel = "stable"            # "beta" also offers release candidates
 
 [net]                         # the NET band: internet radio from radio-browser.info (public-domain directory)
 enabled = false               # off until you turn it on; or Settings → Sources. Searches go to radio-browser.info
+# buffer_ms = 4000            # stream audio held: 1000, 2000, 4000, 8000 or 16000; unset = grows when a stream cuts out

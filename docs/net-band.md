@@ -328,9 +328,23 @@ switches every window over, and tuning the rig, a scan or turning internet radio
   - Stations that can't play here are left out of the list: HLS, other codecs, and streams whose
     codec the directory doesn't know. Paging follows the directory's offsets, and an empty page
     is read past.
-- **Pacing:** PCM is mono 16-bit at 32 kHz (`NET_RATE`). A `JitterBuffer` holds 1.5 s before
-  playing, at most 5 s, and hands out one block per tick, so network bursts don't reach the
-  player.
+- **Pacing:** PCM is mono 16-bit at 32 kHz (`NET_RATE`). A `JitterBuffer` fills to its size
+  before playing (and again after the stream runs dry), holds that plus 3 s (or the size again)
+  at most, and hands out one block per tick, so network bursts don't reach the player.
+- **Buffer size:** automatic by default: each stream starts at 2 s and goes up a step of
+  `NET_BUFFER_STEPS_MS` (1, 2, 4, 8, 16 s) each time it runs dry, never down, so a station that
+  keeps cutting out ends up with enough held to ride over it. The listener can pick a fixed size
+  instead (`Call::SetNetBuffer`, saved as `[net] buffer_ms`; unset is automatic). It applies to
+  the stream playing at once.
+- **The funnel:** on the NET faceplate the buffer is drawn in the whole dial's place as a funnel
+  on its side (`NetFunnel.tsx`, geometry in `funnel.ts`): the stream pours in at the mouth and
+  leaves through the spout, on a log scale from 0.5 s to 32 s so each size is one equal section.
+  The audio held fills it from the spout, a gate marks the size it fills to (`buffer_target_ms`),
+  a dashed line where the oldest starts to go (`buffer_max_ms`). The sections' labels and an Auto
+  button pick the size; while Auto is on, the size it has grown to is lit.
+- **States:** `Connecting` (fetching and filling up), `Playing`, `Buffering` (it ran dry and is
+  filling up again), `Failed`. The faceplate shows a chip while it connects or fills
+  (`Buffering 40%`, of the size it fills to), and the UI asks every 0.5 s meanwhile.
 - **Safety:** the UI sends only a station uuid. The server reads the station's details, counts the
   click (`/json/url/{uuid}`), and opens the URL only if `stream_url_ok` allows it: http(s), no
   local or private addresses.

@@ -22,7 +22,9 @@ use atlas_core::audio::{
     cards_from_names, find_device, parse_asound, pick_capture_format, rate_drift, AudioChoice, AudioStatus,
     AudioTuning, CaptureFailure, CaptureFormat, CaptureOffer, Converter, SampleKind, SoundCard,
 };
-use atlas_core::net::{JitterBuffer, NetNow, NetPlaying, NetState, NetStream, NET_RATE};
+use atlas_core::net::{
+    net_buffer_max_ms, JitterBuffer, NetNow, NetPlaying, NetState, NetStream, NET_BUFFER_AUTO_START_MS, NET_RATE,
+};
 use atlas_core::platform::Os;
 use bytes::Bytes;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -68,6 +70,8 @@ struct Inner {
     net: Option<NetStream>,
     /// Why its stream last failed, and when.
     net_failed: Option<(Instant, String)>,
+    /// The listener's buffer for internet streams (`None`: automatic).
+    net_buffer: Option<u32>,
 }
 
 impl Inner {
@@ -183,6 +187,7 @@ impl AudioHub {
                 log: VecDeque::new(),
                 net: None,
                 net_failed: None,
+                net_buffer: None,
             }),
         })
     }
@@ -209,8 +214,8 @@ impl AudioHub {
             let (hub, generation) = (Arc::downgrade(self), inner.generation);
             match inner.net.clone() {
                 Some(stream) => {
-                    let block_ms = inner.choice.tuning.block_ms;
-                    inner.capture = Some(crate::net_audio::start(hub, generation, stream, block_ms)?);
+                    let (block_ms, buffer) = (inner.choice.tuning.block_ms, inner.net_buffer);
+                    inner.capture = Some(crate::net_audio::start(hub, generation, stream, block_ms, buffer)?);
                     inner.net_failed = None;
                 }
                 None => {
@@ -252,6 +257,16 @@ impl AudioHub {
         was
     }
 
+    /// The buffer for internet streams: a size from `NET_BUFFER_STEPS_MS`, or `None` (automatic).
+    /// The stream playing takes it at once.
+    pub fn set_net_buffer(&self, ms: Option<u32>) {
+        let mut inner = self.inner.lock().expect("audio lock");
+        inner.net_buffer = ms;
+        if let Some(j) = inner.capture.as_ref().and_then(|c| c.jitter.as_ref()) {
+            j.lock().expect("jitter buffer").set(ms);
+        }
+    }
+
     /// An internet station is the source (playing, connecting or failed).
     pub fn net_selected(&self) -> bool {
         self.inner.lock().expect("audio lock").net.is_some()
@@ -262,21 +277,31 @@ impl AudioHub {
     pub fn net_now(&self) -> Option<NetNow> {
         let inner = self.inner.lock().expect("audio lock");
         let stream = inner.net.as_ref()?;
+        let jitter = inner.capture.as_ref().and_then(|c| c.jitter.as_ref()).map(|j| {
+            let j = j.lock().expect("jitter buffer");
+            (j.held_ms(), j.target_ms(), j.max_ms(), j.playing())
+        });
         let state = match (&inner.net_failed, inner.running, &inner.capture) {
             (Some((_, why)), _, _) => NetState::Failed { message: why.clone() },
+            (None, true, _) if jitter.is_some_and(|(.., playing)| !playing) => NetState::Buffering,
             (None, true, _) => NetState::Playing,
             (None, false, Some(_)) => NetState::Connecting,
             (None, false, None) => NetState::Tuned,
         };
-        let buffer_ms = inner
-            .capture
-            .as_ref()
-            .and_then(|c| c.jitter.as_ref())
-            .map_or(0, |j| j.lock().expect("jitter buffer").held_ms());
+        let (buffer_ms, buffer_target_ms, buffer_max_ms) = jitter.map_or_else(
+            || {
+                let target = inner.net_buffer.unwrap_or(NET_BUFFER_AUTO_START_MS);
+                (0, target, net_buffer_max_ms(target))
+            },
+            |(held, target, max, _)| (held, target, max),
+        );
         Some(NetNow {
             station: stream.station.clone(),
             state,
             buffer_ms,
+            buffer_target_ms,
+            buffer_max_ms,
+            buffer_setting_ms: inner.net_buffer,
             place: None,
             route: None,
             sun: None,
@@ -700,8 +725,19 @@ mod tests {
         hub.tune_net(station("a", "http://127.0.0.1:9/"));
         let now = hub.net_now().unwrap();
         assert_eq!((now.state, now.buffer_ms, hub.status().listeners), (NetState::Tuned, 0, 0));
+        assert_eq!((now.buffer_target_ms, now.buffer_setting_ms), (NET_BUFFER_AUTO_START_MS, None));
+        hub.set_net_buffer(Some(8_000));
+        let now = hub.net_now().unwrap();
+        assert_eq!((now.buffer_target_ms, now.buffer_max_ms, now.buffer_setting_ms), (8_000, 16_000, Some(8_000)));
         let sub = hub.subscribe().unwrap();
-        assert!(matches!(hub.net_now().unwrap().state, NetState::Connecting | NetState::Failed { .. }));
+        let now = hub.net_now().unwrap();
+        assert!(matches!(now.state, NetState::Connecting | NetState::Failed { .. }));
+        // the stream's buffer takes the listener's size, and a new one at once
+        if now.state == NetState::Connecting {
+            assert_eq!(now.buffer_target_ms, 8_000);
+            hub.set_net_buffer(Some(1_000));
+            assert_eq!(hub.net_now().unwrap().buffer_target_ms, 1_000);
+        }
         drop(sub);
         hub.shutdown().await;
     }

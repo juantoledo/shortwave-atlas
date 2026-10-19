@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { NO_FILTERS, type Filters } from '../hooks/useCore';
 import type { NetNow } from '../types/generated/NetNow';
 import { netRings, route, siteColor, siteRings, skyLook, skyRoute, skyStrands, splashRings } from './stage/fx';
-import { audioCell, bufferSegs, canListen, dimSites, favFilter, isNet, lensFilters, leaveNet, mixesNet, NET_BAND, NET_DOT_ID, netCountryOpts, netQuery, netSiteDots, playingUuid, stepChannel, streamLabel } from './net';
+import { audioCell, canListen, dimSites, favFilter, isNet, lensFilters, leaveNet, mixesNet, NET_BAND, NET_DOT_ID, netCountryOpts, netPhase, netQuery, netSiteDots, playingUuid, stepChannel, streamLabel } from './net';
 
 const radio: Filters = { ...NO_FILTERS, q: 'radio', langs: ['S'], regions: ['am'], countries: ['ARG'], sources: ['eibi'], site: 7, scan: 's1', lens: 'all' };
 const onNet: Filters = { ...radio, bands: [NET_BAND] };
@@ -60,12 +60,13 @@ describe('NET band', () => {
     expect(audioCell(false, true)).toBe('panel');
     expect(audioCell(false, false)).toBe('off');
     const station = { uuid: 'u1', name: 'La 100', itu: 'ARG', flag: 'ar', langs: [], tags: [], codec: 'MP3', bitrate: 128, hls: false, homepage: null, ok: true, votes: 0, playable: true, pos: null };
-    const playing: NetNow = { station, state: { state: 'playing' }, buffer_ms: 1500, place: null, route: null, sun: null, listened_secs: 0 };
+    const playing: NetNow = { station, state: { state: 'playing' }, buffer_ms: 1500, buffer_target_ms: 2000, buffer_max_ms: 5000, buffer_setting_ms: null, place: null, route: null, sun: null, listened_secs: 0 };
     expect(canListen(false, null)).toBe(false);
     expect(canListen(false, playing)).toBe(true);
     expect(canListen(true, null)).toBe(true);
     expect(playingUuid(playing)).toBe('u1');
     expect(playingUuid({ ...playing, state: { state: 'connecting' } })).toBe('u1');
+    expect(playingUuid({ ...playing, state: { state: 'buffering' } })).toBe('u1');
     expect(playingUuid({ ...playing, state: { state: 'failed', message: 'gone' } })).toBeNull();
     expect(playingUuid(null)).toBeNull();
   });
@@ -81,10 +82,18 @@ describe('NET band', () => {
     expect(stepChannel([], 'a', 1)).toBeNull();
   });
 
-  it('fills the buffer meter over 5 s', () => {
-    expect(bufferSegs(0, 11)).toBe(0);
-    expect(bufferSegs(2500, 11)).toBe(6);
-    expect(bufferSegs(9000, 11)).toBe(11);
+  it('says when the stream is connecting or buffering', () => {
+    const station = { uuid: 'u1', name: 'La 100', itu: 'ARG', flag: 'ar', langs: [], tags: [], codec: 'MP3', bitrate: 128, hls: false, homepage: null, ok: true, votes: 0, playable: true, pos: null };
+    const n: NetNow = { station, state: { state: 'tuned' }, buffer_ms: 0, buffer_target_ms: 4000, buffer_max_ms: 7000, buffer_setting_ms: null, place: null, route: null, sun: null, listened_secs: 0 };
+    expect(netPhase(n, false)).toEqual({ kind: 'tuned' });
+    // Listen pressed, before the server says so
+    expect(netPhase(n, true)).toEqual({ kind: 'connecting' });
+    expect(netPhase({ ...n, state: { state: 'connecting' } }, true)).toEqual({ kind: 'connecting' });
+    expect(netPhase({ ...n, state: { state: 'connecting' }, buffer_ms: 1000 }, true)).toEqual({ kind: 'buffering', pct: 25 });
+    expect(netPhase({ ...n, state: { state: 'buffering' }, buffer_ms: 4000 }, true)).toEqual({ kind: 'buffering', pct: 99 });
+    expect(netPhase({ ...n, state: { state: 'buffering' }, buffer_ms: 1 }, true)).toEqual({ kind: 'buffering', pct: 1 });
+    expect(netPhase({ ...n, state: { state: 'playing' }, buffer_ms: 4000 }, true)).toEqual({ kind: 'playing' });
+    expect(netPhase({ ...n, state: { state: 'failed', message: 'gone' } }, true)).toEqual({ kind: 'failed' });
   });
 
   it('finds favorites by name or label', () => {

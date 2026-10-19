@@ -187,6 +187,11 @@ pub enum Call {
     NetStop,
     /// The internet station tuned, if any (result: `NetNow | null`).
     NetNow,
+    /// The internet stream's buffer: a size from `net::NET_BUFFER_STEPS_MS`, or `None` to size it
+    /// automatically. Applies to the stream playing at once, and is saved.
+    SetNetBuffer {
+        ms: Option<u32>,
+    },
     /// The internet stations kept, in memory-channel order (result: `NetFavorite[]`).
     NetFavorites,
     /// Keep an internet station, or relabel the one kept (result: `NetFavorite`).
@@ -442,6 +447,8 @@ mod tests {
             (r#"{"cmd":"net_overview"}"#, Call::NetOverview),
             (r#"{"cmd":"net_stop"}"#, Call::NetStop),
             (r#"{"cmd":"net_now"}"#, Call::NetNow),
+            (r#"{"cmd":"set_net_buffer","args":{"ms":null}}"#, Call::SetNetBuffer { ms: None }),
+            (r#"{"cmd":"set_net_buffer","args":{"ms":4000}}"#, Call::SetNetBuffer { ms: Some(4000) }),
             (
                 r#"{"cmd":"net_stats","args":{"period":"week","tz_offset_min":60}}"#,
                 Call::NetStats(StatsQuery { period: crate::stats::Period::Week, tz_offset_min: 60 }),

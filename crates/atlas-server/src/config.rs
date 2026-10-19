@@ -143,6 +143,9 @@ pub struct NetConfig {
     /// Offer the NET band in the station list; its searches go to radio-browser.info. Off until
     /// the listener turns it on (Settings → Sources).
     pub enabled: bool,
+    /// Stream audio held ahead, in milliseconds: one of `NET_BUFFER_STEPS_MS`; unset = sized
+    /// automatically (it grows each time a stream runs dry). Or the NET faceplate's buffer pick.
+    pub buffer_ms: Option<u32>,
 }
 
 /// Default config directory: `~/.config/swatlas` on Linux.
@@ -332,6 +335,15 @@ pub fn save_update(path: &Path, check: bool, channel: Channel) -> Result<(), Str
 /// Write the NET band's switch into the `[net]` table, the same way as `save_rig`.
 pub fn save_net(path: &Path, enabled: bool) -> Result<(), String> {
     save_table(path, "net", [("enabled", enabled.into())], &[])
+}
+
+/// Write the internet stream's buffer into the `[net]` table, the same way as `save_rig`
+/// (automatic: no `buffer_ms`).
+pub fn save_net_buffer(path: &Path, ms: Option<u32>) -> Result<(), String> {
+    match ms {
+        Some(ms) => save_table(path, "net", [("buffer_ms", i64::from(ms).into())], &[]),
+        None => save_table(path, "net", [], &["buffer_ms"]),
+    }
 }
 
 /// Set `keys` in table `name` of the TOML at `path` and remove `obsolete`, keeping everything else.
@@ -589,6 +601,25 @@ channel = \"beta\"",
         save_update(&path, false, Channel::Beta).unwrap();
         let c: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!((c.update.check, c.update.channel, c.rig.model), (false, Channel::Beta, 1042));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn net_buffer_is_saved_and_cleared() {
+        let path = tmp("net-buffer");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, include_str!("../../../docs/swatlas.example.toml")).unwrap();
+        let c: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(c.net, NetConfig { enabled: false, buffer_ms: None }, "automatic unless set");
+        save_net_buffer(&path, Some(8_000)).unwrap();
+        save_net(&path, true).unwrap();
+        let c: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(c.net, NetConfig { enabled: true, buffer_ms: Some(8_000) });
+        save_net_buffer(&path, None).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# buffer_ms = 4000"), "the comment stays: {text}");
+        let c: AppConfig = toml::from_str(&text).unwrap();
+        assert_eq!(c.net, NetConfig { enabled: true, buffer_ms: None });
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
