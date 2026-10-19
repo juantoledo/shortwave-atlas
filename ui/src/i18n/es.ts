@@ -31,6 +31,7 @@ export const es: Messages = {
 
   receiver: 'Receptor',
   freqLabel: 'Frecuencia en kHz',
+  freqWheelHint: 'Gira la rueda sobre una cifra para sintonizarla; haz clic para escribir',
   mode: 'Modo',
   signal: 'Señal',
   signalMeter: 'Medidor de señal',

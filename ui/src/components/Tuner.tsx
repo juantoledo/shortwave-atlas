@@ -33,6 +33,7 @@ import {
 } from './dial';
 import { Dropdown, type DropOpt } from './Dropdown';
 import { Knob } from './Knob';
+import { Readout } from './Readout';
 import { profilePath, type Profile } from './scan';
 
 const MODES: Mode[] = ['AM', 'USB', 'LSB', 'CW', 'AMN', 'FM'];
@@ -68,19 +69,6 @@ export function meterSegments(db: number | null): number {
   if (db === null) return 0;
   const s = db <= 0 ? 9 + db / 6 : 9 + db / 10;
   return Math.round(Math.min(METER_SEGS, Math.max(0, s)));
-}
-
-/** The readout: Hz in dot groups, padded to 000.000.000. */
-export function fmtReadout(hz: number): string {
-  return String(Math.round(hz)).padStart(9, '0').replace(/\B(?=(\d{3})+$)/g, '.');
-}
-
-/** Typed text -> Hz: the readout's 000.000.000 form is Hz, a plain or decimal number is kHz. */
-export function parseReadout(s: string): number {
-  const t = String(s).replace(/[\s  ]/g, '');
-  if (/^\d{1,3}\.\d{3}\.\d{3}$/.test(t)) return Number(t.replace(/\./g, ''));
-  const n = Number(t.replace(',', '.'));
-  return t !== '' && Number.isFinite(n) ? n * 1000 : NaN;
 }
 
 /** Station marks: off-air ones dim, on-air ones lit (a separate svg, so the glow stays round). */
@@ -204,19 +192,6 @@ interface Props {
 export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans, coverage, win, profiles, heat, scanBar, star, expanded, onExpand, onTune, onMode, net, onNetSpan }: Props) {
   const t = useT();
   const names = useNames();
-  const shown = freqHz === null ? '' : fmtReadout(freqHz);
-  const [text, setText] = useState(shown);
-  const [editing, setEditing] = useState(false);
-  useEffect(() => {
-    if (!editing) setText(shown);
-  }, [shown, editing]);
-
-  const commit = () => {
-    setEditing(false);
-    const hz = parseReadout(text);
-    if (Number.isNaN(hz)) setText(shown);
-    else onTune(hz);
-  };
   const nudge = (khz: number) => { if (on && freqHz !== null) onTune(freqHz + khz * 1000); };
 
   const { w, khz } = win;
@@ -362,21 +337,7 @@ export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans,
         <div className="rx-top">
           <label className="sr" htmlFor="freq">{t.freqLabel}</label>
           <div className="readout">
-            <input
-              className="freq"
-              id="freq"
-              type="text"
-              inputMode="decimal"
-              autoComplete="off"
-              spellCheck={false}
-              disabled={!on}
-              value={on ? text : '---.---.---'}
-              onFocus={(e) => { setEditing(true); e.currentTarget.select(); }}
-              onChange={(e) => setText(e.currentTarget.value)}
-              onBlur={commit}
-              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-              onWheel={(e) => nudge(e.deltaY < 0 ? 1 : -1)}
-            />
+            <Readout on={on} freqHz={freqHz} coverage={coverage} onTune={onTune} />
             <span className="unit">Hz</span>
             {star}
           </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fmtReadout, parseReadout } from './Tuner';
+import { fmtReadout, parseReadout, readoutPlaces } from './Readout';
 
 describe('readout', () => {
   it('shows Hz as 000.000.000', () => {
@@ -16,5 +16,12 @@ describe('readout', () => {
     expect(parseReadout('9500,5')).toBe(9_500_500);
     expect(parseReadout('')).toBeNaN();
     expect(parseReadout('abc')).toBeNaN();
+  });
+
+  it('knows what each digit is worth, and that dots are worth nothing', () => {
+    expect(readoutPlaces('009.500.000')).toEqual([
+      1e8, 1e7, 1e6, null, 1e5, 1e4, 1e3, null, 100, 10, 1,
+    ]);
+    expect(readoutPlaces('')).toEqual([]);
   });
 });
