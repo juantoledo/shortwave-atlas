@@ -1,6 +1,7 @@
 // The window is the receiver: a top bar, the globe in the middle with the station list on its
 // left and the tuned station on its right, and the faceplate (dial and audio) along the bottom.
 // Smaller screens fold the side panels into tabs (styles.css); `view` says which one shows.
+// The side panels fold to rails and the faceplate's cells to one line (`data-folded`, useFolds).
 // The globe may also be drawn behind the whole window (`data-globe`, Settings → Display).
 // Stats (`data-page="stats"`) takes the middle of the window; the top bar and faceplate stay.
 
@@ -27,6 +28,7 @@ import { chromeFor } from './api/window';
 import { makeNames, NamesProvider } from './catalog/names';
 import { NO_FILTERS, useCandidates, useCore, useDial, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
 import { PHONE, useMedia } from './hooks/useMedia';
+import { useFolds } from './hooks/useFolds';
 import { useFavorites } from './hooks/useFavorites';
 import { findSite, oneOf, readFilters, readSiteRef, readString, usePersisted, type SiteRef } from './hooks/usePersisted';
 import { useDisplay } from './hooks/useDisplay';
@@ -96,9 +98,18 @@ export function App() {
   const [statsPeriod, setStatsPeriod] = usePersisted<Period>('swatlas.statsPeriod', 'week', oneOf('day', 'week', 'month', 'year', 'all'));
   /** Another view (the phone's bottom tabs, a list action) leaves Stats. */
   const setView = useCallback((v: View) => { setPage('main'); setViewRaw(v); }, []);
-  const [dockOpen, setDockOpen] = useState(false);
-  const [touchedGlobe, setTouchedGlobe] = useState(false);
   const phone = useMedia(PHONE);
+  const folds = useFolds();
+  /** Bring the station list into sight: its view on phones (leaving Stats), elsewhere its tab,
+   *  unfolded. */
+  const showList = () => {
+    if (phone) return setView('browse');
+    setViewRaw('browse');
+    folds.reveal('browse');
+  };
+  /** A panel's tabs or rail: that view, unfolded. */
+  const openView = (v: View) => { setView(v); if (v !== 'globe') folds.reveal(v); };
+  const [touchedGlobe, setTouchedGlobe] = useState(false);
   const t = useMemo(() => pickMessages(info?.lang, navigator.languages), [info?.lang]);
   useEffect(() => { document.documentElement.lang = t.locale; }, [t]);
   useEffect(() => {
@@ -236,6 +247,8 @@ export function App() {
     const s = filters.site === null ? null : sites.find((x) => x.id === filters.site);
     setSiteRef(s ? { name: s.name, lat: s.lat, lon: s.lon } : null);
   }, [filters.site]);
+  const showListRef = useRef(showList);
+  showListRef.current = showList;
   const siteLabel = useCallback((s: SiteDot) => (s.id >= NET_DOT_ID
     ? { country: t.netBand, onAir: t.netDotCount(s.total) }
     : { country: names.country(s.itu), onAir: t.siteOnAir(s.on, s.total) }), [names, t]);
@@ -248,7 +261,7 @@ export function App() {
     } else {
       setFilters((f) => ({ ...leaveNet(f), site: f.site === id ? null : id }));
     }
-    setView('browse');
+    showListRef.current();
   }, []);
 
   const [frame, setFrame] = useState(true);
@@ -278,7 +291,8 @@ export function App() {
   const toggleStats = () => setPage((p) => (p === 'stats' ? 'main' : 'stats'));
   const statsCountry = (itu: string) => {
     setFilters((f) => ({ ...leaveNet(f), countries: [itu], lens: 'all', scan: null, site: null }));
-    setView(phone ? 'browse' : view);
+    setPage('main');
+    showList();
   };
   const statsGlobe = () => {
     setFilters((f) => ({ ...leaveNet(f), lens: 'listened', scan: null }));
@@ -338,7 +352,7 @@ export function App() {
   // hears light up when it ends (the logbook is only written then)
   const startScan = (bandId: string, stepHz: number, speed: ScanSpeed) => {
     setFilters({ ...NO_FILTERS, lens: 'heard', sort: 'recent' });
-    if (phone) setView('browse');
+    showList();
     void scan.start(bandId, stepHz, speed);
   };
   const runningSince = scan.status.state === 'running' ? scan.status.started : null;
@@ -353,7 +367,7 @@ export function App() {
   const showScan = (id: string) => {
     setSheet(null);
     setFilters((f) => ({ ...leaveNet(f), scan: id, lens: 'all' }));
-    if (phone) setView('browse');
+    showList();
   };
   // the listener's own stations: the form, and where it opens from
   const addStation = (c: Candidate | null) => {
@@ -379,7 +393,7 @@ export function App() {
   const toggleFavorites = () => {
     const to = filters.lens === 'favorites' ? 'all' : 'favorites';
     setFilters((f) => ({ ...f, lens: to }));
-    if (phone && to === 'favorites') setView('browse');
+    if (to === 'favorites') showList();
   };
 
   // the stars: the station shown, and the tuned frequency (with the station if it is on it)
@@ -440,18 +454,19 @@ export function App() {
   };
   const toNetBand = () => {
     setFilters((f) => ({ ...f, bands: [NET_BAND], lens: 'all' }));
-    if (phone) setView('browse');
+    showList();
   };
   const focusSearch = (select: boolean) => {
-    if (phone) setView('browse');
+    const hidden = phone || folds.folded('browse');
+    showList();
     const go = () => {
       const el = searchRef.current;
       el?.focus();
       if (select) el?.select();
     };
     go();
-    // on phones the panel only shows after the view change renders
-    if (phone) requestAnimationFrame(go);
+    // a hidden panel only shows after the change renders
+    if (hidden) requestAnimationFrame(go);
   };
   useKeys(sheet !== null || askOff || welcome.open, (a: Action) => {
     switch (a.kind) {
@@ -518,7 +533,7 @@ export function App() {
   return (
     <I18nProvider value={t}>
       <NamesProvider value={names}>
-      <div className="app" data-view={view} data-page={page === 'stats' ? 'stats' : undefined} data-dock={dockOpen ? 'open' : undefined} data-globe={display.fullGlobe ? 'full' : 'framed'} data-map={display.map}>
+      <div className="app" data-view={view} data-page={page === 'stats' ? 'stats' : undefined} data-folded={folds.attr || undefined} data-globe={display.fullGlobe ? 'full' : 'framed'} data-map={display.map}>
         <TopBar
           info={info}
           chrome={api ? chromeFor(api.transport.kind, info?.os) : null}
@@ -572,8 +587,8 @@ export function App() {
           <Hud faded={touchedGlobe} flat={display.map === 'flat'} />
         </main>
 
-        <section className="panel browse" aria-label={t.stations}>
-          <PanelHead own="browse" onView={setView} aside={count} count={shortCount} />
+        <section className={'panel browse' + (folds.folded('browse') ? ' folded' : '')} id="panel-browse" aria-label={t.stations}>
+          <PanelHead own="browse" onView={openView} aside={count} count={shortCount} folded={folds.folded('browse')} onFold={() => folds.toggle('browse')} panelId="panel-browse" />
           <StationList
             on={on}
             meta={meta}
@@ -613,8 +628,8 @@ export function App() {
           />
         </section>
 
-        <section className="panel station" aria-label={t.station} aria-live="polite">
-          <PanelHead own="station" onView={setView} count={shortCount} />
+        <section className={'panel station' + (folds.folded('station') ? ' folded' : '')} id="panel-station" aria-label={t.station} aria-live="polite">
+          <PanelHead own="station" onView={openView} count={shortCount} folded={folds.folded('station')} onFold={() => folds.toggle('station')} panelId="panel-station" />
           {netNow ? (
             <NetDossier now={netNow} country={netCountryName(netNow.station.itu)} star={netStar} onBackToRig={stopNet} />
           ) : (
@@ -675,8 +690,8 @@ export function App() {
                 onRemove={() => tunedFav && favs.remove(tunedFav.id)}
               />
             )}
-            expanded={dockOpen}
-            onExpand={() => setDockOpen((o) => !o)}
+            expanded={!folds.folded('rx')}
+            onExpand={() => folds.toggle('rx')}
             onTune={tune}
             onMode={setMode}
             net={netFace}
@@ -697,6 +712,8 @@ export function App() {
               net={netNow}
               onSetUp={() => openSettings('audio')}
               onListening={setAudioOn}
+              expanded={!folds.folded('audio')}
+              onExpand={() => folds.toggle('audio')}
             />
           ) : (
             info && <AudioOff onSetUp={() => openSettings('audio')} />

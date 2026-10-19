@@ -72,6 +72,10 @@ export const en = {
   listenHeat: 'Where you have listened with a good signal: brighter for longer and stronger',
   moreControls: 'More receiver controls',
   lessControls: 'Fewer receiver controls',
+  moreAudio: 'More audio controls',
+  lessAudio: 'Fewer audio controls',
+  collapsePanel: (name: string) => `Collapse ${name}`,
+  expandPanel: (name: string) => `Expand ${name}`,
 
   station: 'Station',
   onAir: 'On the air',

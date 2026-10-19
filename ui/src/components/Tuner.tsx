@@ -4,8 +4,8 @@
 // utility bands on another, with a lens over where the band dial looks; and the dual tuning
 // knob at the right; under the band dial, the scan controls, and over it the strength profile of
 // the band's last scan (or the one running) with the scan before it as a ghost, and under it a
-// heat strip of the channels listened to with a valid signal. `rx-x` parts fold away on small
-// screens until expanded.
+// heat strip of the channels listened to with a valid signal. `rx-x` parts fold away while the
+// receiver is folded (hooks/folds.ts; its chevron unfolds it).
 // Tuned to an internet station (the NET band), the same faceplate becomes an internet receiver:
 // the station's name in the readout, its stream where the modes were, the NET favorites as
 // memory channels on the band dial (the arrows and the knob step through them), the audio held
@@ -18,6 +18,7 @@ import { useNames } from '../catalog/names';
 import { useMeter, type Meter } from '../hooks/meter';
 import { sLabel, useT } from '../i18n';
 import { altName, isMac } from '../keys/keymap';
+import { FoldButton } from './FoldButton';
 import type { Band } from '../types/generated/Band';
 import { Flag } from './Flag';
 import type { NetPhase } from './net';
@@ -289,16 +290,7 @@ export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans,
               <span className="chip"><Flag flag={net.flag} title={net.country} />{net.country}</span>
               {phaseText && <span className={'chip net-state ' + ph.kind}>{phaseText}</span>}
             </div>
-            <button
-              className="icon-btn dock-more"
-              type="button"
-              aria-expanded={expanded}
-              aria-label={expanded ? t.lessControls : t.moreControls}
-              title={expanded ? t.lessControls : t.moreControls}
-              onClick={onExpand}
-            >
-              {expanded ? '⌄' : '⌃'}
-            </button>
+            <FoldButton className="dock-more" edge="bottom" expanded={expanded} label={expanded ? t.lessControls : t.moreControls} onClick={onExpand} />
           </div>
 
           <div className="bdial">
@@ -393,16 +385,7 @@ export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans,
               <button key={m} type="button" role="radio" aria-checked={on && mode === m} disabled={!on} title={`${ALT}${i + 1}`} onClick={() => onMode(m)}>{MODE_LABEL[m] ?? m}</button>
             ))}
           </div>
-          <button
-            className="icon-btn dock-more"
-            type="button"
-            aria-expanded={expanded}
-            aria-label={expanded ? t.lessControls : t.moreControls}
-            title={expanded ? t.lessControls : t.moreControls}
-            onClick={onExpand}
-          >
-            {expanded ? '⌄' : '⌃'}
-          </button>
+          <FoldButton className="dock-more" edge="bottom" expanded={expanded} label={expanded ? t.lessControls : t.moreControls} onClick={onExpand} />
         </div>
 
         <div className="bdial">

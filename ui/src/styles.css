@@ -9,6 +9,9 @@
      < 600px           phone: one view at a time (bottom tabs), compact faceplate
      max-height 520px  short screens: compact faceplate
      max-height 700px  a tighter faceplate
+   Folding (hooks/folds.ts, `data-folded`): a side panel to a rail (the tabbed column as one
+   below 1280px; never on phones), the receiver and the audio cell to their first line. Each
+   size keeps its own choice; below 900px wide, short windows and phones start folded.
    The globe is either framed in the stage or drawn behind the whole window with frosted panels
    (data-globe="full"; see the block after the stage). */
 :root {
@@ -89,7 +92,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   padding:
     max(var(--gap), env(safe-area-inset-top)) max(var(--gap), env(safe-area-inset-right))
     max(var(--gap), env(safe-area-inset-bottom)) max(var(--gap), env(safe-area-inset-left));
-  grid-template-columns: 360px minmax(0, 1fr) 360px;
+  --rail: 40px;
+  --browse-col: 360px;
+  --station-col: 360px;
+  --side-col: 360px;
+  grid-template-columns: var(--browse-col) minmax(0, 1fr) var(--station-col);
   grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas: "top top top" "browse stage station" "dock dock dock";
 }
@@ -100,10 +107,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .dock { grid-area: dock; }
 .toast { grid-area: stage; }
 .tabs.nav { display: none; }
+/* a folded panel: a rail, and the globe takes the room (no transition: the globe would resize
+   with every frame of it) */
+.app[data-folded~="browse"] { --browse-col: var(--rail); }
+.app[data-folded~="station"] { --station-col: var(--rail); }
+.app[data-folded~="side"] { --side-col: var(--rail); }
 
 /* one side column with tabs */
 @media (max-width: 1279px) {
-  .app { grid-template-columns: minmax(0, 1fr) 360px; grid-template-areas: "top top" "stage side" "dock dock"; }
+  .app { grid-template-columns: minmax(0, 1fr) var(--side-col); grid-template-areas: "top top" "stage side" "dock dock"; }
   .browse, .station { grid-area: side; }
   .app:not([data-view="browse"]) .browse { display: none; }
   .app[data-view="browse"] .station { display: none; }
@@ -111,7 +123,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .panel-head .panel-tabs { display: flex; }
 }
 @media (max-width: 899px) {
-  .app { grid-template-columns: minmax(0, 1fr) 300px; }
+  .app { --side-col: 300px; }
 }
 
 /* phones: one view at a time */
@@ -456,9 +468,46 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
   padding: 14px 16px; background: var(--panel-bg); border: 1px solid var(--line); border-radius: var(--radius);
   animation: fade-in 0.15s ease-out both;
 }
-.panel-head { flex: none; margin-bottom: 10px; }
-.panel-title { margin: 0; }
-.panel-tabs { display: none; margin: -6px -4px 0; }
+.panel-head { flex: none; display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.panel-title { flex: 1; min-width: 0; margin: 0; }
+.panel-tabs { flex: 1; min-width: 0; display: none; margin: -6px -4px 0; }
+/* fold buttons (FoldButton.tsx): a quiet square with one chevron, turned to point the way the
+   panel or cell will go (drawn pointing down) */
+.fold-btn {
+  display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; padding: 0;
+  background: transparent; border: 1px solid var(--line); border-radius: 7px; color: var(--dim);
+  transition: color 0.12s, background-color 0.12s, border-color 0.12s;
+}
+.fold-btn[aria-expanded="false"] { color: var(--text); border-color: var(--line-strong); }
+.fold-btn:hover { color: var(--amber); background: var(--amber-soft); border-color: rgba(255, 179, 63, 0.45); }
+.fold-chev { width: 12px; height: 8px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transition: rotate 0.18s ease-out; }
+.fold-btn[data-edge="left"] .fold-chev, .fold-btn[data-edge="right"][aria-expanded="false"] .fold-chev { rotate: 90deg; }
+.fold-btn[data-edge="right"] .fold-chev, .fold-btn[data-edge="left"][aria-expanded="false"] .fold-chev { rotate: -90deg; }
+.fold-btn[data-edge="bottom"][aria-expanded="false"] .fold-chev { rotate: 180deg; }
+@media (prefers-reduced-motion: reduce) { .fold-chev { transition: none; } }
+/* the list folds to the left, the station (and the tabbed column) to the right */
+.panel-fold { width: 26px; height: 26px; margin: -4px -4px -4px 0; }
+@media (max-width: 1279px) {
+  .browse .panel-fold .fold-chev { rotate: -90deg; }
+  .browse .panel-fold[aria-expanded="false"] .fold-chev { rotate: 90deg; }
+}
+@media (max-width: 599px) { .panel-fold { display: none; } }
+/* folded: the header is the rail, its title (or the tabs) written down it */
+.panel.folded { padding: 8px 0; }
+.panel.folded > :not(.panel-head) { display: none; }
+.panel.folded .panel-head { flex: 1; flex-direction: column; align-items: center; gap: 10px; margin: 0; }
+.panel.folded .panel-fold { order: -1; margin: 0; }
+.panel.folded .panel-title { flex: none; justify-content: center; }
+.panel.folded .panel-aside { display: none; }
+.panel.folded .panel-tabs { flex: none; flex-direction: column; gap: 6px; margin: 0; border-bottom: 0; }
+.panel.folded .panel-tabs button { writing-mode: vertical-rl; flex: none; min-height: 0; min-width: var(--hit); padding: 10px 6px; margin: 0; border-bottom: 0; border-left: 2px solid transparent; }
+.panel.folded .panel-tabs button[aria-selected="true"] { border-left-color: var(--amber); }
+.panel-rail {
+  writing-mode: vertical-rl; display: inline-flex; align-items: center; gap: 8px; padding: 8px 6px;
+  background: none; border: 0; border-radius: 6px; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit;
+}
+.panel-rail:hover { color: var(--text); background: rgba(140, 185, 230, 0.08); }
+.panel-rail small { font-size: 10px; letter-spacing: 0.04em; opacity: 0.8; }
 
 /* station dossier */
 .dossier { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-width: thin; container-type: size; }
@@ -840,7 +889,10 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .segs i { width: 7px; height: 14px; border-radius: 1px; background: rgba(140, 185, 230, 0.14); transition: background 0.12s; }
 .segs i.on { background: var(--amber); }
 .sval { min-width: 4.5ch; font: 500 12px var(--font-mono); font-variant-numeric: tabular-nums; }
-.dock-more { display: none; margin-left: auto; }
+.dock-more { margin-left: auto; }
+/* folded cells: their first line (⌃ unfolds them) */
+.app[data-folded~="rx"] .rx-x, .app[data-folded~="audio"] .audio-x { display: none; }
+@media (min-height: 701px) and (min-width: 600px) { .app[data-folded~="rx"] .knob { --k: 88px; } }
 
 /* the dual tuning knob: a knurled outer ring (fast) round a smooth cap (slow); --a turns each */
 .knob { --k: 168px; position: relative; width: var(--k); height: var(--k); flex: none; touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -1018,6 +1070,12 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .audio.off { justify-content: center; }
 .audio.off p { margin: 0; }
 
+/* the audio cell folded beside the receiver: only as wide as its line */
+@media (min-width: 900px) {
+  .app[data-folded~="audio"] .dock { grid-template-columns: minmax(0, 1fr) auto; }
+  .app[data-folded~="audio"] .audio { justify-content: center; max-width: 340px; }
+}
+
 /* side by side no more: the audio cell goes under the receiver */
 @media (max-width: 899px) {
   .dock { grid-template-columns: minmax(0, 1fr); }
@@ -1028,10 +1086,8 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
   .audio.off .h { margin: 0; }
 }
 
-/* short windows, phones: the faceplate folds (whole dial, S-meter, audio extras); ⌃ unfolds it */
+/* short windows, phones: a tighter faceplate (folded at first: hooks/folds.ts) */
 @media (max-height: 700px), (max-width: 599px) {
-  .dock-more { display: inline-grid; }
-  .app:not([data-dock="open"]) .rx-x, .app:not([data-dock="open"]) .audio-x { display: none; }
   .freq { font-size: 30px; width: 11ch; }
   .rx { gap: 8px; padding: 10px 14px; }
   .rx-top { gap: 8px 12px; }
@@ -1044,6 +1100,7 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
   .audio.off .h { margin: 0; }
   .audio-row { flex-wrap: nowrap; }
   .audio-st { flex: 1 1 auto; }
+  .audio-row .dock-more { order: 1; margin-left: 0; }
 }
 @media (max-width: 599px) {
   .dock { gap: var(--gap); }
@@ -1072,7 +1129,7 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 /* phones on their side: the faceplate is one line (⌃ for the dials) */
 @media (max-height: 520px) and (min-width: 600px) {
   .app { --gap: 8px; }
-  .app:not([data-dock="open"]) .bdial { display: none; }
+  .app[data-folded~="rx"] .bdial { display: none; }
   .audio .wf-wrap, .audio .axis { display: none; }
   .audio.off .note { display: none; }
   .dock { grid-template-columns: minmax(0, 1fr) auto; }

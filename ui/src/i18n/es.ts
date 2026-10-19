@@ -57,6 +57,10 @@ export const es: Messages = {
   listenHeat: 'Dónde has escuchado con buena señal: más brillante cuanto más tiempo y más fuerte',
   moreControls: 'Más controles del receptor',
   lessControls: 'Menos controles del receptor',
+  moreAudio: 'Más controles de audio',
+  lessAudio: 'Menos controles de audio',
+  collapsePanel: (name) => `Contraer ${name}`,
+  expandPanel: (name) => `Expandir ${name}`,
 
   station: 'Estación',
   onAir: 'Al aire',
