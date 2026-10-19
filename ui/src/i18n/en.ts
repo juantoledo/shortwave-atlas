@@ -46,6 +46,7 @@ export const en = {
 
   receiver: 'Receiver',
   freqLabel: 'Frequency in kHz',
+  freqWheelHint: 'Scroll over a digit to tune by it; click to type',
   mode: 'Mode',
   signal: 'Signal',
   signalMeter: 'Signal meter',

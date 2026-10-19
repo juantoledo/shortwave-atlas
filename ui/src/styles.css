@@ -909,6 +909,9 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 .rx { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 20px; container-type: inline-size; }
 .rx-main {
   display: flex; flex-direction: column; gap: 10px; min-width: 0;
+  /* from the top: the band dial grows with a scan profile or heat strip, and centred against the
+     knob that would move the readout under the pointer */
+  align-self: start;
   /* the controls' column (band, scan, signal), the same in each row; the strips take the rest */
   --rx-side: clamp(280px, 32cqi, 310px);
 }
@@ -919,6 +922,13 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
   font: italic 44px/1.05 var(--font-freq); font-weight: var(--weight-bold); letter-spacing: 0.01em; font-variant-numeric: tabular-nums;
   color: #fff; text-shadow: 0 0 18px rgba(255, 255, 255, 0.35);
 }
+.freq-wrap { position: relative; display: inline-block; }
+/* the digits over the readout while you are not typing: scroll over one to tune by it */
+.freq-digits { position: absolute; inset: 0; width: auto; white-space: pre; cursor: ns-resize; user-select: none; }
+/* Goldman's digits are proportional (no tnum): a cell each, so tuning never moves one under the pointer */
+.freq-digits [data-p] { display: inline-block; width: 1ch; text-align: center; }
+.freq-digits [data-p]:hover { color: var(--amber); }
+.freq-wrap.show input.freq { color: transparent; text-shadow: none; }
 .unit { font: 500 13px var(--font-mono); letter-spacing: 0.1em; color: var(--dim); }
 .rx.off .freq { color: #4b5b6c; text-shadow: none; }
 .rx.off .dial, .rx.off .bdial, .rx.off .knob { opacity: 0.45; }
