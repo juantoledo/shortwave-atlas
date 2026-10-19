@@ -257,7 +257,7 @@ pub(crate) mod fake {
         pub fn new(packaging: Packaging, offer: Option<&str>) -> Arc<Self> {
             let release = offer.map(|v| Release {
                 version: v.into(),
-                notes: "notes".into(),
+                notes: atlas_core::release_notes::parse("notes"),
                 pub_date: None,
                 url: atlas_core::update::RELEASES_PAGE.into(),
             });

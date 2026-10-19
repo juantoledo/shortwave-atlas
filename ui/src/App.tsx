@@ -830,6 +830,8 @@ export function App() {
             onTopic={(topic) => setSheet({ kind: 'help', topic })}
             version={info?.version ?? null}
             meta={meta}
+            api={api}
+            offered={update.status && 'release' in update.status.state ? update.status.state.release ?? null : null}
             onClose={() => setSheet(null)}
           />
         )}

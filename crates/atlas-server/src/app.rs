@@ -519,6 +519,7 @@ impl Atlas {
             }
             Call::AudioDiagnostics => json(serde_json::to_value(self.audio_diagnostics())),
             Call::UpdateStatus => json(serde_json::to_value(self.update.status())),
+            Call::ReleaseNotes => json(serde_json::to_value(atlas_core::release_notes::this_version())),
             Call::CheckUpdate => json(serde_json::to_value(self.update.check_now().await)),
             Call::InstallUpdate => {
                 self.install_update()?;
@@ -1169,6 +1170,8 @@ pub(crate) mod tests {
 
         let s = atlas.call(Call::UpdateStatus).await.unwrap();
         assert_eq!((s["state"]["state"].as_str(), s["install"]["kind"].as_str()), (Some("idle"), Some("auto")));
+        let notes = atlas.call(Call::ReleaseNotes).await.unwrap();
+        assert_eq!(notes[0]["kind"], "heading");
         let e = atlas.call(Call::InstallUpdate).await.unwrap_err();
         assert_eq!(e.kind, ErrorKind::Conflict, "nothing offered yet");
         let s = atlas.call(Call::CheckUpdate).await.unwrap();

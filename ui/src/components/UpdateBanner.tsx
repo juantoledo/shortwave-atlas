@@ -6,6 +6,7 @@ import type { TransportKind } from '../api/transport';
 import { useDismiss } from '../hooks/useDismiss';
 import { updateView, type UpdateApi } from '../hooks/useUpdate';
 import { useT } from '../i18n';
+import { ReleaseNotes } from './ReleaseNotes';
 
 interface Props {
   update: UpdateApi;
@@ -52,10 +53,10 @@ export function UpdateBanner({ update, transport, onError }: Props) {
           <h2>{t.updateTitle(v.version)}</h2>
           {update.status && <p className="note">{t.updateCurrent(update.status.current)}</p>}
 
-          {v.notes && (
+          {v.notes.length > 0 && (
             <details className="log" open={v.phase === 'offer'}>
               <summary>{t.updateNotes}</summary>
-              <pre>{v.notes}</pre>
+              <ReleaseNotes blocks={v.notes} />
             </details>
           )}
 

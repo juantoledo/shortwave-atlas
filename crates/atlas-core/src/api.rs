@@ -85,6 +85,8 @@ pub enum Call {
     AudioDiagnostics,
     /// Update check and install progress (result: `UpdateStatus`).
     UpdateStatus,
+    /// This build's release notes, from its section of the changelog (result: `NoteBlock[]`).
+    ReleaseNotes,
     /// Check for an update now (result: `UpdateStatus`).
     CheckUpdate,
     /// Download, verify and install the offered update, then restart. Returns at once;

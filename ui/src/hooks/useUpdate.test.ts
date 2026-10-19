@@ -3,7 +3,7 @@ import type { Release } from '../types/generated/Release';
 import type { UpdateStatus } from '../types/generated/UpdateStatus';
 import { updateView } from './useUpdate';
 
-const release: Release = { version: '0.2.0', notes: '* banner', pub_date: null, url: 'https://github.com/o/r/releases/tag/v0.2.0' };
+const release: Release = { version: '0.2.0', notes: [{ kind: 'list', items: [[{ kind: 'text', text: 'banner' }]] }], pub_date: null, url: 'https://github.com/o/r/releases/tag/v0.2.0' };
 const status = (patch: Partial<UpdateStatus>): UpdateStatus => ({
   current: '0.1.0',
   check: true,
