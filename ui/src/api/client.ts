@@ -23,6 +23,7 @@ import type { NetNow } from '../types/generated/NetNow';
 import type { NetPage } from '../types/generated/NetPage';
 import type { NetQuery } from '../types/generated/NetQuery';
 import type { NetStats } from '../types/generated/NetStats';
+import type { NoteBlock } from '../types/generated/NoteBlock';
 import type { Overview } from '../types/generated/Overview';
 import type { Qth } from '../types/generated/Qth';
 import type { RigChoice } from '../types/generated/RigChoice';
@@ -75,6 +76,7 @@ export class Api {
   audioDiagnostics = () => this.transport.call({ cmd: 'audio_diagnostics' }) as Promise<AudioDiagnostics>;
 
   updateStatus = () => this.transport.call({ cmd: 'update_status' }) as Promise<UpdateStatus>;
+  releaseNotes = () => this.transport.call({ cmd: 'release_notes' }) as Promise<NoteBlock[]>;
   checkUpdate = () => this.transport.call({ cmd: 'check_update' }) as Promise<UpdateStatus>;
   /** Desktop window only: a remote browser gets an `invalid` error. */
   installUpdate = () => this.transport.call({ cmd: 'install_update' }) as Promise<null>;

@@ -6,6 +6,7 @@ import type { Api } from '../api/client';
 import type { TransportKind } from '../api/transport';
 import type { Channel } from '../types/generated/Channel';
 import type { ManualReason } from '../types/generated/ManualReason';
+import type { NoteBlock } from '../types/generated/NoteBlock';
 import type { UpdateStatus } from '../types/generated/UpdateStatus';
 
 /** The core checks by itself; this only picks its result up. */
@@ -23,7 +24,7 @@ export type UpdateAction =
 
 export interface UpdateView {
   version: string;
-  notes: string;
+  notes: NoteBlock[];
   url: string;
   phase: 'offer' | 'downloading' | 'installing' | 'failed';
   /** Download progress 0-100, `null` when the size is unknown. */

@@ -21,7 +21,7 @@ import { StationList } from './components/StationList';
 import { TopBar } from './components/TopBar';
 import { Tuner, useBandWindow } from './components/Tuner';
 import { DEFAULT_COVERAGE, HF_SPAN } from './components/dial';
-import { bandOf, noiseFloor } from './components/scan';
+import { bandOf, noiseFloor, scanFilters } from './components/scan';
 import { keyOf, MINE } from './components/sources';
 import { UpdateBanner } from './components/UpdateBanner';
 import { chromeFor } from './api/window';
@@ -366,7 +366,7 @@ export function App() {
   // the station list narrowed to a scan, or showing the favorites
   const showScan = (id: string) => {
     setSheet(null);
-    setFilters((f) => ({ ...leaveNet(f), scan: id, lens: 'all' }));
+    setFilters((f) => scanFilters(f, id));
     showList();
   };
   // the listener's own stations: the form, and where it opens from
@@ -710,6 +710,7 @@ export function App() {
                 on={on}
                 band={win.w.band}
                 status={scan.status}
+                stuckDb={bandScans.summary?.stuck_db ?? null}
                 onStart={startScan}
                 onStop={scan.stop}
               />
@@ -829,6 +830,8 @@ export function App() {
             onTopic={(topic) => setSheet({ kind: 'help', topic })}
             version={info?.version ?? null}
             meta={meta}
+            api={api}
+            offered={update.status && 'release' in update.status.state ? update.status.state.release ?? null : null}
             onClose={() => setSheet(null)}
           />
         )}

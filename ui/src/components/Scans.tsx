@@ -66,6 +66,7 @@ function Detail({ s, full, onTune, onShow, onDelete }: DetailProps) {
         {t.scanMeta(stepKhz(s.step_hz), paceLabel(t, s), sLabel(s.noise_db))} · {t.scanOutcome[s.outcome.kind]}
         {s.outcome.kind === 'failed' && <span className="warn">{` · ${s.outcome.message}`}</span>}
       </p>
+      {s.stuck_db !== null && <p className="note warn" role="note">{t.scanStuck(sLabel(s.stuck_db))}</p>}
       <div className="scan-big" aria-hidden="true">
         <svg viewBox={`0 0 ${MARKS_W} 1`} preserveAspectRatio="none">
           <path className="peaks" d={marks} />
@@ -146,6 +147,7 @@ function ScanItem({ s, asking, onOpen, onAsk, onDelete }: ItemProps) {
         <span>
           {t.scanCount(tl.signals, tl.logged, tl.expected)}
           {s.outcome.kind !== 'complete' && ` · ${t.scanOutcome[s.outcome.kind]}`}
+          {s.stuck_db !== null && <em className="scan-stuck-tag">{` · ${t.scanStuckTag}`}</em>}
         </span>
       </button>
       <button className="icon-btn scan-del-one" type="button" aria-label={t.scanDeleteOne} title={t.scanDeleteOne} onClick={() => onAsk(!asking)}>✕</button>

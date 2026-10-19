@@ -12,7 +12,7 @@ import type { Verdict } from '../types/generated/Verdict';
 
 /** Hint texts that differ on some OS (the shared text is the Linux one). */
 /** Help topics, in the order the Help index lists them. */
-export const HELP_TOPICS = ['start', 'globe', 'lists', 'stats', 'about'] as const;
+export const HELP_TOPICS = ['start', 'globe', 'lists', 'stats', 'notes', 'about'] as const;
 export type HelpTopic = (typeof HELP_TOPICS)[number];
 
 type ByOs<H extends string> = Partial<Record<Os, Partial<Record<H, [string, string]>>>>;
@@ -486,6 +486,9 @@ export const en = {
   scanMissed: 'On the air, not heard',
   scanMissedNone: 'Every station on the air was heard.',
   scanNoSignals: 'No signal over the noise.',
+  scanStuck: (s: string) => `The S-meter read ${s} on almost every step: the receiver heard nothing, whatever was on the air. Check the RF gain (and the attenuator), then scan again.`,
+  scanStuckTag: 'S-meter stuck',
+  scanStuckLast: (s: string) => `Last scan heard nothing: the S-meter stuck at ${s}. Check the RF gain.`,
   verdicts: { sure: 'Identified', ambiguous: 'One of these', unidentified: 'Not in the schedule' } as Record<Verdict, string>,
   scanDelete: 'Delete',
   scanDeleteAsk: 'Delete this scan? Its stations leave the log unless another scan logged them.',
@@ -506,8 +509,13 @@ export const en = {
     globe: ['The globe', 'The globe shows day and night as they are now, every transmitter site in the schedule, and the path from the station you are tuned to down to your QTH. Globe and Flat, over the zoom buttons, switch between the globe and a flat map of the whole world; this device remembers which.'],
     lists: ['Stations, scans and favorites', 'The station list has three views. All is the whole schedule. Heard is what your band scans actually received, across every band, in one list: the stations they logged and the signals no station explains, with the best reading and when each was last heard. Sort it by frequency, strength or how recent. Favorites are the stations and frequencies you keep: press ☆ next to a station\'s name or next to the frequency. They are one list on any band, whatever the filters, with your internet favorites after the radio ones; only the search narrows it. With internet radio on, searching words on All also shows the first internet stations found, with a link to the rest on the NET band. In a scan, Show in the station list narrows the list to the stations that scan heard and missed, so you can go through them with the globe in view. Favorites are kept on the computer that runs Shortwave Atlas, so every window sees the same ones. A click on a row tunes it; a double-click (or Shift+Enter) tunes it and starts listening.'],
     stats: ['Stats', 'Stats keeps a history of what you listen to: stay on a frequency for 30 seconds, with the radio on and no scan running, and a session starts; it ends when you tune away or turn the radio off. The station is the one on the air there, or the one you pick. Overview shows when, what and how far, against the period before. Collection is a quiet game layer: a passport of countries, badges and a monthly bingo card (hide it in Settings › Display). Propagation shows which band came in best at each hour, grey-line catches and the faintest signals you stayed on. Hunt suggests stations on the air now that are new to you. Clean up forgets old sessions or all of them, after asking. The history is kept on the computer that runs Shortwave Atlas.'],
+    notes: ['Release notes', 'What changed in the version you are running, and in the new one when an update is available.'],
     about: ['About', 'Shows the station you are tuned to, live, from the frequency your radio reports.'],
   } as Record<HelpTopic, [string, string]>,
+  notesThisVersion: (v: string) => `This version: ${v}`,
+  notesNone: 'No release notes for this version.',
+  notesLoading: 'Loading…',
+  notesUnavailable: 'The release notes could not be loaded.',
   byAuthor: 'by CD3DXZ Juan',
   aboutBlurb: "Live shortwave broadcast schedule on a 3D globe. See what's on the air right now, then tune it on your own radio via Hamlib. Receive only. Desktop app for Linux, Windows and macOS, or a browser UI from a headless server. Station data from EiBi.",
   sourceCode: 'Source code on GitHub',

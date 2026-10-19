@@ -32,6 +32,13 @@ pub const READS: u32 = 3;
 pub const READ_GAP_MS: u32 = 60;
 /// A signal stands at least this far over the noise floor (one S-unit).
 pub const SIGNAL_DB: i32 = 6;
+/// A meter that sits at this or higher (S7) on a whole band, hardly moving, did not hear it: RF
+/// gain turned down, or the AGC or the meter held (`meter_stuck`).
+pub const STUCK_FLOOR_DB: i16 = -12;
+/// How little the readings may spread (10th to 90th percentile) for the meter to count as stuck.
+pub const STUCK_SPREAD_DB: i16 = 3;
+/// Readings needed to tell: fewer say too little.
+pub const STUCK_MIN_POINTS: usize = 10;
 /// `ScanSummary::version` of what this build writes.
 pub const FORMAT_VERSION: u32 = 1;
 /// Steps a running scan's status keeps in `pings` (the UI polls slower than a fast scan steps).
@@ -329,6 +336,10 @@ pub struct ScanSummary {
     pub sources: Vec<SourceStamp>,
     /// The median reading, dB relative to S9.
     pub noise_db: Option<i16>,
+    /// The reading the meter was stuck at, when it was (`meter_stuck`): the receiver heard
+    /// nothing, whatever was on the air. Worked out again when scans load.
+    #[serde(default)]
+    pub stuck_db: Option<i16>,
     /// Grid points measured.
     pub measured: u32,
     pub peaks: Vec<Peak>,
@@ -441,6 +452,7 @@ pub struct Logged {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Found {
     pub noise_db: Option<i16>,
+    pub stuck_db: Option<i16>,
     pub peaks: Vec<Peak>,
     pub missed: Vec<StationRef>,
 }
@@ -453,6 +465,21 @@ pub fn noise_floor(samples: &[Option<i16>]) -> Option<i16> {
     }
     v.sort_unstable();
     Some(v[(v.len() - 1) / 2])
+}
+
+/// The reading a meter was stuck at across a scan, if it was: nearly every step read the same,
+/// at S7 or more. A band always varies by tens of dB from channel to channel, noise included;
+/// this is a receiver turned deaf (RF gain down, the AGC or the meter held). A flat reading at
+/// S0 is not counted: that is also a closed band.
+pub fn meter_stuck(samples: &[Option<i16>]) -> Option<i16> {
+    let mut v: Vec<i16> = samples.iter().flatten().copied().collect();
+    if v.len() < STUCK_MIN_POINTS {
+        return None;
+    }
+    v.sort_unstable();
+    let at = |q: usize| v[(v.len() - 1) * q / 100];
+    let (low, median, high) = (at(10), at(50), at(90));
+    (median >= STUCK_FLOOR_DB && high - low <= STUCK_SPREAD_DB).then_some(median)
 }
 
 /// Grid points that stand `SIGNAL_DB` over `floor` and above their neighbours (the first of a
@@ -520,7 +547,7 @@ pub fn analyse(cat: &Catalog, first_hz: u32, step_hz: u32, samples: &[Option<i16
             stations,
         })
         .collect();
-    Found { noise_db: Some(floor), peaks, missed }
+    Found { noise_db: Some(floor), stuck_db: meter_stuck(samples), peaks, missed }
 }
 
 /// The peaks of a scan still running, measured up to grid point `upto` (excluded): as `analyse`
@@ -825,6 +852,28 @@ mod tests {
         assert_eq!(local_peaks(&[None, Some(0), None, Some(-48)], -48), [1]);
     }
 
+    #[test]
+    fn a_meter_stuck_high_is_told() {
+        let steps = |n: usize, db: i16| vec![Some(db); n];
+        // RF gain down: S8 on every step, or nearly (a couple of strong signals still through)
+        assert_eq!(meter_stuck(&steps(141, -5)), Some(-5));
+        let mut few = steps(141, -5);
+        few[40] = Some(4);
+        few[90] = Some(2);
+        few[91] = None;
+        assert_eq!(meter_stuck(&few), Some(-5));
+        // too few readings to tell
+        assert_eq!(meter_stuck(&steps(STUCK_MIN_POINTS - 1, -5)), None);
+        // flat at S0: a closed band reads that too
+        assert_eq!(meter_stuck(&steps(141, -54)), None);
+        // a band heard: noise that varies, and signals over it
+        let heard: Vec<Option<i16>> = (0..141).map(|i| Some([-54, -42, -35, -30, -35, -38, 2, -24][i % 8])).collect();
+        assert_eq!(meter_stuck(&heard), None);
+        // a loud band (S7 noise) still moves the meter
+        let loud: Vec<Option<i16>> = (0..141).map(|i| Some([-14, -10, -12, -6, -16, -12, 0, -12][i % 8])).collect();
+        assert_eq!(meter_stuck(&loud), None);
+    }
+
     fn names(refs: &[StationRef]) -> Vec<(u32, &str)> {
         refs.iter().map(|r| (r.freq_hz / 1000, r.name.as_str())).collect()
     }
@@ -944,6 +993,7 @@ mod tests {
             rig: "sim".into(),
             sources: vec![SourceStamp { id: EIBI.into(), version: "sked-a26.csv".into() }],
             noise_db: Some(-48),
+            stuck_db: None,
             measured: 101,
             peaks,
             missed: vec![],

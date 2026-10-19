@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::platform::Os;
+use crate::release_notes::{self, NoteBlock};
 
 /// Every release, for a manual download when no release page is known.
 pub const RELEASES_PAGE: &str = "https://github.com/juantoledo/shortwave-atlas/releases";
@@ -51,8 +52,8 @@ impl Channel {
 pub struct Release {
     /// Without the tag's `v`: `0.2.0`, `0.2.0-rc.1`.
     pub version: String,
-    /// Release notes (Markdown), empty if there are none.
-    pub notes: String,
+    /// Release notes, parsed from the release's Markdown; empty if there are none.
+    pub notes: Vec<NoteBlock>,
     /// RFC 3339, as written by the release workflow.
     pub pub_date: Option<String>,
     /// The release page, for a manual download.
@@ -82,7 +83,7 @@ pub fn parse_manifest(json: &str) -> Result<Release, String> {
     let version = m.version.trim().trim_start_matches('v').to_string();
     Version::parse(&version).map_err(|e| format!("bad version in update manifest {:?}: {e}", m.version))?;
     let url = m.platforms.values().find_map(|p| release_page(&p.url)).unwrap_or_else(|| RELEASES_PAGE.into());
-    Ok(Release { version, notes: m.notes.unwrap_or_default(), pub_date: m.pub_date, url })
+    Ok(Release { version, notes: release_notes::parse(&m.notes.unwrap_or_default()), pub_date: m.pub_date, url })
 }
 
 /// `https://github.com/o/r/releases/download/v1.2.3/file` -> `https://github.com/o/r/releases/tag/v1.2.3`.
@@ -279,14 +280,14 @@ mod tests {
     }"#;
 
     fn rel(v: &str) -> Release {
-        Release { version: v.into(), notes: String::new(), pub_date: None, url: RELEASES_PAGE.into() }
+        Release { version: v.into(), notes: vec![], pub_date: None, url: RELEASES_PAGE.into() }
     }
 
     #[test]
     fn reads_tauri_manifest() {
         let r = parse_manifest(MANIFEST).unwrap();
         assert_eq!(r.version, "0.2.0");
-        assert!(r.notes.contains("update available"));
+        assert!(matches!(r.notes.as_slice(), [NoteBlock::Para { .. }, NoteBlock::List { .. }]), "{:?}", r.notes);
         assert_eq!(r.pub_date.as_deref(), Some("2026-10-20T12:00:00.000Z"));
         assert_eq!(r.url, "https://github.com/juantoledo/shortwave-atlas/releases/tag/v0.2.0");
     }
@@ -294,7 +295,7 @@ mod tests {
     #[test]
     fn manifest_edge_cases() {
         let r = parse_manifest(r#"{"version":"v0.3.0-rc.1"}"#).unwrap();
-        assert_eq!((r.version.as_str(), r.notes.as_str(), r.url.as_str()), ("0.3.0-rc.1", "", RELEASES_PAGE));
+        assert_eq!((r.version.as_str(), r.notes.as_slice(), r.url.as_str()), ("0.3.0-rc.1", &[][..], RELEASES_PAGE));
         assert!(parse_manifest(r#"{"version":"latest"}"#).is_err());
         assert!(parse_manifest("<html>404</html>").is_err());
     }

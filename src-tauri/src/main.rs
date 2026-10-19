@@ -104,7 +104,7 @@ impl Updater for TauriUpdater {
         let found = updater.check().await.map_err(|e| e.to_string())?;
         let release = found.as_ref().map(|u| Release {
             version: u.version.clone(),
-            notes: u.body.clone().unwrap_or_default(),
+            notes: atlas_core::release_notes::parse(u.body.as_deref().unwrap_or_default()),
             pub_date: u.raw_json.get("pub_date").and_then(|d| d.as_str()).map(String::from),
             url: release_page(u.download_url.as_str()).unwrap_or_else(|| RELEASES_PAGE.into()),
         });
