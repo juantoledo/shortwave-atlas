@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.12.2...v0.13.0) (2026-10-19)
+
+
+### Features
+
+* **net:** adaptive stream buffer, drawn as a funnel that picks its size ([c11cf3c](https://github.com/juantoledo/shortwave-atlas/commit/c11cf3c9797ef82fc8769f818605330041edf74c))
+
+
+### Bug Fixes
+
+* **deps:** drop the updater's zip feature (RUSTSEC-2026-0369) ([a2193ad](https://github.com/juantoledo/shortwave-atlas/commit/a2193ad1b555f68a81475d0df24d44f28e3e07f4))
+
 ## [0.12.2](https://github.com/juantoledo/shortwave-atlas/compare/v0.12.1...v0.12.2) (2026-10-16)
 
 
