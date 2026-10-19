@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.13.0...v0.14.0) (2026-10-19)
+
+
+### Features
+
+* **ui:** collapsible side panels and faceplate cells ([e094006](https://github.com/juantoledo/shortwave-atlas/commit/e0940069c877523b8ee2d2b55e997496206da31d))
+* **ui:** show the station list loading, and double-click a station to play it ([fea45fd](https://github.com/juantoledo/shortwave-atlas/commit/fea45fd27acccf5f2b66d4ee08f491a0240428b1))
+
 ## [0.13.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.12.2...v0.13.0) (2026-10-19)
 
 
