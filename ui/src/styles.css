@@ -738,11 +738,54 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 .active-filters { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }
 .active-filters .link { font-size: 12px; }
 .rows { flex: 1; min-height: 0; overflow-y: auto; margin: 10px -6px 0; padding: 0 6px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+/* the list loading (StationList.tsx): a beam sweeping a hairline over the rows (in the NET pink
+   on NET), skeleton rows while there are none yet, the rows shown dimmed while they are
+   replaced. Each waits a moment before showing, so a quick answer shows nothing. */
+.list-bar { flex: none; position: relative; height: 2px; margin: 8px 0 0; overflow: hidden; border-radius: 1px; --beam: var(--amber); }
+.list-bar[data-net] { --beam: var(--net); }
+.list-bar + .rows { margin-top: 0; }
+.list-bar[data-on="true"] { background: rgba(140, 185, 230, 0.08); animation: fade-in 0.2s 0.15s both; }
+.list-bar[data-on="true"]::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 35%;
+  background: linear-gradient(90deg, transparent, var(--beam), transparent);
+  animation: beam-sweep 1.3s linear 0.15s infinite both;
+}
+.rows.stale .list { opacity: 0.45; pointer-events: none; transition: opacity 0.2s 0.15s; }
+.skel { animation: fade-in 0.3s 0.2s both; }
+.skel-row { cursor: default; }
+.skel-row .rn { display: flex; flex-direction: column; gap: 7px; padding: 2px 0; }
+.skel-b {
+  display: block; height: 10px; border-radius: 3px;
+  background: linear-gradient(90deg, rgba(140, 185, 230, 0.07) 0, rgba(140, 185, 230, 0.16) 40%, rgba(140, 185, 230, 0.07) 80%) 0 0 / 300% 100%;
+  animation: skel-shine 1.6s ease-in-out infinite;
+}
+.skel-b.skel-sub { height: 8px; opacity: 0.7; }
+.skel-f { width: 48px; height: 14px; }
+.skel.net .skel-f { width: 34px; height: 16px; border: 1px solid var(--net-line); background: var(--net-soft); animation: none; }
+.skel-dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #3b4a5b; }
+.skel.net .skel-dot { border-color: var(--net-line); }
+@keyframes skel-shine { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.net-slow { flex: none; margin: 6px 0 0; color: var(--net-text); }
+.net-searching { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 12px; color: var(--dim); }
+.net-searching::before { content: ""; width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--net); animation: net-pulse 1s ease-in-out infinite alternate; }
+.btn.net-retry { margin-top: 10px; border-color: var(--net-line); color: var(--net-text); }
+.list.skel .skel-row:hover { background: transparent; }
+.btn.more.loading, .btn.more.loading:disabled { position: relative; overflow: hidden; color: var(--net-text); opacity: 1; cursor: progress; }
+.btn.more.loading::after {
+  content: ""; position: absolute; left: 0; bottom: 0; width: 35%; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--net), transparent); animation: beam-sweep 1.3s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .list-bar[data-on="true"]::after, .btn.more.loading::after { left: 32%; animation: none; }
+  .skel-b, .net-searching::before { animation: none; }
+}
 .list { list-style: none; margin: 0; padding: 0; }
 .row {
   display: grid; grid-template-columns: 60px minmax(0, 1fr) 12px; align-items: center; gap: 12px; width: 100%;
   padding: 9px 6px; text-align: left; background: transparent; border: 0; border-top: 1px solid var(--line);
 }
+/* a double-click plays the row: it selects no text */
+.row { user-select: none; -webkit-user-select: none; }
 .row:hover:not(:disabled) { background: rgba(140, 185, 230, 0.06); }
 .row:disabled { cursor: default; }
 .row[aria-current="true"] { background: var(--amber-soft); }

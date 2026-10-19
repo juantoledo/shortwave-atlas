@@ -410,12 +410,42 @@ export function App() {
   useEffect(() => { if (audioOn) reloadNetNow(); }, [audioOn, reloadNetNow]);
   // an internet station instead of the rig: tuned, as a radio station is; Listen (the audio
   // panel) plays it, and while listening another one switches at once
+  // A click on the station tuned (or being tuned) asks for no new stream: the second click of a
+  // double-click would restart it. One that failed can be clicked again to retry.
+  const netAsked = useRef<string | null>(null);
   const tuneNet = (uuid: string) => {
-    api?.netTune(uuid).then(setNetNow, onError);
+    if (netAsked.current === uuid || (netNow?.station.uuid === uuid && netNow.state.state !== 'failed')) return;
+    netAsked.current = uuid;
+    api?.netTune(uuid)
+      .then(setNetNow, (e) => {
+        if (listenFor.current === uuid) listenFor.current = null;
+        onError(e);
+      })
+      .finally(() => { if (netAsked.current === uuid) netAsked.current = null; });
   };
   const stopNet = () => {
     setNetNow(null);
     api?.netStop().catch(onError);
+  };
+  // A double-click (or Shift+Enter) on a row in the list: tune it and listen. An internet station
+  // can be listened to once its tune lands (with the rig's audio off there is nothing until then);
+  // a radio one leaves the internet station for the rig.
+  const listenFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!netNow || listenFor.current !== netNow.station.uuid) return;
+    listenFor.current = null;
+    audioKeys.current?.listen();
+  }, [netNow]);
+  const playNet = (uuid: string) => {
+    tuneNet(uuid);
+    if (netAsked.current === uuid) listenFor.current = uuid;
+    else audioKeys.current?.listen();
+  };
+  const playRadio = (tuneIt: () => void) => {
+    listenFor.current = null;
+    if (netNow) stopNet();
+    tuneIt();
+    if (info?.audio) audioKeys.current?.listen();
   };
   const netTuned = netNow?.station.uuid ?? null;
   const netFav = netTuned ? netFavs.byUuid.get(netTuned) ?? null : null;
@@ -610,6 +640,8 @@ export function App() {
             scanDb={search.scanDb}
             onPick={pick}
             onPickOff={pickOff}
+            onPlay={(r) => playRadio(() => pick(r))}
+            onPlayOff={(o) => playRadio(() => pickOff(o))}
             onAddOff={addStationOff}
             onTuneHz={tune}
             onMore={search.more}
@@ -624,6 +656,7 @@ export function App() {
               favs: netFavs.list,
               favUuids: netFavUuids,
               onTune: tuneNet,
+              onPlay: playNet,
             }}
           />
         </section>

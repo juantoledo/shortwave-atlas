@@ -19,6 +19,8 @@ const ROW_MS = 50;
 /** What the keyboard can do to the audio (App's shortcuts). */
 export interface AudioKeys {
   toggle: () => void;
+  /** Start listening if it isn't and there is something to hear; true if it is now. */
+  listen: () => boolean;
   mute: () => void;
   volume: (d: number) => void;
 }
@@ -127,7 +129,13 @@ export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onT
     } else setVolume(unmuted.current || 0.8);
   };
   useEffect(() => () => { if (keys) keys.current = null; }, [keys]);
-  if (keys) keys.current = { toggle, mute, volume: (d) => setVolume((v) => Math.round(Math.min(1, Math.max(0, v + d)) * 100) / 100) };
+  const listen = () => {
+    if (player) return true;
+    if (!listenable) return false;
+    toggle();
+    return true;
+  };
+  if (keys) keys.current = { toggle, listen, mute, volume: (d) => setVolume((v) => Math.round(Math.min(1, Math.max(0, v + d)) * 100) / 100) };
 
   const isCW = !net && (mode === 'CW' || mode === 'CWR') && !!cwPitch;
   const toneAt = (clientX: number) => {

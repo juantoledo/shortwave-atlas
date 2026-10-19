@@ -29,15 +29,21 @@ async function somePlayable(api: Api, filters: Filters, offset: number): Promise
 export interface NetSearch {
   items: NetStation[];
   more: boolean;
+  /** The first page of a search is on its way (what is shown is the last search's). */
   loading: boolean;
+  /** A further page is on its way. */
+  loadingMore: boolean;
   /** The directory could not be reached. */
   failed: boolean;
   loadMore: () => void;
+  /** Ask the same search again (after `failed`). */
+  retry: () => void;
 }
 
 /** `active`: the list is on NET; nothing is asked otherwise. */
 export function useNetSearch(api: Api | null, filters: Filters, active: boolean): NetSearch {
-  const [st, setSt] = useState({ items: [] as NetStation[], more: false, next: 0, loading: false, failed: false });
+  const [st, setSt] = useState({ items: [] as NetStation[], more: false, next: 0, loading: false, loadingMore: false, failed: false });
+  const [tries, setTries] = useState(0);
   const seq = useRef(0);
   const q = netQuery(filters, 0, PAGE);
   const key = `${q.q}|${q.country ?? ''}`; // what the search uses of `filters`
@@ -45,24 +51,24 @@ export function useNetSearch(api: Api | null, filters: Filters, active: boolean)
   useEffect(() => {
     seq.current++;
     if (!api || !active) {
-      setSt({ items: [], more: false, next: 0, loading: false, failed: false });
+      setSt({ items: [], more: false, next: 0, loading: false, loadingMore: false, failed: false });
       return;
     }
     const my = seq.current;
-    setSt((s) => ({ ...s, loading: true, failed: false }));
+    setSt((s) => ({ ...s, loading: true, loadingMore: false, failed: false }));
     const t = setTimeout(() => {
       somePlayable(api, filters, 0).then(
-        (p) => { if (my === seq.current) setSt({ items: p.items, more: p.more, next: p.next_offset, loading: false, failed: false }); },
-        () => { if (my === seq.current) setSt({ items: [], more: false, next: 0, loading: false, failed: true }); },
+        (p) => { if (my === seq.current) setSt({ items: p.items, more: p.more, next: p.next_offset, loading: false, loadingMore: false, failed: false }); },
+        () => { if (my === seq.current) setSt({ items: [], more: false, next: 0, loading: false, loadingMore: false, failed: true }); },
       );
     }, DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [api, active, key]); // `key` stands for `filters`
+  }, [api, active, key, tries]); // `key` stands for `filters`
 
   const loadMore = useCallback(() => {
-    if (!api || !active || st.loading || !st.more) return;
+    if (!api || !active || st.loading || st.loadingMore || !st.more) return;
     const my = seq.current;
-    setSt((s) => ({ ...s, loading: true }));
+    setSt((s) => ({ ...s, loadingMore: true }));
     // from where the directory left off: stations that can't play were left out of the pages
     somePlayable(api, filters, st.next).then(
       (p) => {
@@ -70,14 +76,15 @@ export function useNetSearch(api: Api | null, filters: Filters, active: boolean)
         // a station the directory moved between pages shows once
         setSt((s) => {
           const seen = new Set(s.items.map((i) => i.uuid));
-          return { items: [...s.items, ...p.items.filter((i) => !seen.has(i.uuid))], more: p.more, next: p.next_offset, loading: false, failed: false };
+          return { items: [...s.items, ...p.items.filter((i) => !seen.has(i.uuid))], more: p.more, next: p.next_offset, loading: false, loadingMore: false, failed: false };
         });
       },
-      () => { if (my === seq.current) setSt((s) => ({ ...s, loading: false, failed: true })); },
+      () => { if (my === seq.current) setSt((s) => ({ ...s, loadingMore: false, failed: true })); },
     );
-  }, [api, active, key, st.loading, st.more, st.next]);
+  }, [api, active, key, st.loading, st.loadingMore, st.more, st.next]);
+  const retry = useCallback(() => setTries((n) => n + 1), []);
 
-  return { ...st, loadMore };
+  return { ...st, loadMore, retry };
 }
 
 /** Countries with internet stations, for the map, read once the list first goes to NET. */
