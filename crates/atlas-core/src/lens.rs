@@ -290,6 +290,7 @@ mod tests {
             rig: "sim".into(),
             sources: vec![],
             noise_db: Some(-48),
+            stuck_db: None,
             measured: 101,
             peaks,
             missed,

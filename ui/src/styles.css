@@ -1055,6 +1055,9 @@ svg.flag.none { fill: none; stroke: var(--dim); stroke-width: 1.1; box-shadow: n
 @keyframes beam-sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 .scan-info { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-width: 0; }
 .scan-est { font: 400 11px var(--font-mono); color: var(--dim); white-space: nowrap; }
+/* a scan that heard nothing: the S-meter stuck (RF gain down) */
+.scan-stuck-last { font: 400 11px/1.35 var(--font-mono); color: var(--amber); }
+.scan-stuck-tag { font-style: normal; color: var(--amber); }
 .scan-progress { flex: 1 1 120px; max-width: 360px; height: 6px; accent-color: var(--amber); }
 
 /* whole dial: marks, then two lanes of band bars (broadcast; ham, CB and utility), the scale,

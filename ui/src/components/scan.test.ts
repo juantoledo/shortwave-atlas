@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { NO_FILTERS, type Filters } from '../hooks/useCore';
 import type { Band } from '../types/generated/Band';
 import type { ScanSummary } from '../types/generated/ScanSummary';
-import { dbY, gridPoints, lastTwo, noiseFloor, profilePath, scanSecs, speedOf, stepChoices, tally, trail } from './scan';
+import { dbY, gridPoints, lastTwo, noiseFloor, profilePath, scanFilters, scanSecs, speedOf, stepChoices, tally, trail } from './scan';
 
 const b49: Band = { id: '49m', label: '49', kind: 'broadcast', lo_khz: 5800, hi_khz: 6300, scan_step_hz: 5000 };
 const ham10: Band = { id: 'ham-10m', label: '10', kind: 'ham', lo_khz: 28000, hi_khz: 29700, scan_step_hz: 1000 };
@@ -72,7 +73,7 @@ describe('scan summaries', () => {
   const summary = (id: string, band_id: string): ScanSummary => ({
     version: 1, id, band_id, band_label: '49', band_kind: 'broadcast', first_hz: 5_800_000, step_hz: 5000, points: 101, dwell_ms: 300, reads: 3,
     mode: 'AM', started: 0, finished: 1, outcome: { kind: 'complete' }, qth: { name: 'q', lat: 0, lon: 0 }, rig: 'sim', sources: [{ id: 'eibi', version: 'sked-a26.csv' }],
-    noise_db: -48, measured: 101,
+    noise_db: -48, stuck_db: null, measured: 101,
     peaks: [
       { freq_hz: 6_070_000, db: -6, at: 0, verdict: 'sure', stations: [ref('CRI')] },
       { freq_hz: 6_100_000, db: -10, at: 0, verdict: 'ambiguous', stations: [ref('A'), ref('B')] },
@@ -90,5 +91,13 @@ describe('scan summaries', () => {
     expect(lastTwo(all, '49m').map((s) => s?.id)).toEqual(['b', 'a']);
     expect(lastTwo(all, '41m').map((s) => s?.id)).toEqual(['c', undefined]);
     expect(lastTwo(all, '31m')).toEqual([null, null]);
+  });
+});
+
+describe('scanFilters', () => {
+  it('narrows the list to the scan alone, keeping the sort', () => {
+    const set: Filters = { q: 'bbc', bands: ['41m'], langs: ['E'], countries: ['F'], regions: ['eu'], sources: ['eibi'], site: 7, lens: 'heard', scan: 'old', sort: 'strongest' };
+    expect(scanFilters(set, 's1')).toEqual({ ...NO_FILTERS, scan: 's1', sort: 'strongest' });
+    expect(scanFilters({ ...NO_FILTERS, bands: ['net'] }, 's1')).toEqual({ ...NO_FILTERS, scan: 's1' });
   });
 });

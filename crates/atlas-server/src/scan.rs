@@ -7,9 +7,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use atlas_core::api::Qth;
 use atlas_core::scan::{
-    analyse, analyse_so_far, keep_heard, logbook, logged_sites, on_air_sites, scan_id, unidentified, valid_id, Logged,
-    Peak, Scan, ScanOutcome, ScanPing, ScanPlan, ScanStatus, ScanSummary, Signal, FORMAT_VERSION, PINGS_KEPT,
-    READ_GAP_MS,
+    analyse, analyse_so_far, keep_heard, logbook, logged_sites, meter_stuck, on_air_sites, scan_id, unidentified,
+    valid_id, Logged, Peak, Scan, ScanOutcome, ScanPing, ScanPlan, ScanStatus, ScanSummary, Signal, FORMAT_VERSION,
+    PINGS_KEPT, READ_GAP_MS,
 };
 use atlas_core::stations::{Catalog, CatalogCell};
 use atlas_rig::{ScanLink, ScanStop};
@@ -58,7 +58,8 @@ impl Inner {
     }
 }
 
-/// Every scan file in `dir`, newest first; files that do not read are skipped.
+/// Every scan file in `dir`, newest first; files that do not read are skipped. What is worked out
+/// from the samples alone (`meter_stuck`) is worked out again, for scans saved before it was.
 fn load(dir: &Path) -> Vec<Scan> {
     let Ok(entries) = std::fs::read_dir(dir) else { return vec![] };
     let mut scans: Vec<Scan> = entries
@@ -68,9 +69,12 @@ fn load(dir: &Path) -> Vec<Scan> {
         .filter_map(|p| {
             match std::fs::read_to_string(&p)
                 .map_err(|e| e.to_string())
-                .and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string()))
+                .and_then(|s| serde_json::from_str::<Scan>(&s).map_err(|e| e.to_string()))
             {
-                Ok(s) => Some(s),
+                Ok(mut s) => {
+                    s.summary.stuck_db = meter_stuck(&s.samples);
+                    Some(s)
+                }
                 Err(e) => {
                     tracing::warn!("skipping scan {}: {e}", p.display());
                     None
@@ -239,6 +243,7 @@ impl ScanService {
             rig: ctx.rig,
             sources: vec![],
             noise_db: None,
+            stuck_db: None,
             measured: 0,
             peaks: vec![],
             missed: vec![],
@@ -316,6 +321,7 @@ impl ScanService {
                 outcome,
                 sources: cat.stamps(),
                 noise_db: found.noise_db,
+                stuck_db: found.stuck_db,
                 measured,
                 peaks: found.peaks,
                 missed: found.missed,
@@ -377,6 +383,7 @@ mod tests {
                 rig: "sim".into(),
                 sources: vec![],
                 noise_db: Some(-50),
+                stuck_db: None,
                 measured: 2,
                 peaks: vec![],
                 missed: vec![],
@@ -522,6 +529,20 @@ mod tests {
         assert!(!dir.join("a.json").exists() && !dir.join("b.json").exists());
         assert!(dir.join("broken.json").exists() && dir.join("notes.txt").exists());
         assert_eq!(again.delete_all(), Ok(0));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_deaf_scan_saved_before_the_check_is_told_on_load() {
+        let dir = std::env::temp_dir().join(format!("swatlas-scans-stuck-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // RF gain down: S8 on every step; written without `stuck_db`, as older builds did
+        let mut deaf = serde_json::to_value(Scan { samples: vec![Some(-5); 40], ..scan("deaf", 10) }).unwrap();
+        deaf["summary"].as_object_mut().unwrap().remove("stuck_db");
+        std::fs::write(dir.join("deaf.json"), deaf.to_string()).unwrap();
+        let svc = ScanService::new(Some(dir.clone()), crate::sources::bundled_cell());
+        assert_eq!(svc.summary("deaf").unwrap().stuck_db, Some(-5));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -1,10 +1,11 @@
 // The scan controls under the band dial: Scan (or Stop with the progress) for the band you are
 // in, its step and speed, and how long it will take; while it runs, a trace of the latest
-// readings in place of the pickers. The saved scans open from the top bar.
+// readings in place of the pickers; after a scan that heard nothing because the S-meter stuck
+// (RF gain down), a warning until the band is scanned again. The saved scans open from the top bar.
 
 import { useId, useState } from 'react';
 import { useNames } from '../catalog/names';
-import { fmtSecs, useT } from '../i18n';
+import { fmtSecs, sLabel, useT } from '../i18n';
 import type { Band } from '../types/generated/Band';
 import type { ScanSpeed } from '../types/generated/ScanSpeed';
 import type { ScanStatus } from '../types/generated/ScanStatus';
@@ -16,11 +17,13 @@ interface Props {
   /** The band the band dial shows. */
   band: Band | null;
   status: ScanStatus;
+  /** Where the S-meter stuck in the band's last scan, if it did (`ScanSummary::stuck_db`). */
+  stuckDb: number | null;
   onStart: (bandId: string, stepHz: number, speed: ScanSpeed) => void;
   onStop: () => void;
 }
 
-export function ScanBar({ on, band, status, onStart, onStop }: Props) {
+export function ScanBar({ on, band, status, stuckDb, onStart, onStop }: Props) {
   const t = useT();
   const names = useNames();
   const stepId = useId();
@@ -80,6 +83,7 @@ export function ScanBar({ on, band, status, onStart, onStop }: Props) {
         ) : (
           band && <span className="scan-est">{t.scanEstimate(gridPoints(band, step), fmtSecs(t, scanSecs(gridPoints(band, step), speed)))}</span>
         )}
+        {!running && band && stuckDb !== null && <span className="scan-stuck-last" role="status">{t.scanStuckLast(sLabel(stuckDb))}</span>}
       </div>
     </div>
   );

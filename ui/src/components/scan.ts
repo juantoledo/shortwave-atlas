@@ -1,6 +1,7 @@
 // Band scans on the dial: the strength profile as an SVG path over the band dial's window, the
 // steps the picker offers, how long a scan takes, and what a band's last scan says (its chip).
 
+import type { Filters } from '../hooks/useCore';
 import type { Band } from '../types/generated/Band';
 import type { ScanSpeed } from '../types/generated/ScanSpeed';
 import type { ScanSummary } from '../types/generated/ScanSummary';
@@ -109,4 +110,10 @@ export function tally(s: ScanSummary): { logged: number; expected: number; signa
 export function lastTwo(scans: readonly ScanSummary[], bandId: string): [ScanSummary | null, ScanSummary | null] {
   const of = scans.filter((s) => s.band_id === bandId);
   return [of[0] ?? null, of[1] ?? null];
+}
+
+/** The station list narrowed to a scan: the scan alone says which stations, so the other
+ *  schedule filters go (a country left set from before would empty it), and NET is left. */
+export function scanFilters(f: Filters, id: string): Filters {
+  return { ...f, q: '', bands: [], langs: [], countries: [], regions: [], sources: [], site: null, lens: 'all', scan: id };
 }

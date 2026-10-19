@@ -48,6 +48,11 @@ sources: Array<SourceStamp>,
  */
 noise_db: number | null, 
 /**
+ * The reading the meter was stuck at, when it was (`meter_stuck`): the receiver heard
+ * nothing, whatever was on the air. Worked out again when scans load.
+ */
+stuck_db: number | null, 
+/**
  * Grid points measured.
  */
 measured: number, peaks: Array<Peak>, 
