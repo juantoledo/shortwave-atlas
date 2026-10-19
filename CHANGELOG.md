@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.14.1...v0.15.0) (2026-10-19)
+
+
+### Features
+
+* **ui:** scroll over a readout digit to tune by it ([7966c78](https://github.com/juantoledo/shortwave-atlas/commit/7966c781f0230c73d44ea0f2953e33bf56c97aa7))
+* **ui:** scroll over a readout digit to tune by it ([5ea5f52](https://github.com/juantoledo/shortwave-atlas/commit/5ea5f526770d367d7aed3bb071d7bf3ae3733737))
+
 ## [0.14.1](https://github.com/juantoledo/shortwave-atlas/compare/v0.14.0...v0.14.1) (2026-10-19)
 
 
