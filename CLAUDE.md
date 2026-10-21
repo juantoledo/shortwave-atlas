@@ -12,8 +12,12 @@ See README.md for layout and commands.
   a transport stream rather than a `Call`: `GET /api/audio` (browser) and the Tauri
   `audio_open`/`audio_close` channel (desktop) carry the same `AudioHub` blocks: the rig's, or an
   internet station's decoded server-side (NET band) while one plays instead. No other audio
-  transport. And the WebSocket refuses `Call::InstallUpdate`: only the desktop window may restart
-  the app on the host.
+  transport. And the WebSocket refuses `Call::InstallUpdate` and `Call::SetRemote`: only the
+  desktop window may restart the app on the host or change remote access.
+- Remote access: `atlas-server/src/remote.rs` (`RemoteServer`) starts and stops `server.rs` while
+  the app runs; the desktop serves its embedded UI (`UiSource::Embedded`). Addresses, QR codes
+  and bind failures are `atlas_core::remote`. There is no password: the page warns before it
+  listens beyond loopback.
 - Updates: `atlas_core::update` (manifest, versions, per-OS install mode, state) and
   `atlas-server/src/update.rs` (`UpdateService`, checks). The desktop installs through Tauri's
   updater (`TauriUpdater` in `src-tauri`), verified with the `pubkey` in `tauri.conf.json`.
