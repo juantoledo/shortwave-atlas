@@ -1,6 +1,7 @@
 // The window's top bar: name and version, what the rig is doing, the Ko-fi link, the UTC
-// clock, and the update, scans, stats, favorites, help, settings and power buttons (turning off
-// asks first). The Stats button's lamp glows while a listening session is being recorded.
+// clock, and the update, scans, stats, favorites, remote access, help, settings and power
+// buttons (turning off asks first). The Stats button's lamp glows while a listening session is
+// being recorded; the remote access one shows only while browsers may connect.
 // In the desktop app it is also the title bar: it drags the window (not from its buttons, links
 // or popovers), and on Windows and Linux ends in the window controls (api/window.ts).
 
@@ -58,11 +59,14 @@ interface Props {
   favOn: boolean;
   onHelp: () => void;
   onSettings: () => void;
+  /** Remote access is on: how many browsers are connected (`null`: off). */
+  remote: number | null;
+  onRemote: () => void;
   /** The update pill, when there is one. */
   update: ReactNode;
 }
 
-export function TopBar({ info, chrome, status, on, powerBusy, powerDisabled, onPower, askOff, onConfirmOff, onCancelOff, onSetup, onScans, scansNew, onStats, statsOn, listening, onFavorites, favOn, onHelp, onSettings, update }: Props) {
+export function TopBar({ info, chrome, status, on, powerBusy, powerDisabled, onPower, askOff, onConfirmOff, onCancelOff, onSetup, onScans, scansNew, onStats, statsOn, listening, onFavorites, favOn, onHelp, onSettings, remote, onRemote, update }: Props) {
   const t = useT();
   const power = useRef<HTMLDivElement>(null);
   const setup = info && !info.configured && info.backend === 'sim';
@@ -108,6 +112,13 @@ export function TopBar({ info, chrome, status, on, powerBusy, powerDisabled, onP
           <span className="top-ico" aria-hidden="true">★</span>
           <span className="top-txt">{t.favoritesBtn}</span>
         </button>
+        {remote !== null && (
+          <button className="top-btn remote" type="button" aria-label={t.remoteLamp(remote)} title={t.remoteLamp(remote)} onClick={onRemote}>
+            <svg className="top-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 9.6a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2zM4.6 4.6l1 1a3.4 3.4 0 0 0 0 4.8l-1 1a4.8 4.8 0 0 1 0-6.8zm6.8 0a4.8 4.8 0 0 1 0 6.8l-1-1a3.4 3.4 0 0 0 0-4.8zM2.4 2.4l1 1a6.5 6.5 0 0 0 0 9.2l-1 1a7.9 7.9 0 0 1 0-11.2zm11.2 0a7.9 7.9 0 0 1 0 11.2l-1-1a6.5 6.5 0 0 0 0-9.2z" /></svg>
+            <span className="top-txt">{remote > 0 ? `${t.remoteBtn} · ${remote}` : t.remoteBtn}</span>
+            <span className="rec-lamp" />
+          </button>
+        )}
         <button className="icon-btn" type="button" aria-label={t.help} title={`${t.help} (F1)`} onClick={onHelp}>?</button>
         <button className="icon-btn" type="button" aria-label={t.settings} title={t.settings} onClick={onSettings}>⚙</button>
         <div className="power-wrap" ref={power} data-tauri-drag-region="false">

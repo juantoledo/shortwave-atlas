@@ -1,11 +1,11 @@
 //! `swatlas.toml` plus environment overrides (the prototype's variable names still work).
 
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use atlas_core::api::Qth;
 use atlas_core::audio::{default_device, default_tuning, validate_audio, AudioChoice, AudioTuning};
 use atlas_core::platform::Os;
+use atlas_core::remote::{validate_remote, RemoteChoice};
 use atlas_core::setup::RigChoice;
 use atlas_core::update::Channel;
 use atlas_rig::{BackendKind, RigConfig};
@@ -36,6 +36,9 @@ pub struct AppConfig {
     /// `AudioChoice` fields forced by environment variables.
     #[serde(skip)]
     pub audio_locked: Vec<String>,
+    /// `RemoteChoice` fields forced by environment variables.
+    #[serde(skip)]
+    pub server_locked: Vec<String>,
     /// `UpdateConfig` fields forced by environment variables.
     #[serde(skip)]
     pub update_locked: Vec<String>,
@@ -48,7 +51,8 @@ pub struct ServerConfig {
     pub enabled: bool,
     pub bind: String,
     pub port: u16,
-    /// `user:password` for HTTP basic auth. Required to bind beyond loopback.
+    /// No longer used (the HTTP basic auth is gone); a value, or `WEB_AUTH`, only logs a warning.
+    #[serde(skip_serializing)]
     pub auth: Option<String>,
     /// Built UI (`ui/dist`); unset = look next to the working directory and the binary.
     pub ui_dir: Option<PathBuf>,
@@ -57,6 +61,12 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self { enabled: false, bind: "127.0.0.1".into(), port: 8080, auth: None, ui_dir: None }
+    }
+}
+
+impl ServerConfig {
+    pub fn choice(&self) -> RemoteChoice {
+        RemoteChoice { enabled: self.enabled, bind: self.bind.clone(), port: self.port }
     }
 }
 
@@ -183,6 +193,11 @@ impl AppConfig {
                 self.locked.push(field.into());
             }
         }
+        for (var, field) in [("WEB_BIND", "bind"), ("WEB_PORT", "port")] {
+            if get(var).is_some() && !self.server_locked.iter().any(|f| f == field) {
+                self.server_locked.push(field.into());
+            }
+        }
         for (var, fields) in [("AUDIO_DEVICE", &["enabled", "device"][..]), ("AUDIO_RATE", &["rate"][..])] {
             if get(var).is_some() {
                 for f in fields {
@@ -264,21 +279,9 @@ impl AppConfig {
         }
     }
 
-    /// Refuse unsafe server settings before anything listens.
+    /// Refuse server settings nothing could listen on, before anything listens.
     pub fn validate_server(&self) -> Result<(), String> {
-        let s = &self.server;
-        if let Some(a) = &s.auth {
-            if !a.contains(':') {
-                return Err("server.auth must be \"user:password\"".into());
-            }
-        }
-        let loopback = s.bind == "localhost" || s.bind.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback());
-        if !loopback && s.auth.is_none() {
-            return Err(format!(
-                "refusing to listen on {} without a password: set server.auth (or WEB_AUTH=user:password)",
-                s.bind
-            ));
-        }
+        validate_remote(&self.server.choice())?;
         if self.audio.enabled {
             validate_audio(Os::CURRENT, &self.audio.choice()).map_err(|e| format!("[audio]: {e}"))?;
         }
@@ -330,6 +333,17 @@ pub fn save_audio(path: &Path, choice: &AudioChoice) -> Result<(), String> {
 /// (`url` is kept).
 pub fn save_update(path: &Path, check: bool, channel: Channel) -> Result<(), String> {
     save_table(path, "update", [("check", check.into()), ("channel", channel.as_str().into())], &[])
+}
+
+/// Write remote access into the `[server]` table, the same way as `save_rig` (`ui_dir` is kept,
+/// the unused `auth` dropped).
+pub fn save_server(path: &Path, c: &RemoteChoice) -> Result<(), String> {
+    save_table(
+        path,
+        "server",
+        [("enabled", c.enabled.into()), ("bind", c.bind.as_str().into()), ("port", i64::from(c.port).into())],
+        &["auth"],
+    )
 }
 
 /// Write the NET band's switch into the `[net]` table, the same way as `save_rig`.
@@ -439,7 +453,9 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!((c.rig.backend, c.rig.port), (BackendKind::External, 4533));
+        // read only to warn that it no longer protects anything
         assert_eq!(c.server.auth.as_deref(), Some("me:secret"));
+        assert_eq!(c.server_locked, ["bind"]);
         assert!(c.audio.enabled);
         c.validate_server().unwrap();
     }
@@ -624,13 +640,35 @@ channel = \"beta\"",
     }
 
     #[test]
-    fn open_bind_needs_auth() {
+    fn save_server_keeps_comments_and_drops_the_old_password() {
+        let path = tmp("server").join("swatlas.toml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let old = r#"[rig]
+model = 1042
+
+[server]
+port = 9000   # my port
+auth = "me:secret"
+ui_dir = "/opt/ui"
+"#;
+        std::fs::write(&path, old).unwrap();
+        let c = RemoteChoice { enabled: true, bind: "0.0.0.0".into(), port: 8081 };
+        save_server(&path, &c).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("port = 8081   # my port") && text.contains("model = 1042"), "{text}");
+        assert!(!text.contains("auth"), "{text}");
+        let cfg: AppConfig = toml::from_str(&text).unwrap();
+        assert_eq!(cfg.server.choice(), c);
+        assert_eq!(cfg.server.ui_dir, Some("/opt/ui".into()));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn any_bind_is_served_without_a_password() {
         let mut c = AppConfig::default();
         c.server.bind = "0.0.0.0".into();
+        c.validate_server().unwrap();
+        c.server.port = 0;
         assert!(c.validate_server().is_err());
-        c.server.auth = Some("nocolon".into());
-        assert!(c.validate_server().is_err());
-        c.server.auth = Some("u:p".into());
-        assert!(c.validate_server().is_ok());
     }
 }
