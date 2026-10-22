@@ -1,7 +1,8 @@
 // The window's top bar: name and version, what the rig is doing, the Ko-fi link, the UTC
 // clock, and the update, scans, stats, favorites, remote access, help, settings and power
 // buttons (turning off asks first). The Stats button's lamp glows while a listening session is
-// being recorded; the remote access one shows only while browsers may connect.
+// being recorded; the remote access one shows only while browsers may connect; a phone's
+// browser also gets the way to the simple remote.
 // In the desktop app it is also the title bar: it drags the window (not from its buttons, links
 // or popovers), and on Windows and Linux ends in the window controls (api/window.ts).
 
@@ -62,11 +63,13 @@ interface Props {
   /** Remote access is on: how many browsers are connected (`null`: off). */
   remote: number | null;
   onRemote: () => void;
+  /** Open the phone remote (a phone's browser only, else `null`). */
+  onSimple: (() => void) | null;
   /** The update pill, when there is one. */
   update: ReactNode;
 }
 
-export function TopBar({ info, chrome, status, on, powerBusy, powerDisabled, onPower, askOff, onConfirmOff, onCancelOff, onSetup, onScans, scansNew, onStats, statsOn, listening, onFavorites, favOn, onHelp, onSettings, remote, onRemote, update }: Props) {
+export function TopBar({ info, chrome, status, on, powerBusy, powerDisabled, onPower, askOff, onConfirmOff, onCancelOff, onSetup, onScans, scansNew, onStats, statsOn, listening, onFavorites, favOn, onHelp, onSettings, remote, onRemote, onSimple, update }: Props) {
   const t = useT();
   const power = useRef<HTMLDivElement>(null);
   const setup = info && !info.configured && info.backend === 'sim';
@@ -117,6 +120,12 @@ export function TopBar({ info, chrome, status, on, powerBusy, powerDisabled, onP
             <svg className="top-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 9.6a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2zM4.6 4.6l1 1a3.4 3.4 0 0 0 0 4.8l-1 1a4.8 4.8 0 0 1 0-6.8zm6.8 0a4.8 4.8 0 0 1 0 6.8l-1-1a3.4 3.4 0 0 0 0-4.8zM2.4 2.4l1 1a6.5 6.5 0 0 0 0 9.2l-1 1a7.9 7.9 0 0 1 0-11.2zm11.2 0a7.9 7.9 0 0 1 0 11.2l-1-1a6.5 6.5 0 0 0 0-9.2z" /></svg>
             <span className="top-txt">{remote > 0 ? `${t.remoteBtn} · ${remote}` : t.remoteBtn}</span>
             <span className="rec-lamp" />
+          </button>
+        )}
+        {onSimple && (
+          <button className="top-btn simple" type="button" aria-label={t.remoteSimpleTitle} title={t.remoteSimpleTitle} onClick={onSimple}>
+            <svg className="top-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 1h6a1.5 1.5 0 0 1 1.5 1.5v11A1.5 1.5 0 0 1 11 15H5a1.5 1.5 0 0 1-1.5-1.5v-11A1.5 1.5 0 0 1 5 1zm0 1.5v9.5h6V2.5zM8 12.6a.8.8 0 1 0 0 1.6.8.8 0 0 0 0-1.6z" /></svg>
+            <span className="top-txt">{t.remoteSimple}</span>
           </button>
         )}
         <button className="icon-btn" type="button" aria-label={t.help} title={`${t.help} (F1)`} onClick={onHelp}>?</button>

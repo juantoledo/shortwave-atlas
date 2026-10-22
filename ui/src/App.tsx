@@ -25,9 +25,10 @@ import { bandOf, noiseFloor, scanFilters } from './components/scan';
 import { keyOf, MINE } from './components/sources';
 import { UpdateBanner } from './components/UpdateBanner';
 import { chromeFor } from './api/window';
+import { goTo } from './page';
 import { makeNames, NamesProvider } from './catalog/names';
 import { NO_FILTERS, useCandidates, useCore, useDial, useNow, useOverview, useStationSearch, useStationsMeta, useTuning, type Filters } from './hooks/useCore';
-import { PHONE, useMedia } from './hooks/useMedia';
+import { COARSE, PHONE, useMedia } from './hooks/useMedia';
 import { useFolds } from './hooks/useFolds';
 import { useFavorites } from './hooks/useFavorites';
 import { findSite, oneOf, readFilters, readSiteRef, readString, usePersisted, type SiteRef } from './hooks/usePersisted';
@@ -104,6 +105,9 @@ export function App() {
   /** Another view (the phone's bottom tabs, a list action) leaves Stats. */
   const setView = useCallback((v: View) => { setPage('main'); setViewRaw(v); }, []);
   const phone = useMedia(PHONE);
+  // a phone's browser may go (back) to the simple remote (page.ts)
+  const coarse = useMedia(COARSE);
+  const simple = api?.transport.kind === 'ws' && phone && coarse;
   const folds = useFolds();
   /** Bring the station list into sight: its view on phones (leaving Stats), elsewhere its tab,
    *  unfolded. */
@@ -592,6 +596,7 @@ export function App() {
           onSettings={() => openSettings()}
           remote={remote?.running ? remote.clients : null}
           onRemote={() => openSettings('remote')}
+          onSimple={simple ? () => goTo('remote') : null}
           update={api && <UpdateBanner update={update} transport={api.transport.kind} onError={onError} />}
         />
 

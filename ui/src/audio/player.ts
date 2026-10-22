@@ -4,11 +4,12 @@
 // Blocks are scheduled back to back on the AudioContext clock. The queue ahead of the
 // playhead is kept between the cushion (rebuilt after an underrun) and the maximum (blocks
 // beyond that are dropped), so latency cannot grow over time. Both come from Settings →
-// Audio → Advanced.
-// Graph: sources -> bus -> gain -> speakers
+// Audio → Advanced; each underrun while playing raises them a step (cushion.ts).
+// Graph: sources -> bus -> gain -> speakers (or, `background`, a media element)
 //                       \-> analyser (waterfall, independent of the volume)
 
 import type { OpenAudio } from '../api/transport';
+import { grown, larger } from './cushion';
 
 const RETRY_MS = 1000;
 export const FFT_SIZE = 4096;
@@ -17,6 +18,13 @@ export const FFT_SIZE = 4096;
 export interface PlayerBuffer {
   cushionMs: number;
   maxAheadMs: number;
+}
+
+/** How the phone remote plays: `latencyHint` for the AudioContext ('playback' buffers more), and
+ *  `background` through a media element, which phones keep playing with the screen off. */
+export interface PlayerOptions {
+  latencyHint?: AudioContextLatencyCategory;
+  background?: boolean;
 }
 
 export type PlayerStatus =
@@ -38,17 +46,37 @@ export class AudioPlayer {
   private n = 0;
   private odd: number | null = null;
   private shown = 0;
+  /** The buffer in use: the configured one (`buffer`), raised after underruns. */
+  private live: PlayerBuffer;
+  private element: HTMLAudioElement | null = null;
+  private wake = () => {
+    if (document.visibilityState !== 'visible') return;
+    if (this.ctx.state !== 'running') void this.ctx.resume();
+    if (this.element?.paused) void this.element.play().catch(() => {});
+  };
 
   private rate = 0;
 
-  constructor(private open: OpenAudio, volume: number, private buffer: PlayerBuffer, private onStatus: (s: PlayerStatus) => void) {
-    this.ctx = new AudioContext();
+  /** Make it from the gesture that asks for sound (a tap on Listen): phones only allow it then. */
+  constructor(private open: OpenAudio, volume: number, private buffer: PlayerBuffer, private onStatus: (s: PlayerStatus) => void, opts: PlayerOptions = {}) {
+    this.ctx = new AudioContext(opts.latencyHint ? { latencyHint: opts.latencyHint } : undefined);
     void this.ctx.resume();
+    this.live = buffer;
     this.bus = this.ctx.createGain();
     this.gain = this.ctx.createGain();
     this.analyser = this.ctx.createAnalyser();
     this.gain.gain.value = volume;
-    this.gain.connect(this.ctx.destination);
+    if (opts.background && typeof this.ctx.createMediaStreamDestination === 'function') {
+      const out = this.ctx.createMediaStreamDestination();
+      this.gain.connect(out);
+      this.element = new Audio();
+      this.element.srcObject = out.stream;
+      void this.element.play().catch(() => {});
+    } else {
+      this.gain.connect(this.ctx.destination);
+    }
+    // back in front: a phone may have suspended it
+    document.addEventListener('visibilitychange', this.wake);
     this.analyser.fftSize = FFT_SIZE;
     this.analyser.smoothingTimeConstant = 0.2;
     this.bus.connect(this.gain);
@@ -61,14 +89,21 @@ export class AudioPlayer {
     this.gain.gain.value = v;
   }
 
+  /** A new setting: the buffer grown so far stays if it is larger. */
   setBuffer(b: PlayerBuffer) {
     this.buffer = b;
+    this.live = larger(this.live, b);
   }
 
   stop() {
     this.running = false;
     this.close?.();
     this.cancel?.();
+    document.removeEventListener('visibilitychange', this.wake);
+    if (this.element) {
+      this.element.pause();
+      this.element.srcObject = null;
+    }
     void this.ctx.close();
   }
 
@@ -113,8 +148,11 @@ export class AudioPlayer {
 
   private play() {
     const now = this.ctx.currentTime;
-    if (this.t < now) this.t = now + this.buffer.cushionMs / 1000; // underrun (or first block): rebuild the cushion
-    else if (this.t - now > this.buffer.maxAheadMs / 1000) return; // too far behind live: drop this block
+    if (this.t < now) {
+      // underrun (or first block): rebuild the cushion, a step bigger if it ran dry while playing
+      if (this.t > 0) this.live = grown(this.buffer, this.live);
+      this.t = now + this.live.cushionMs / 1000;
+    } else if (this.t - now > this.live.maxAheadMs / 1000) return; // too far behind live: drop this block
     const ab = this.ctx.createBuffer(1, this.block.length, this.rate);
     ab.getChannelData(0).set(this.block);
     const src = this.ctx.createBufferSource();

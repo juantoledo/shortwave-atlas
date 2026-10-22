@@ -1,0 +1,61 @@
+/* The design tokens and base rules both pages share: the full atlas (styles.css) and the
+   phone remote (remote/remote.css). */
+:root {
+  --ink: #070d15;
+  --panel: #0c1520;
+  --panel-bg: #0a131d;
+  --line: rgba(140, 185, 230, 0.14);
+  --line-strong: rgba(140, 185, 230, 0.3);
+  --text: #d6e2ef;
+  --dim: #8498ad;
+  --amber: #ffb33f;
+  --amber-soft: rgba(255, 179, 63, 0.14);
+  /* the band dial's heat strip, levels 1 to 4: more time at a stronger signal, brighter */
+  --heat-1: rgba(255, 179, 63, 0.22);
+  --heat-2: rgba(255, 179, 63, 0.45);
+  --heat-3: rgba(255, 179, 63, 0.72);
+  --heat-4: var(--amber);
+  --cool: #7fd0ff;
+  --warn: #ff8a7a;
+  /* the NET band (internet radio): its own pink, wherever it shows */
+  --net: rgb(255, 122, 196);
+  --net-text: rgb(255, 170, 215);
+  --net-line: rgba(255, 122, 196, 0.5);
+  --net-soft: rgba(255, 122, 196, 0.15);
+  --site-on: #ffe2a0;
+  --site-quiet: rgba(150, 185, 220, 0.6);
+  /* band bars on the whole dial, and their labels */
+  --band-bc: rgba(140, 185, 230, 0.34);
+  --band-bc-text: #a9bdd2;
+  --band-ham: #4fc8a4;
+  --band-ham-text: #7fdcbf;
+  --band-util: #b48cf0;
+  --band-util-text: #c9aef5;
+  /* the listener's own stations */
+  --mine: #bea0ff;
+  --band-gap: repeating-linear-gradient(135deg, rgba(140, 185, 230, 0.13) 0 2px, transparent 2px 6px);
+  --gap: 8px;
+  --radius: 8px;
+  --hit: 32px;
+  --font-display: 'Big Shoulders Display', 'Arial Narrow', 'Roboto Condensed', sans-serif;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-freq: 'Goldman', var(--font-display);
+  --weight-bold: 700;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--text);
+  font: 14px/1.5 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--cool); outline-offset: 2px; }
+[hidden] { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

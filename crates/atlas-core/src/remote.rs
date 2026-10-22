@@ -106,8 +106,13 @@ pub enum UrlKind {
 pub struct RemoteUrl {
     pub url: String,
     pub kind: UrlKind,
+    /// What the QR code opens: the phone remote at that address (`PHONE_PAGE`).
+    pub qr_url: String,
     pub qr: Qr,
 }
+
+/// The UI's page for phones, next to the atlas's `index.html`: the QR codes open it.
+pub const PHONE_PAGE: &str = "remote.html";
 
 /// A QR code as one SVG path: dark modules on a `size` × `size` grid, quiet zone included.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -149,8 +154,9 @@ fn url_for(host: IpAddr, port: u16) -> String {
 }
 
 fn remote_url(url: String, kind: UrlKind) -> RemoteUrl {
-    let qr = qr(&url);
-    RemoteUrl { url, kind, qr }
+    let qr_url = format!("{url}{PHONE_PAGE}");
+    let qr = qr(&qr_url);
+    RemoteUrl { url, kind, qr_url, qr }
 }
 
 /// Where the UI can be opened while listening on `bind`: Tailscale first, then the LAN, then this
@@ -305,6 +311,17 @@ mod tests {
         assert_eq!(urls(Os::Linux, "100.100.1.1", &ifaces), [("http://100.100.1.1:8080/".into(), UrlKind::Tailscale)]);
         assert_eq!(urls(Os::Linux, "fd00::5", &ifaces), [("http://[fd00::5]:8080/".into(), UrlKind::Lan)]);
         assert_eq!(urls(Os::Linux, "pi.local", &ifaces), [("http://pi.local:8080/".into(), UrlKind::Lan)]);
+    }
+
+    #[test]
+    fn qr_codes_open_the_phone_remote() {
+        let ifaces = [("eth0".to_string(), ip("192.168.1.20"))];
+        let u = &remote_urls(Os::Linux, "0.0.0.0", 8080, &ifaces)[0];
+        assert_eq!(u.url, "http://192.168.1.20:8080/");
+        assert_eq!(u.qr_url, "http://192.168.1.20:8080/remote.html");
+        assert_eq!(u.qr, qr(&u.qr_url));
+        let v6 = &remote_urls(Os::Linux, "fd00::5", 8080, &[])[0];
+        assert_eq!(v6.qr_url, "http://[fd00::5]:8080/remote.html");
     }
 
     #[test]
