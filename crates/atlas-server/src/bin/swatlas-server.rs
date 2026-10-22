@@ -2,7 +2,7 @@
 //! The systemd-friendly successor of the original Python prototype.
 //!
 //! Config: `$SWATLAS_CONFIG`, else `~/.config/swatlas/swatlas.toml`, plus env overrides
-//! (`SWATLAS_RIG`, `RIGCTLD_HOST/PORT`, `WEB_BIND/PORT`, `AUDIO_DEVICE/RATE`, ...).
+//! (`SWATLAS_RIG`, `RIGCTLD_HOST/PORT`, `WEB_BIND/PORT/AUTH`, `AUDIO_DEVICE/RATE`, ...).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use atlas_core::update::Packaging;
 use atlas_server::config::config_dir;
 use atlas_server::update::{ManifestUpdater, CURRENT};
-use atlas_server::{AppConfig, Atlas};
+use atlas_server::{server, AppConfig, Atlas};
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -33,7 +33,7 @@ async fn main() -> ExitCode {
         }
     };
     cfg.quiet_dev_updates(cfg!(debug_assertions));
-    let choice = cfg.server.choice();
+    let server_cfg = cfg.server.clone();
     // the server only says that an update exists: it is replaced by hand
     let updater = Arc::new(ManifestUpdater::new(Packaging::Server));
     let atlas = match Atlas::start(cfg, Some(path), Some(config_dir()), updater) {
@@ -43,13 +43,15 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if let Err(e) = atlas.remote.serve_headless(&atlas, choice).await {
-        eprintln!("swatlas-server: {e}");
-        atlas.shutdown().await;
-        return ExitCode::FAILURE;
+    tokio::select! {
+        r = server::serve(atlas.clone(), server_cfg) => {
+            if let Err(e) = r {
+                eprintln!("swatlas-server: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+        _ = shutdown() => tracing::info!("stopping"),
     }
-    shutdown().await;
-    tracing::info!("stopping");
     atlas.shutdown().await;
     ExitCode::SUCCESS
 }

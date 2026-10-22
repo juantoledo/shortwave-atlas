@@ -33,7 +33,6 @@ import { useFavorites } from './hooks/useFavorites';
 import { findSite, oneOf, readFilters, readSiteRef, readString, usePersisted, type SiteRef } from './hooks/usePersisted';
 import { useDisplay } from './hooks/useDisplay';
 import { useBandScans, useScan } from './hooks/useScan';
-import { useRemote } from './hooks/useRemote';
 import { useUpdate } from './hooks/useUpdate';
 import { useUserStations } from './hooks/useUserStations';
 import { useWelcome } from './hooks/useWelcome';
@@ -71,8 +70,6 @@ const Welcome = lazy(() => import('./components/Welcome').then((m) => ({ default
 const MSG_MS = 6000;
 /** How long the rows a finished scan heard stay lit. */
 const FRESH_MS = 10000;
-/** How often the top bar asks whether remote access is on and who is connected. */
-const REMOTE_LAMP_MS = 5000;
 const NO_HZ: number[] = [];
 const NO_BANDS: Band[] = [];
 const NO_SITES: SiteDot[] = [];
@@ -89,8 +86,6 @@ type SheetState =
 export function App() {
   const { api, info, reloadInfo, rig, meter, status } = useCore();
   const update = useUpdate(api);
-  // the top bar's remote access lamp, in the desktop window (a browser is the remote)
-  const { status: remote } = useRemote(api, api?.transport.kind === 'tauri' ? REMOTE_LAMP_MS : null);
   const display = useDisplay();
   const welcome = useWelcome();
   const [sheet, setSheet] = useState<SheetState>(null);
@@ -590,8 +585,6 @@ export function App() {
           favOn={filters.lens === 'favorites'}
           onHelp={() => openHelp()}
           onSettings={() => openSettings()}
-          remote={remote?.running ? remote.clients : null}
-          onRemote={() => openSettings('remote')}
           update={api && <UpdateBanner update={update} transport={api.transport.kind} onError={onError} />}
         />
 
@@ -808,7 +801,6 @@ export function App() {
             onApplied={reloadInfo}
             net={netEnabled}
             onNetOn={toNetBand}
-            listen={info?.audio ?? false}
           />
         )}
         {sheet?.kind === 'scans' && (

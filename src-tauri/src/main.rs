@@ -4,8 +4,7 @@
 //! remote browser sends over the WebSocket; rig state changes arrive as `rig://state`.
 //! Rig audio comes over a binary channel (`audio_open`/`audio_close`), the counterpart of
 //! the browser's `GET /api/audio`, fed by the same `AudioHub`.
-//! Settings → Remote access (`[server] enabled`) also serves the remote browser UI from this
-//! process, with the UI embedded in the app.
+//! With `server.enabled`, the same process also serves the remote browser UI.
 //! Updates are found, downloaded, verified and installed by Tauri's updater, driven by the
 //! shared `UpdateService` through `TauriUpdater`.
 
@@ -19,9 +18,8 @@ use async_trait::async_trait;
 use atlas_core::api::{ApiError, Call, ErrorKind};
 use atlas_core::update::{release_page, Packaging, Release, RELEASES_PAGE};
 use atlas_server::config::config_dir;
-use atlas_server::server::UiAsset;
 use atlas_server::update::{Progress, Updater};
-use atlas_server::{AppConfig, Atlas};
+use atlas_server::{server, AppConfig, Atlas};
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
@@ -157,7 +155,10 @@ fn main() {
             let path = std::env::var_os("SWATLAS_CONFIG").map(Into::into).unwrap_or_else(|| dir.join("swatlas.toml"));
             let mut cfg = AppConfig::load(&path)?;
             cfg.quiet_dev_updates(cfg!(debug_assertions));
-            let remote = cfg.server.choice();
+            if cfg.server.enabled {
+                cfg.validate_server()?;
+            }
+            let server_cfg = cfg.server.clone();
             let updater = Arc::new(TauriUpdater { app: app.handle().clone(), pending: Default::default() });
             // Atlas spawns its tasks on Tauri's tokio runtime.
             let atlas =
@@ -172,16 +173,11 @@ fn main() {
                 }
             });
 
-            let assets = app.asset_resolver();
-            atlas.remote.set_embedded(Arc::new(move |path: &str| {
-                assets.get(path.to_owned()).map(|a| UiAsset { bytes: a.bytes, mime: a.mime_type })
-            }));
-            if remote.enabled {
-                // a failed start shows in Settings → Remote access; the window opens regardless
+            if server_cfg.enabled {
                 let atlas = atlas.clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Err(e) = atlas.remote.apply(&atlas, remote).await {
-                        tracing::error!("remote access: {e}");
+                    if let Err(e) = server::serve(atlas, server_cfg).await {
+                        tracing::error!("remote server: {e}");
                     }
                 });
             }

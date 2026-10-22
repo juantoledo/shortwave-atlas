@@ -6,11 +6,8 @@ import type { BadgeId } from '../types/generated/BadgeId';
 import type { Hint } from '../types/generated/Hint';
 import type { ManualReason } from '../types/generated/ManualReason';
 import type { Os } from '../types/generated/Os';
-import type { RemoteFailure } from '../types/generated/RemoteFailure';
 import type { ScanOutcome } from '../types/generated/ScanOutcome';
 import type { ScanSpeed } from '../types/generated/ScanSpeed';
-import type { Scope } from '../types/generated/Scope';
-import type { UrlKind } from '../types/generated/UrlKind';
 import type { Verdict } from '../types/generated/Verdict';
 
 /** Hint texts that differ on some OS (the shared text is the Linux one). */
@@ -748,44 +745,6 @@ export const en = {
       device_missing: ['The sound device is not there', 'The radio is off or unplugged. Plug it in, press Refresh and pick it again.'],
     },
   } as ByOs<AudioHint>,
-
-  remoteSection: 'Remote access',
-  remoteHelp: "Open Shortwave Atlas in a browser on another computer, tablet or phone: the globe, the dial and the rig's audio, with the same controls as here.",
-  remoteHeadless: 'swatlas-server always serves. To change it, edit [server] in its config and restart it.',
-  remoteFromHost: 'Change remote access from the Shortwave Atlas window on the computer wired to the radio.',
-  remoteWho: 'Who can connect',
-  remoteScopes: { loopback: 'This computer only', network: 'My network and Tailscale' } as Record<'loopback' | 'network', string>,
-  remoteScopeHelp: {
-    loopback: 'Only browsers on this computer.',
-    network: 'Every network this computer is on: your LAN and Tailscale.',
-    custom: 'Only this address, as set in the config file.',
-  } as Record<Scope, string>,
-  remotePort: 'Port',
-  remoteNoPassword: 'There is no password: anyone who can reach this computer on these networks can tune the radio, change its settings and listen. The connection is not encrypted either. Use networks you trust, and Tailscale away from home.',
-  copy: 'Copy',
-  remoteStart: 'Start remote access',
-  remoteStop: 'Stop remote access',
-  remoteRestart: 'Restart with these settings',
-  remoteStopped: 'Off',
-  remoteRunning: (n: number) => (n === 0 ? 'On · no browser connected' : `On · ${n} browser${n === 1 ? '' : 's'} connected`),
-  remoteFailed: (error: string) => `Could not start: ${error}`,
-  remoteFailures: {
-    port_in_use: (port: number, _bind: string) => `Could not start: another program uses port ${port}. Pick another port.`,
-    port_reserved: (port: number, _bind: string) => `Could not start: Windows keeps port ${port} for itself (Hyper-V, WSL). Pick another port.`,
-    port_privileged: (port: number, _bind: string) => `Could not start: port ${port} needs administrator rights. Pick a port above 1024.`,
-    no_such_address: (_port: number, bind: string) => `Could not start: this computer has no address ${bind}.`,
-  } as Record<Exclude<RemoteFailure, 'invalid' | 'other'>, (port: number, bind: string) => string>,
-  remoteKinds: { tailscale: 'Tailscale', lan: 'Network', loopback: 'This computer' } as Record<UrlKind, string>,
-  remoteQr: 'QR',
-  remoteQrLabel: (url: string) => `QR code for ${url}`,
-  remoteNoAudio: ['Browsers will hear nothing', 'Listen is off. Turn it on in Audio to send them the rig.'] as [string, string],
-  remoteFirewall: {
-    linux: (port: number) => `If a firewall (ufw, firewalld) is on, allow TCP port ${port}.`,
-    windows: (port: number) => `The first time, Windows Firewall asks whether to let Shortwave Atlas use the network: allow it on private networks (port ${port}).`,
-    macos: (port: number) => `The first time, macOS asks whether Shortwave Atlas may accept incoming connections: allow it (port ${port}).`,
-  } as Record<Os, (port: number) => string>,
-  remoteBtn: 'Remote',
-  remoteLamp: (n: number) => `Remote access is on · ${n} browser${n === 1 ? '' : 's'} connected`,
 };
 
 export type Messages = typeof en;

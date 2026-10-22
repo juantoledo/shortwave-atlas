@@ -96,9 +96,8 @@ radiomap: **use the data, never copy the code.**
   1. **Recording or saving streams.** Rule: **no recording of NET streams**, kept like the
      receive-only rule.
   2. **The headless server relaying a stream to other people.** `swatlas-server` exposed publicly
-     would become a re-streaming service. Remote access has no password, so it warns whenever it
-     listens beyond loopback (Settings → Remote access, and a log line): trusted networks and
-     Tailscale only, never a public port.
+     without auth would become a re-streaming service. Relay only to authenticated clients, or warn
+     when auth is off.
   3. **App stores.** An [Apple developer forum thread](https://developer.apple.com/forums/thread/847520)
      describes an app built on radio-browser rejected three times under guideline 5.2.3. Apple
      wanted proof of rights to each stream, and a public-domain directory wasn't enough. This

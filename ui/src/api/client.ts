@@ -26,8 +26,6 @@ import type { NetStats } from '../types/generated/NetStats';
 import type { NoteBlock } from '../types/generated/NoteBlock';
 import type { Overview } from '../types/generated/Overview';
 import type { Qth } from '../types/generated/Qth';
-import type { RemoteChoice } from '../types/generated/RemoteChoice';
-import type { RemoteStatus } from '../types/generated/RemoteStatus';
 import type { RigChoice } from '../types/generated/RigChoice';
 import type { RigCommand } from '../types/generated/RigCommand';
 import type { RigDiagnostics } from '../types/generated/RigDiagnostics';
@@ -76,9 +74,6 @@ export class Api {
   soundCards = () => this.transport.call({ cmd: 'sound_cards' }) as Promise<SoundCard[]>;
   applyAudio = (args: AudioChoice) => this.transport.call({ cmd: 'apply_audio', args }) as Promise<null>;
   audioDiagnostics = () => this.transport.call({ cmd: 'audio_diagnostics' }) as Promise<AudioDiagnostics>;
-
-  remoteStatus = () => this.transport.call({ cmd: 'remote_status' }) as Promise<RemoteStatus>;
-  setRemote = (args: RemoteChoice) => this.transport.call({ cmd: 'set_remote', args }) as Promise<RemoteStatus>;
 
   updateStatus = () => this.transport.call({ cmd: 'update_status' }) as Promise<UpdateStatus>;
   releaseNotes = () => this.transport.call({ cmd: 'release_notes' }) as Promise<NoteBlock[]>;

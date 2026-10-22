@@ -1,7 +1,7 @@
 # Shortwave Atlas config: ~/.config/swatlas/swatlas.toml (or $SWATLAS_CONFIG).
 # Shared by the desktop app and swatlas-server. Every key is optional.
 # Environment overrides: SWATLAS_RIG, RIGCTLD_HOST, RIGCTLD_PORT, SWATLAS_RIG_MODEL,
-# SWATLAS_RIG_DEVICE, SWATLAS_RIG_BAUD, WEB_BIND, WEB_PORT, AUDIO_DEVICE,
+# SWATLAS_RIG_DEVICE, SWATLAS_RIG_BAUD, WEB_BIND, WEB_PORT, WEB_AUTH, AUDIO_DEVICE,
 # AUDIO_RATE, SWATLAS_LANG, SWATLAS_EIBI_DIR, SWATLAS_UI_DIR.
 
 # lang = "es"                 # UI language; default follows the browser/OS
@@ -23,9 +23,10 @@ lat = -33.45
 lon = -70.67
 
 [server]                      # remote browser UI (always on in swatlas-server)
-enabled = false               # desktop app: also serve the remote UI (Settings → Remote access)
-bind = "127.0.0.1"            # "0.0.0.0" = every network; there is no password, so only trusted ones
+enabled = false               # desktop app: also serve the remote UI
+bind = "127.0.0.1"            # anything beyond loopback requires auth
 port = 8080
+# auth = "user:A_LONG_PASSWORD"
 
 [audio]                       # rig audio, for the desktop app and remote browsers
 enabled = false               # or pick the sound card in Settings → Audio

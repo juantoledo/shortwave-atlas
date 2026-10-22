@@ -57,9 +57,8 @@ It runs on Linux, Windows and macOS.
 Two ways to use it:
 - **Desktop app** (Tauri v2), on the machine wired to the rig. It can play the rig's audio and show
   the audio waterfall too.
-- **Remote browser**, over Tailscale or a LAN: press **Start remote access** in the desktop app
-  (*Settings → Remote access*), or run `swatlas-server` (headless). It includes low-latency rig
-  audio and an audio waterfall.
+- **Remote browser**, over Tailscale or a LAN. This is `swatlas-server` (headless) or the desktop
+  app with `server.enabled`. It includes low-latency rig audio and an audio waterfall.
 
 ## Layout
 ```
@@ -146,7 +145,7 @@ saves the choice. The page shows whether the card is capturing, and explains a b
 a missing `audio` group or a refused microphone permission (Windows, macOS).
 
 To configure by hand, copy `docs/swatlas.example.toml` to `~/.config/swatlas/swatlas.toml`. The
-desktop app and the server share it. The prototype's environment variables (`RIGCTLD_PORT`, `WEB_BIND`, `AUDIO_DEVICE`, ...)
+desktop app and the server share it. The prototype's environment variables (`RIGCTLD_PORT`, `WEB_AUTH`, `AUDIO_DEVICE`, ...)
 still work as overrides. A QTH picked by clicking the globe is saved in `~/.config/swatlas/qth.json`.
 
 Rig-specific notes live in `docs/rigs/` (start with `ftdx10.md`).
@@ -172,26 +171,15 @@ file was built by this repository's release workflow: `gh attestation verify <fi
 juantoledo/shortwave-atlas`. How releases are made: [docs/releasing.md](docs/releasing.md).
 
 ## Remote access
-In the desktop app, *Settings → Remote access* serves the same UI to browsers while the app runs.
-Choose **This computer only** or **My network and Tailscale** and press **Start remote access**.
-The page lists the addresses to open, each with a QR code for a phone, and how many browsers are
-connected; a **Remote** lamp in the top bar shows while it is on. Browsers hear the rig once
-**Listen** is on in *Audio*. The choice is saved as `[server]` in `swatlas.toml` and comes back at
-the next start. Only the desktop window can change it: browsers see it, but can't turn it off.
-
-**There is no password.** Anyone who can reach the port can tune the radio, change its settings
-and listen, and the connection is plain HTTP. Serve beyond this computer only on networks you
-trust; away from home, use Tailscale (which encrypts and only lets your own devices in), never a
-port forwarded from the internet.
-
-For an always-on server without a window, run `swatlas-server`: the same applies. Release archives
-hold the server, the built UI and (Windows, macOS) rigctld side by side; run it from there.
+`swatlas-server` refuses to listen beyond loopback without `server.auth`. Use Tailscale rather than
+exposing it to the internet. Release archives hold the server, the built UI and (Windows, macOS)
+rigctld side by side; run it from there.
 
 - **Windows:** run `swatlas-server.exe` at logon from Task Scheduler, or as a service with
-  [NSSM](https://nssm.cc/), with `WEB_BIND` set as an environment variable. Windows Firewall asks
-  the first time it listens beyond loopback.
+  [NSSM](https://nssm.cc/), with `WEB_BIND`/`WEB_AUTH` set as environment variables. Windows
+  Firewall asks the first time it listens beyond loopback.
 - **macOS:** a LaunchAgent (`~/Library/LaunchAgents/org.swatlas.server.plist`) with
-  `ProgramArguments` set to the server's path, `EnvironmentVariables` for `WEB_BIND`, and
+  `ProgramArguments` set to the server's path, `EnvironmentVariables` for `WEB_BIND`/`WEB_AUTH`, and
   `KeepAlive` set to true. Load it with `launchctl load`.
 - **Linux:** systemd, below. Put the contents of the Linux server archive in `/opt/swatlas` (the
   server finds `ui/` next to it) and add a user for it: `sudo useradd -r -G dialout,audio swatlas` (`audio` is
@@ -206,6 +194,7 @@ After=network.target
 [Service]
 ExecStart=/opt/swatlas/swatlas-server
 Environment=WEB_BIND=0.0.0.0
+Environment=WEB_AUTH=admin:A_LONG_PASSWORD
 Restart=always
 RestartSec=5
 User=swatlas

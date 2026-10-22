@@ -228,7 +228,6 @@ name = "atlas-core"
 version = "0.15.0"
 dependencies = [
  "pulldown-cmark",
- "qrcode",
  "regex",
  "rubato",
  "semver",
@@ -259,15 +258,16 @@ dependencies = [
  "atlas-core",
  "atlas-rig",
  "axum",
+ "base64 0.23.1",
  "bytes",
  "cpal",
  "dirs",
  "futures-util",
- "if-addrs",
  "reqwest",
  "rustls",
  "serde",
  "serde_json",
+ "subtle",
  "symphonia",
  "tokio",
  "tokio-tungstenite 0.30.0",
@@ -2021,16 +2021,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "if-addrs"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0a05c691e1fae256cf7013d99dad472dc52d5543322761f83ec8d47eab40d2b"
-dependencies = [
- "libc",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3268,12 +3258,6 @@ dependencies = [
  "memchr",
  "unicase",
 ]
-
-[[package]]
-name = "qrcode"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quick-xml"

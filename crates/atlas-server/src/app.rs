@@ -7,7 +7,7 @@ use std::sync::{Arc, RwLock, Weak};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use atlas_core::api::{
-    ApiError, AudioDiagnostics, AudioSettings, Call, ErrorKind, Info, Qth, RemoteStatus, RigSettings, UpdatePrefs,
+    ApiError, AudioDiagnostics, AudioSettings, Call, ErrorKind, Info, Qth, RigSettings, UpdatePrefs,
 };
 use atlas_core::audio::{default_tuning, diagnose_audio, validate_audio, AudioChoice};
 use atlas_core::bands::{Dial, ItuRegion};
@@ -17,7 +17,6 @@ use atlas_core::listening::Ctx;
 use atlas_core::net::{net_buffer_ok, NET_BUFFER_STEPS_MS};
 use atlas_core::net_listening::net_stats;
 use atlas_core::platform::Os;
-use atlas_core::remote::{validate_remote, RemoteChoice};
 use atlas_core::rig::RigCommand;
 use atlas_core::scan::{plan, ScanRequest, ScanStatus};
 use atlas_core::setup::{validate_choice, BackendKind, RigChoice, RigModel};
@@ -28,13 +27,12 @@ use serde_json::Value;
 use tokio::sync::OnceCell;
 
 use crate::audio::{backend, sound_cards, AudioHub};
-use crate::config::{save_audio, save_net, save_net_buffer, save_rig, save_server, save_update, AppConfig};
+use crate::config::{save_audio, save_net, save_net_buffer, save_rig, save_update, AppConfig};
 use crate::favorites::FavoriteService;
 use crate::listening::ListeningService;
 use crate::net::NetService;
 use crate::net_favorites::NetFavoriteService;
 use crate::net_listening::NetListeningService;
-use crate::remote::RemoteServer;
 use crate::scan::{Context, ScanService};
 use crate::update::{InstallRefused, UpdateService, Updater};
 use crate::user_stations::UserStationService;
@@ -70,8 +68,6 @@ pub struct Atlas {
     pub net_listening: Arc<NetListeningService>,
     /// The NET band's favorites (its memory channels).
     pub net_favorites: Arc<NetFavoriteService>,
-    /// The browser UI's server (Settings → Remote access).
-    pub remote: RemoteServer,
     /// Ourselves, for the background install task.
     me: Weak<Atlas>,
     /// `<data_dir>/swatlas.lock`, held while we run (see `lock_data_dir`).
@@ -90,7 +86,7 @@ fn lock_data_dir(dir: &Path) -> Result<Option<File>, String> {
         Ok(()) => Ok(Some(file)),
         Err(TryLockError::WouldBlock) => Err(format!(
             "Shortwave Atlas is already running with {} (the desktop app or swatlas-server). Close it, \
-             or use Settings → Remote access in the desktop app",
+             or turn on [server] in the desktop app for remote access",
             dir.display()
         )),
         Err(TryLockError::Error(e)) => {
@@ -127,9 +123,6 @@ impl Atlas {
         if let Some(p) = &config.stations {
             tracing::warn!("`stations = {}` is no longer used; see `eibi_dir`", p.display());
         }
-        if config.server.auth.is_some() {
-            tracing::warn!("server.auth (WEB_AUTH) is no longer used: remote access has no password");
-        }
         let eibi = match &config.eibi_dir {
             Some(dir) => crate::sources::load(dir)?,
             None => crate::sources::bundled(),
@@ -160,7 +153,6 @@ impl Atlas {
         let net = Arc::new(NetService::new(config.net.enabled));
         let net_listening = NetListeningService::new(data_dir.as_ref().map(|d| d.join("net-listening.jsonl")));
         let net_favorites = NetFavoriteService::new(data_dir.as_ref().map(|d| d.join("net-favorites.json")));
-        let remote = RemoteServer::new(config.server.choice(), config.server.ui_dir.clone());
         let atlas = Arc::new_cyclic(|me| Self {
             rig,
             audio,
@@ -179,7 +171,6 @@ impl Atlas {
             net,
             net_listening,
             net_favorites,
-            remote,
             me: me.clone(),
             _lock: lock,
         });
@@ -251,7 +242,6 @@ impl Atlas {
     /// Stop the audio capture and the rigctld we started, and wait until they are gone, so the
     /// serial port, rigctld's TCP port and the sound card are free when the app is gone.
     pub async fn shutdown(&self) {
-        self.remote.stop().await;
         self.listening.close();
         self.net_listening.close();
         self.audio.shutdown().await;
@@ -320,29 +310,6 @@ impl Atlas {
     fn audio_diagnostics(&self) -> AudioDiagnostics {
         let status = self.audio.status();
         AudioDiagnostics { hints: diagnose_audio(Os::CURRENT, &status), status }
-    }
-
-    async fn remote_status(&self) -> RemoteStatus {
-        RemoteStatus {
-            locked: self.config.server_locked.clone(),
-            config_path: self.config_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
-            ..self.remote.status().await
-        }
-    }
-
-    /// Start, restart or stop remote access and save the choice.
-    async fn set_remote(&self, choice: RemoteChoice) -> Result<RemoteStatus, ApiError> {
-        if self.remote.headless() {
-            return Err(invalid("swatlas-server always serves: change [server] in its config and restart it."));
-        }
-        validate_remote(&choice).map_err(invalid)?;
-        let atlas = self.me.upgrade().ok_or_else(|| ApiError::internal("shutting down"))?;
-        // a failed start is in the status, and the choice is saved anyway: it's what was asked for
-        let _ = self.remote.apply(&atlas, choice.clone()).await;
-        if let Some(p) = &self.config_path {
-            save_server(p, &choice).map_err(|e| ApiError::internal(format!("Changed, but could not save: {e}")))?;
-        }
-        Ok(self.remote_status().await)
     }
 
     /// Start downloading and installing the offered update in the background.
@@ -699,8 +666,6 @@ impl Atlas {
                 Ok(Value::Null)
             }
             Call::NetOverview => json(serde_json::to_value(self.net.overview(self.user_stations.gazetteer()).await?)),
-            Call::RemoteStatus => json(serde_json::to_value(self.remote_status().await)),
-            Call::SetRemote(choice) => json(serde_json::to_value(self.set_remote(choice).await?)),
             Call::NetStats(q) => {
                 json(serde_json::to_value(self.net_listening.with(|l, open| net_stats(l, open, &q, now))))
             }

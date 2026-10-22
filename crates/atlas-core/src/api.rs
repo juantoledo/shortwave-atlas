@@ -9,7 +9,6 @@ use crate::favorites::FavoriteRequest;
 use crate::geo::LatLon;
 use crate::net::NetQuery;
 use crate::platform::Os;
-use crate::remote::{RemoteChoice, RemoteFailure, RemoteUrl, Scope};
 use crate::rig::{CommandError, RigCommand, RigState};
 use crate::scan::ScanRequest;
 use crate::setup::{BackendKind, Hint, RigChoice, RigModel, RigctldStatus};
@@ -214,12 +213,6 @@ pub enum Call {
     NetOverview,
     /// Internet listening in a period, kept apart from the rig's Stats (result: `NetStats`).
     NetStats(StatsQuery),
-    /// Remote access: is the browser UI served, where, and to how many (result: `RemoteStatus`).
-    RemoteStatus,
-    /// Start, restart or stop remote access, and save the choice. A failed start is in the
-    /// result's `failure` (result: `RemoteStatus`). Desktop window only: the WebSocket refuses it,
-    /// and swatlas-server always serves.
-    SetRemote(RemoteChoice),
 }
 
 /// Argument of `Call::SetUpdatePrefs`.
@@ -274,28 +267,6 @@ pub struct AudioSettings {
 pub struct AudioDiagnostics {
     pub status: AudioStatus,
     pub hints: Vec<AudioHint>,
-}
-
-/// Result of `Call::RemoteStatus`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
-pub struct RemoteStatus {
-    /// swatlas-server: always serving, set only in the file.
-    pub headless: bool,
-    pub running: bool,
-    /// What is served (while running), else what was last chosen.
-    pub choice: RemoteChoice,
-    pub scope: Scope,
-    /// Where to open it, best first (empty while stopped).
-    pub urls: Vec<RemoteUrl>,
-    /// Browsers connected now.
-    pub clients: u32,
-    /// Why the last start failed, with the error as the OS gave it.
-    pub failure: Option<RemoteFailure>,
-    pub error: Option<String>,
-    /// `RemoteChoice` fields forced by environment variables: a change lasts until restart.
-    pub locked: Vec<String>,
-    pub config_path: String,
 }
 
 /// Result of `Call::Info`.
