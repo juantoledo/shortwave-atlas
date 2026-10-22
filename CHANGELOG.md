@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.16.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.15.0...v0.16.0) (2026-10-22)
+
+
+### Features
+
+* start and stop remote access from the desktop app ([295abd9](https://github.com/juantoledo/shortwave-atlas/commit/295abd99a7d45d961a563462c5267f845203716b))
+* start and stop remote access from the desktop app ([0212f33](https://github.com/juantoledo/shortwave-atlas/commit/0212f33afb514338296635a3d91f2cc504d8de84))
+* start and stop remote access from the desktop app ([af46be9](https://github.com/juantoledo/shortwave-atlas/commit/af46be9d3875bf2a471f794cc4823d25370c39cf))
+
 ## [0.15.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.14.1...v0.15.0) (2026-10-19)
 
 
