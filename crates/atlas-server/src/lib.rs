@@ -12,6 +12,7 @@ pub mod net;
 pub mod net_audio;
 pub mod net_favorites;
 pub mod net_listening;
+pub mod remote;
 pub mod scan;
 pub mod server;
 pub mod sources;

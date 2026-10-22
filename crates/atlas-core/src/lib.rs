@@ -18,6 +18,7 @@ pub mod net_favorites;
 pub mod net_listening;
 pub mod platform;
 pub mod release_notes;
+pub mod remote;
 pub mod rig;
 pub mod scan;
 pub mod schedule;
