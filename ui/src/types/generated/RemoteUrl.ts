@@ -5,4 +5,8 @@ import type { UrlKind } from "./UrlKind";
 /**
  * An address to open the UI at.
  */
-export type RemoteUrl = { url: string, kind: UrlKind, qr: Qr, };
+export type RemoteUrl = { url: string, kind: UrlKind, 
+/**
+ * What the QR code opens: the phone remote at that address (`PHONE_PAGE`).
+ */
+qr_url: string, qr: Qr, };

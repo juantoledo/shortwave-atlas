@@ -63,10 +63,13 @@ function Address({ t, u, showQr, onQr }: { t: Messages; u: RemoteUrl; showQr: bo
         </span>
       </div>
       {showQr && u.qr.size > 0 && (
-        <svg className="remote-qr" viewBox={`0 0 ${u.qr.size} ${u.qr.size}`} role="img" aria-label={t.remoteQrLabel(u.url)}>
-          <rect width={u.qr.size} height={u.qr.size} fill="#fff" />
-          <path d={u.qr.path} fill="#000" />
-        </svg>
+        <>
+          <svg className="remote-qr" viewBox={`0 0 ${u.qr.size} ${u.qr.size}`} role="img" aria-label={t.remoteQrLabel(u.qr_url)}>
+            <rect width={u.qr.size} height={u.qr.size} fill="#fff" />
+            <path d={u.qr.path} fill="#000" />
+          </svg>
+          <p className="note">{t.remoteQrHint}</p>
+        </>
       )}
     </li>
   );

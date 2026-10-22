@@ -175,7 +175,13 @@ juantoledo/shortwave-atlas`. How releases are made: [docs/releasing.md](docs/rel
 In the desktop app, *Settings → Remote access* serves the same UI to browsers while the app runs.
 Choose **This computer only** or **My network and Tailscale** and press **Start remote access**.
 The page lists the addresses to open, each with a QR code for a phone, and how many browsers are
-connected; a **Remote** lamp in the top bar shows while it is on. Browsers hear the rig once
+connected; a **Remote** lamp in the top bar shows while it is on.
+
+Phones get the **simple remote** (`remote.html`), which the QR codes open: a page for one thumb, with
+no globe, so it loads fast. It shows the frequency, the S-meter and who is on the air there. You can
+tune with steps, a drag strip, a keypad or band jumps, and change mode. Three lists sit below: this
+band's stations, on the air first; your favorites, internet ones too; and a search. **Listen** sits
+at the bottom. **Full atlas** opens the whole app on the phone, and the phone remembers that choice. Browsers hear the rig once
 **Listen** is on in *Audio*. The choice is saved as `[server]` in `swatlas.toml` and comes back at
 the next start. Only the desktop window can change it: browsers see it, but can't turn it off.
 
