@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.16.0...v0.17.0) (2026-10-22)
+
+
+### Features
+
+* **ui:** a simple remote page for phones ([9abc8e7](https://github.com/juantoledo/shortwave-atlas/commit/9abc8e756dbf25a725e0ed3b76dcf6844a53c7f8))
+* **ui:** a simple remote page for phones ([4e0b9e2](https://github.com/juantoledo/shortwave-atlas/commit/4e0b9e2d20b0875a922b1d7e89224bf716dbb717))
+
 ## [0.16.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.15.0...v0.16.0) (2026-10-22)
 
 
