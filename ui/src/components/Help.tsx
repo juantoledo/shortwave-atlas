@@ -1,5 +1,6 @@
 // Help: an index of topics, each opening its own page. Topics are `HELP_TOPICS` (i18n/en.ts)
-// with their texts in `helpText`; a topic can add more below its text here.
+// with their texts in `helpText`; a topic can add more below its text here (Getting started:
+// the tour and the tips).
 
 import { useEffect, useState } from 'react';
 import type { Api } from '../api/client';
@@ -22,10 +23,13 @@ interface Props {
   api: Api | null;
   /** The release an update offers, if any. */
   offered: Release | null;
+  /** Getting started: take the tour (closing Help), show the tips again. */
+  onTour: () => void;
+  onTipsReset: () => void;
   onClose: () => void;
 }
 
-type ExtraProps = Pick<Props, 'version' | 'meta' | 'api' | 'offered'> & { topic: HelpTopic };
+type ExtraProps = Pick<Props, 'version' | 'meta' | 'api' | 'offered' | 'onTour' | 'onTipsReset'> & { topic: HelpTopic };
 
 /** This build's notes, then the offered update's. */
 function Notes({ api, version, offered }: Pick<Props, 'api' | 'version' | 'offered'>) {
@@ -55,18 +59,25 @@ function Notes({ api, version, offered }: Pick<Props, 'api' | 'version' | 'offer
   );
 }
 
-function Extra({ topic, version, meta, api, offered }: ExtraProps) {
+function Extra({ topic, version, meta, api, offered, onTour, onTipsReset }: ExtraProps) {
   const t = useT();
   const touch = useMedia(COARSE);
+  const [reset, setReset] = useState(false);
   if (topic === 'notes') return <Notes api={api} version={version} offered={offered} />;
   if (topic === 'start') {
     return (
+      <>
+      <div className="actions">
+        <button className="btn primary" type="button" onClick={onTour}>{t.helpTour}</button>
+        <button className="btn" type="button" disabled={reset} onClick={() => { onTipsReset(); setReset(true); }}>{reset ? t.helpTipsBack : t.helpTipsReset}</button>
+      </div>
       <ul className="legend-list">
         <li><i className="lg band k-broadcast" />{t.legendBroadcast}</li>
         <li><i className="lg band k-ham" />{t.legendHam}</li>
         <li><i className="lg band k-utility" />{t.legendCb}</li>
         <li><i className="lg band gap" />{t.legendGap}</li>
       </ul>
+      </>
     );
   }
   if (topic === 'globe') {
@@ -115,7 +126,7 @@ function Extra({ topic, version, meta, api, offered }: ExtraProps) {
   return null;
 }
 
-export function Help({ topic, onTopic, version, meta, api, offered, onClose }: Props) {
+export function Help({ topic, onTopic, version, meta, api, offered, onTour, onTipsReset, onClose }: Props) {
   const t = useT();
   return (
     <Sheet title={t.help} onClose={onClose}>
@@ -138,7 +149,7 @@ export function Help({ topic, onTopic, version, meta, api, offered, onClose }: P
           <button className="link" type="button" onClick={() => onTopic(null)}>← {t.helpTopics}</button>
           <h2>{t.helpText[topic][0]}</h2>
           <p>{t.helpText[topic][1]}</p>
-          <Extra topic={topic} version={version} meta={meta} api={api} offered={offered} />
+          <Extra topic={topic} version={version} meta={meta} api={api} offered={offered} onTour={onTour} onTipsReset={onTipsReset} />
         </article>
       )}
     </Sheet>

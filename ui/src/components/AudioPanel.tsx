@@ -151,7 +151,7 @@ export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onT
   if (!listenable && !player) return <AudioOff onSetUp={onSetUp} />;
   const netNote = net && netLine(t, net);
   return (
-    <section className={'audio' + (net ? ' net' : '')} aria-label={t.audio}>
+    <section className={'audio' + (net ? ' net' : '')} data-tour="audio" aria-label={t.audio}>
       <div className="audio-row">
         <button className={'btn' + (player ? ' primary' : '')} type="button" aria-pressed={!!player} title={t.keyHint(player ? t.stop : t.listen, t.keySpace)} onClick={toggle}>
           {player ? `■ ${t.stop}` : `▶ ${t.listen}`}
@@ -194,7 +194,7 @@ export function AudioPanel({ openAudio, rate, buffer, mode, cwPitch, freqHz, onT
 export function AudioOff({ onSetUp }: { onSetUp: () => void }) {
   const t = useT();
   return (
-    <section className="audio off" aria-label={t.audio}>
+    <section className="audio off" data-tour="audio" aria-label={t.audio}>
       <h2 className="h"><span>{t.audio}</span></h2>
       <p className="note">{t.audioOff}</p>
       <p><button className="link" type="button" onClick={onSetUp}>{t.audioSetUp} →</button></p>

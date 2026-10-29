@@ -109,6 +109,11 @@ impl Mode {
         }
     }
 
+    /// The rig's mode as it reports it, if it is one the UI may set (not PKTUSB and the like).
+    pub fn from_rig(s: &str) -> Option<Self> {
+        [Self::USB, Self::LSB, Self::CW, Self::CWR, Self::AM, Self::AMN, Self::FM].into_iter().find(|m| m.as_str() == s)
+    }
+
     /// The rig's mode (as it reports it) already serves for this one: the same, or AM-N for
     /// AM (a broadcast keeps the narrow filter the listener chose).
     pub fn satisfied_by(self, current: Option<&str>) -> bool {
@@ -221,6 +226,14 @@ mod tests {
         assert!(!Mode::AM.satisfied_by(Some("USB")));
         assert!(!Mode::USB.satisfied_by(Some("PKTUSB")));
         assert!(!Mode::AM.satisfied_by(None));
+    }
+
+    #[test]
+    fn modes_the_rig_reports() {
+        assert_eq!(Mode::from_rig("AMN"), Some(Mode::AMN));
+        assert_eq!(Mode::from_rig("CWR"), Some(Mode::CWR));
+        assert_eq!(Mode::from_rig("PKTUSB"), None);
+        assert_eq!(Mode::from_rig("am"), None);
     }
 
     #[test]

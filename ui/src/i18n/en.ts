@@ -10,6 +10,7 @@ import type { RemoteFailure } from '../types/generated/RemoteFailure';
 import type { ScanOutcome } from '../types/generated/ScanOutcome';
 import type { ScanSpeed } from '../types/generated/ScanSpeed';
 import type { Scope } from '../types/generated/Scope';
+import type { StepId, TipId } from '../tour/tour';
 import type { UrlKind } from '../types/generated/UrlKind';
 import type { Verdict } from '../types/generated/Verdict';
 
@@ -509,7 +510,7 @@ export const en = {
   kofi: 'Buy Me a Coffee at ko-fi.com',
   helpTopics: 'Topics',
   helpText: {
-    start: ['Getting started', 'Step-by-step help is on its way. Meanwhile: turn the receiver on, move the dial or pick a station from the list, and the globe flies to its transmitter.'],
+    start: ['Getting started', 'Turn the receiver on, move the dial or pick a station from the list, and the globe flies to its transmitter. The tour shows each part of the window in turn; the dots on some buttons say what those do, once.'],
     globe: ['The globe', 'The globe shows day and night as they are now, every transmitter site in the schedule, and the path from the station you are tuned to down to your QTH. Globe and Flat, over the zoom buttons, switch between the globe and a flat map of the whole world; this device remembers which.'],
     lists: ['Stations, scans and favorites', 'The station list has three views. All is the whole schedule. Heard is what your band scans actually received, across every band, in one list: the stations they logged and the signals no station explains, with the best reading and when each was last heard. Sort it by frequency, strength or how recent. Favorites are the stations and frequencies you keep: press ☆ next to a station\'s name or next to the frequency. They are one list on any band, whatever the filters, with your internet favorites after the radio ones; only the search narrows it. With internet radio on, searching words on All also shows the first internet stations found, with a link to the rest on the NET band. In a scan, Show in the station list narrows the list to the stations that scan heard and missed, so you can go through them with the globe in view. Favorites are kept on the computer that runs Shortwave Atlas, so every window sees the same ones. A click on a row tunes it; a double-click (or Shift+Enter) tunes it and starts listening.'],
     stats: ['Stats', 'Stats keeps a history of what you listen to: stay on a frequency for 30 seconds, with the radio on and no scan running, and a session starts; it ends when you tune away or turn the radio off. The station is the one on the air there, or the one you pick. Overview shows when, what and how far, against the period before. Collection is a quiet game layer: a passport of countries, badges and a monthly bingo card (hide it in Settings › Display). Propagation shows which band came in best at each hour, grey-line catches and the faintest signals you stayed on. Hunt suggests stations on the air now that are new to you. Clean up forgets old sessions or all of them, after asking. The history is kept on the computer that runs Shortwave Atlas.'],
@@ -530,7 +531,34 @@ export const en = {
   welcomeEnjoy: 'Enjoy the bands, and 73!',
   welcomeDontShow: "Don't show this again",
   welcomeStart: 'Start listening',
-  welcomeLater: 'You can read this again any time in Help › About.',
+  welcomeLater: 'You can read this again any time in Help › About, and take the tour from Help › Getting started.',
+  welcomeTour: 'Take the tour',
+  tour: {
+    globe: ['The globe', 'Every transmitter in the schedule, with day and night as they are now. Drag to turn it and pick a site to see what it sends. Tune a station and the globe flies to it, drawing the path down to you.'],
+    browse: ['Stations', 'The schedule, narrowed to what you want: search by name, language or country, or filter by band. A click on a row tunes it; a double-click tunes it and starts listening.'],
+    station: ['The tuned station', 'Who is on the frequency you are tuned to: the station, its language, where it sends from and to, and how far that is. When several share the frequency, pick the one you hear; ☆ keeps it.'],
+    dial: ['The receiver', "Your radio's frequency and mode. Type a frequency, turn the dial or step through the bands; the marks show where the stations are. Scan steps through a band and logs what it hears."],
+    audio: ['Audio', "Listen through this computer when your radio's audio reaches it: set it up in Settings › Audio."],
+    top: ['Scans, Stats and Favorites', 'Scans keeps your band scans. Stats is the history of what you listen to: countries, badges and propagation. Favorites shows the stations and frequencies you keep.'],
+    power: ['Power', 'Turns your radio on and off. No radio yet? A simulated one answers until you connect yours in Settings › Rig.'],
+    help: ['Help and Settings', 'Help (F1) explains each part in more detail, and takes this tour again. Settings, next to it, sets up your radio, audio, remote access and display.'],
+  } as Record<StepId, [string, string]>,
+  tourStep: (i: number, n: number) => `${i} of ${n}`,
+  tourNext: 'Next',
+  tourBack: 'Back',
+  tourDone: 'Done',
+  tourSkip: 'Skip the tour',
+  helpTour: 'Take the tour',
+  helpTipsReset: 'Show the tips again',
+  helpTipsBack: 'The tips are back',
+  tips: {
+    net: ['Internet radio', 'NET turns the receiver to internet stations: search them by name or country, play them and keep favorites, no radio needed.'],
+    stats: ['Stats', 'Stay on a frequency for 30 seconds and a listening session starts. Stats keeps them: what you heard, from how far, and when the bands were best.'],
+    scans: ['Scans', 'A scan steps through a band and logs every signal it hears. Your scans are kept here; Heard in the station list shows what they found.'],
+    favorites: ['Favorites', 'Press ☆ next to a station or the frequency to keep it. This shows them all, on any band.'],
+  } as Record<TipId, [string, string]>,
+  tipOpen: (title: string) => `Tip: ${title}`,
+  tipGotIt: 'Got it',
   dataNoticeTitle: 'About the data',
   dataNoticeFrom: 'Station information comes from the EiBi shortwave schedule by Eike Bierwirth (eibispace.de), which he generously makes freely available. Many thanks! Shortwave Atlas refreshes it every week.',
   dataNoticeAsIs: 'Shortwave Atlas shows this information as is, for reference only and without warranty. Broadcasters change their plans often, so what is on the air may differ from what you see here in:',

@@ -23,6 +23,7 @@ import type { Band } from '../types/generated/Band';
 import { Flag } from './Flag';
 import type { NetPhase } from './net';
 import { NetFunnel } from './NetFunnel';
+import { Tip } from './Tip';
 import type { FreqHeat } from '../types/generated/FreqHeat';
 import type { Mode } from '../types/generated/Mode';
 import type { RxRange } from '../types/generated/RxRange';
@@ -252,7 +253,7 @@ export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans,
       : ph.kind === 'failed' ? t.netStoppedShort
       : null;
     return (
-      <section className="rx net" aria-label={t.receiver}>
+      <section className="rx net" data-tour="dial" aria-label={t.receiver}>
         <div className="rx-main">
           <div className="rx-top">
             <div className="readout">
@@ -332,7 +333,7 @@ export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans,
   }
 
   return (
-    <section className={'rx' + (on ? '' : ' off')} aria-label={t.receiver}>
+    <section className={'rx' + (on ? '' : ' off')} data-tour="dial" aria-label={t.receiver}>
       <div className="rx-main">
         <div className="rx-top">
           <label className="sr" htmlFor="freq">{t.freqLabel}</label>
@@ -407,6 +408,7 @@ export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans,
           <div className="dial-side">
             <SMeter on={on} meter={meter} />
             {spans.length > 1 && (
+              <Tip id="net" off={!onNetSpan}>
               <div className="seg spans" role="radiogroup" aria-label={t.spansLabel}>
                 {spans.map((s) => (
                   <button key={s.id} type="button" role="radio" aria-checked={s.id === span.id} className={s.id === here.id ? 'here' : undefined} onClick={() => setLooking(s.id === here.id ? null : s.id)}>
@@ -415,6 +417,7 @@ export function Tuner({ on, freqHz, mode, meter, freqsHz, onAirHz, bands, spans,
                 ))}
                 {netSpan}
               </div>
+              </Tip>
             )}
           </div>
           <div className={'dial' + (away ? ' away' : '')} ref={dialRef}>

@@ -1,16 +1,19 @@
 // The welcome splash at start: what Shortwave Atlas is, and where its data comes from. Only its
 // button closes it (no Escape, no press outside), so it is read once; "Don't show this again"
-// keeps it closed on this device (hooks/useWelcome.ts).
+// keeps it closed on this device (hooks/useWelcome.ts). Until this device has taken the tour
+// (components/Tour.tsx), it offers that too.
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { useT } from '../i18n';
 import { DataNotice } from './DataNotice';
 
 interface Props {
-  onClose: (dontShow: boolean) => void;
+  /** `tour`: closed to take the tour. */
+  onClose: (dontShow: boolean, tour: boolean) => void;
+  offerTour: boolean;
 }
 
-export function Welcome({ onClose }: Props) {
+export function Welcome({ onClose, offerTour }: Props) {
   const t = useT();
   const id = useId();
   const [dontShow, setDontShow] = useState(false);
@@ -45,7 +48,10 @@ export function Welcome({ onClose }: Props) {
             <input type="checkbox" checked={dontShow} onChange={(e) => setDontShow(e.target.checked)} />
             <span>{t.welcomeDontShow}</span>
           </label>
-          <button className="btn primary" type="button" ref={start} onClick={() => onClose(dontShow)}>{t.welcomeStart}</button>
+          <span className="welcome-go">
+            {offerTour && <button className="btn" type="button" onClick={() => onClose(dontShow, true)}>{t.welcomeTour}</button>}
+            <button className="btn primary" type="button" ref={start} onClick={() => onClose(dontShow, false)}>{t.welcomeStart}</button>
+          </span>
         </footer>
       </section>
     </div>
