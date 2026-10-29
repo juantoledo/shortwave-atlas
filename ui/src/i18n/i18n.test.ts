@@ -20,7 +20,7 @@ describe('i18n', () => {
         if (typeof en[k] === 'function') expect((cat[k] as () => string).length, k).toBe((en[k] as () => string).length);
       }
       expect(cat.compass).toHaveLength(8);
-      for (const k of ['hints', 'audioHints', 'hintsByOs', 'audioHintsByOs', 'regions', 'sun', 'helpText', 'problem', 'remoteScopes', 'remoteScopeHelp', 'remoteFailures', 'remoteKinds', 'remoteFirewall'] as const) expect(shape(cat[k]), k).toEqual(shape(en[k]));
+      for (const k of ['hints', 'audioHints', 'hintsByOs', 'audioHintsByOs', 'regions', 'sun', 'helpText', 'tour', 'tips', 'problem', 'remoteScopes', 'remoteScopeHelp', 'remoteFailures', 'remoteKinds', 'remoteFirewall'] as const) expect(shape(cat[k]), k).toEqual(shape(en[k]));
     }
   });
 
