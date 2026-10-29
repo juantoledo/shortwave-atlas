@@ -50,6 +50,10 @@ pub trait RigBackend: Send + Sync {
     async fn freq(&self) -> Option<u32> {
         self.get_state(&RigState::without_rig(Link::Ok, Power::On)).await.freq_hz
     }
+    /// The mode alone, as the rig reports it (a scan checks it at every step).
+    async fn mode(&self) -> Option<String> {
+        self.get_state(&RigState::without_rig(Link::Ok, Power::On)).await.mode
+    }
     /// What the rig receives, if it can say.
     async fn coverage(&self) -> Option<Vec<RxRange>> {
         None
@@ -119,6 +123,10 @@ type ScanSlot = Arc<Mutex<Option<Arc<ScanCtl>>>>;
 /// the rig, publishing each frequency and reading as the state. Dropping it hands the rig back.
 pub struct ScanLink {
     backend: Arc<dyn RigBackend>,
+    /// The mode the scan began in, kept at every step: a step into another band can make the rig
+    /// recall that band's mode (Hamlib changes band first on the FTDX-10 and other Yaesus), and
+    /// the readings would mix AM with SSB. `None` if the rig was in a mode the UI cannot set.
+    hold: Option<Mode>,
     state: Arc<watch::Sender<RigState>>,
     paused: Arc<AtomicBool>,
     wake: Arc<Notify>,
@@ -142,6 +150,7 @@ impl ScanLink {
         gap: Duration,
     ) -> Result<Option<i32>, CommandError> {
         self.backend.set_freq(hz).await?;
+        self.keep_mode(hz).await;
         tokio::time::sleep(dwell).await;
         let mut best: Option<i32> = None;
         for k in 0..reads {
@@ -160,9 +169,28 @@ impl ScanLink {
         Ok(best)
     }
 
-    /// Tune without reading (back where the scan started).
+    /// Tune without reading (back where the scan started, in the mode it started in).
     pub async fn tune(&self, hz: u32) -> Result<(), CommandError> {
-        self.backend.set_freq(hz).await
+        self.backend.set_freq(hz).await?;
+        self.keep_mode(hz).await;
+        Ok(())
+    }
+
+    /// Put the rig back in `hold` if tuning to `hz` changed its mode, then back on `hz` (some
+    /// rigs move the frequency with the mode). A rig that will not is left as it is.
+    async fn keep_mode(&self, hz: u32) {
+        let Some(hold) = self.hold else { return };
+        let now = self.backend.mode().await;
+        if now.is_none() || hold.satisfied_by(now.as_deref()) {
+            return;
+        }
+        if let Err(e) = self.backend.set_mode(hold).await {
+            tracing::warn!("scan: set_mode {}: {e}", hold.as_str());
+            return;
+        }
+        if let Err(e) = self.backend.set_freq(hz).await {
+            tracing::warn!("scan: set_freq {hz} after the mode: {e}");
+        }
     }
 }
 
@@ -342,6 +370,7 @@ impl Rig {
         r.paused.store(true, Ordering::SeqCst);
         Ok(ScanLink {
             backend: r.backend.clone(),
+            hold: self.state.borrow().mode.as_deref().and_then(Mode::from_rig),
             state: self.state.clone(),
             paused: r.paused.clone(),
             wake: r.wake.clone(),
@@ -685,14 +714,43 @@ mod tests {
             assert_eq!((rig.state().freq_hz, rig.state().strength_db), (Some(hz), *got.last().unwrap()));
         }
         assert_eq!(got, [Some(-54), Some(-12), Some(-54)]);
-        // the poller slept: only tuning and meter reads reached the rig
+        // the poller slept: only tuning, the mode check and meter reads reached the rig
         let during = fake.all().await[from..].to_vec();
-        assert_eq!(during.len(), 12, "{during:?}");
-        assert!(during.iter().all(|c| c.starts_with("F ") || c == "l STRENGTH"), "{during:?}");
+        assert_eq!(during.len(), 15, "{during:?}");
+        assert!(during.iter().all(|c| c.starts_with("F ") || c == "m" || c == "l STRENGTH"), "{during:?}");
 
         drop(link);
         assert!(!rig.scanning());
         rig.begin_scan().unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_scan_keeps_its_mode_across_a_band_change() {
+        let fake = FakeRigctld::start().await;
+        // the 7 MHz band was last used in LSB: the rig recalls it on the way in
+        fake.band_mode(7, "LSB").await;
+        let rig = Rig::start(Arc::new(hamlib::Hamlib::new("127.0.0.1", fake.port)));
+        let mut rx = rig.subscribe();
+        until(&mut rx, |s| s.power == Power::On).await;
+        rig.execute(RigCommand::Tune { hz: 9_500_000, mode: Mode::AM }).await.unwrap();
+        until(&mut rx, |s| s.freq_hz == Some(9_500_000) && s.mode.as_deref() == Some("AM")).await;
+
+        let link = rig.begin_scan().unwrap();
+        let from = fake.log().await.len();
+        for hz in [6_995_000, 7_000_000, 7_005_000] {
+            link.measure(hz, MS, 1, MS).await.unwrap();
+        }
+        // and back, to a band last left in USB
+        fake.band_mode(9, "USB").await;
+        link.tune(9_500_000).await.unwrap();
+        let log = fake.log().await[from..].to_vec();
+        assert_eq!(
+            log,
+            ["F 6995000", "F 7000000", "M AM 0", "F 7000000", "F 7005000", "F 9500000", "M AM 0", "F 9500000"]
+        );
+        drop(link);
+        let s = until(&mut rx, |s| s.freq_hz == Some(9_500_000)).await;
+        assert_eq!(s.mode.as_deref(), Some("AM"));
     }
 
     #[tokio::test]

@@ -37,6 +37,8 @@ import { useBandScans, useScan } from './hooks/useScan';
 import { useRemote } from './hooks/useRemote';
 import { useUpdate } from './hooks/useUpdate';
 import { useUserStations } from './hooks/useUserStations';
+import { TipsProvider, useTipsState } from './hooks/useTips';
+import { useTour } from './hooks/useTour';
 import { useWelcome } from './hooks/useWelcome';
 import { useFreqHeat, useListening, useStats } from './hooks/useStats';
 import { useNetCountries, useNetOverview, useNetSearch } from './hooks/useNetSearch';
@@ -50,6 +52,7 @@ import { fmtKhz, fmtStamp, I18nProvider, pickMessages } from './i18n';
 import type { HelpTopic } from './i18n/en';
 import { stepIndex, type Action } from './keys/keymap';
 import { useKeys } from './keys/useKeys';
+import type { TourStep } from './tour/tour';
 import type { Band } from './types/generated/Band';
 import type { Candidate } from './types/generated/Candidate';
 import type { Mode } from './types/generated/Mode';
@@ -67,6 +70,7 @@ const Scans = lazy(() => import('./components/Scans').then((m) => ({ default: m.
 const Settings = lazy(() => import('./components/settings/Settings').then((m) => ({ default: m.Settings })));
 const StationForm = lazy(() => import('./components/StationForm').then((m) => ({ default: m.StationForm })));
 const StatsView = lazy(() => import('./components/stats/StatsView').then((m) => ({ default: m.StatsView })));
+const Tour = lazy(() => import('./components/Tour').then((m) => ({ default: m.Tour })));
 const Welcome = lazy(() => import('./components/Welcome').then((m) => ({ default: m.Welcome })));
 
 const MSG_MS = 6000;
@@ -118,6 +122,26 @@ export function App() {
   };
   /** A panel's tabs or rail: that view, unfolded. */
   const openView = (v: View) => { setView(v); if (v !== 'globe') folds.reveal(v); };
+  // the tour walks the views and leaves the listener on the one they were on; the tips wait
+  // while anything covers the window
+  const tour = useTour();
+  const tips = useTipsState(welcome.open || tour.open || sheet !== null);
+  const tourFrom = useRef<View | null>(null);
+  const startTour = () => {
+    tourFrom.current = view;
+    setSheet(null);
+    setPage('main');
+    tour.start();
+  };
+  const endTour = () => {
+    tour.finish();
+    if (tourFrom.current) setViewRaw(tourFrom.current);
+    tourFrom.current = null;
+  };
+  const showStep = (s: TourStep) => {
+    if (s.view) setView(s.view);
+    if (s.reveal) folds.reveal(s.reveal);
+  };
   const [touchedGlobe, setTouchedGlobe] = useState(false);
   const t = useMemo(() => pickMessages(info?.lang, navigator.languages), [info?.lang]);
   useEffect(() => { document.documentElement.lang = t.locale; }, [t]);
@@ -507,7 +531,7 @@ export function App() {
     // a hidden panel only shows after the change renders
     if (hidden) requestAnimationFrame(go);
   };
-  useKeys(sheet !== null || askOff || welcome.open, (a: Action) => {
+  useKeys(sheet !== null || askOff || welcome.open || tour.open, (a: Action) => {
     switch (a.kind) {
       case 'search':
         setPage('main');
@@ -572,6 +596,7 @@ export function App() {
   return (
     <I18nProvider value={t}>
       <NamesProvider value={names}>
+      <TipsProvider value={tips}>
       <div className="app" data-view={view} data-page={page === 'stats' ? 'stats' : undefined} data-folded={folds.attr || undefined} data-globe={display.fullGlobe ? 'full' : 'framed'} data-map={display.map}>
         <TopBar
           info={info}
@@ -585,12 +610,12 @@ export function App() {
           onConfirmOff={() => { setAskOff(false); setPower(false); }}
           onCancelOff={() => setAskOff(false)}
           onSetup={() => openSettings('rig')}
-          onScans={() => openScans()}
+          onScans={() => { tips.dismiss('scans'); openScans(); }}
           scansNew={scansNew}
-          onStats={toggleStats}
+          onStats={() => { tips.dismiss('stats'); toggleStats(); }}
           statsOn={page === 'stats'}
           listening={listening}
-          onFavorites={toggleFavorites}
+          onFavorites={() => { tips.dismiss('favorites'); toggleFavorites(); }}
           favOn={filters.lens === 'favorites'}
           onHelp={() => openHelp()}
           onSettings={() => openSettings()}
@@ -600,7 +625,7 @@ export function App() {
           update={api && <UpdateBanner update={update} transport={api.transport.kind} onError={onError} />}
         />
 
-        <main className="stage" aria-label={t.globe}>
+        <main className="stage" data-tour="globe" aria-label={t.globe}>
           {qth && (
             <Globe
               sel={on && !netNow ? sel : null}
@@ -629,7 +654,7 @@ export function App() {
           <Hud faded={touchedGlobe} flat={display.map === 'flat'} />
         </main>
 
-        <section className={'panel browse' + (folds.folded('browse') ? ' folded' : '')} id="panel-browse" aria-label={t.stations}>
+        <section className={'panel browse' + (folds.folded('browse') ? ' folded' : '')} id="panel-browse" data-tour="browse" aria-label={t.stations}>
           <PanelHead own="browse" onView={openView} aside={count} count={shortCount} folded={folds.folded('browse')} onFold={() => folds.toggle('browse')} panelId="panel-browse" />
           <StationList
             on={on}
@@ -673,7 +698,7 @@ export function App() {
           />
         </section>
 
-        <section className={'panel station' + (folds.folded('station') ? ' folded' : '')} id="panel-station" aria-label={t.station} aria-live="polite">
+        <section className={'panel station' + (folds.folded('station') ? ' folded' : '')} id="panel-station" data-tour="station" aria-label={t.station} aria-live="polite">
           <PanelHead own="station" onView={openView} count={shortCount} folded={folds.folded('station')} onFold={() => folds.toggle('station')} panelId="panel-station" />
           {netNow ? (
             <NetDossier now={netNow} country={netCountryName(netNow.station.itu)} star={netStar} onBackToRig={stopNet} />
@@ -741,7 +766,7 @@ export function App() {
             onTune={tune}
             onMode={setMode}
             net={netFace}
-            onNetSpan={netEnabled ? toNetBand : null}
+            onNetSpan={netEnabled ? () => { tips.dismiss('net'); toNetBand(); } : null}
           />
           {/* always mounted, so audio keeps playing whatever else opens */}
           {info && api && audioCell(info.audio, netEnabled) === 'panel' ? (
@@ -845,12 +870,21 @@ export function App() {
             meta={meta}
             api={api}
             offered={update.status && 'release' in update.status.state ? update.status.state.release ?? null : null}
+            onTour={startTour}
+            onTipsReset={tips.reset}
             onClose={() => setSheet(null)}
           />
         )}
-        {welcome.open && <Welcome onClose={welcome.close} />}
+        {welcome.open && (
+          <Welcome
+            offerTour={!tour.done}
+            onClose={(dontShow, go) => { welcome.close(dontShow); if (go) startTour(); }}
+          />
+        )}
+        {tour.open && <Tour index={tour.index} onShow={showStep} onIndex={tour.go} onClose={endTour} />}
         </Suspense>
       </div>
+      </TipsProvider>
       </NamesProvider>
     </I18nProvider>
   );

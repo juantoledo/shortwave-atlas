@@ -258,6 +258,10 @@ impl RigBackend for Hamlib {
         self.number(Cmd::GetFreq).await.ok().map(|f| f.round() as u32)
     }
 
+    async fn mode(&self) -> Option<String> {
+        self.send(Cmd::GetMode).await.ok().and_then(|l| l.into_iter().next())
+    }
+
     async fn coverage(&self) -> Option<Vec<RxRange>> {
         let ranges = parse_dump_state(&self.send(Cmd::DumpState).await.ok()?);
         (!ranges.is_empty()).then_some(ranges)

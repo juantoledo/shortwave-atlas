@@ -11,6 +11,7 @@ import { useNow } from '../hooks/useCore';
 import { fmtSecs, useT, type Messages } from '../i18n';
 import type { Chrome } from '../api/window';
 import { Confirm } from './Confirm';
+import { Tip } from './Tip';
 import { WindowControls } from './WindowControls';
 import type { Info } from '../types/generated/Info';
 import type { ListeningNow } from '../types/generated/ListeningNow';
@@ -101,20 +102,28 @@ export function TopBar({ info, chrome, status, on, powerBusy, powerDisabled, onP
         </a>
         <Clock />
         {update}
+        <span className="top-group" data-tour="top">
+        <Tip id="scans">
         <button className="top-btn scans" type="button" aria-label={scansNew ? t.scansNew : t.scans} title={scansNew ? t.scansNew : t.scans} onClick={onScans}>
           <svg className="top-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 14h2v-4H1zM5 14h2V5H5zM9 14h2V8H9zM13 14h2V2h-2z" /></svg>
           <span className="top-txt">{t.scans}</span>
           {scansNew && <span className="new-dot" />}
         </button>
+        </Tip>
+        <Tip id="stats">
         <button className="top-btn stats" type="button" aria-pressed={statsOn} aria-label={statsTitle} title={statsTitle} onClick={onStats}>
           <svg className="top-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 14h14v1H1zM1 11.6l4.2-5.1 3 3L14 2.8l1 .9-6.7 7.6-3-3L2.1 12.5z" /></svg>
           <span className="top-txt">{t.statsBtn}</span>
           {(rec || netRec) && <span className="rec-lamp" />}
         </button>
+        </Tip>
+        <Tip id="favorites">
         <button className="top-btn fav" type="button" aria-pressed={favOn} aria-label={t.favoritesBtn} title={t.favoritesBtn} onClick={onFavorites}>
           <span className="top-ico" aria-hidden="true">★</span>
           <span className="top-txt">{t.favoritesBtn}</span>
         </button>
+        </Tip>
+        </span>
         {remote !== null && (
           <button className="top-btn remote" type="button" aria-label={t.remoteLamp(remote)} title={t.remoteLamp(remote)} onClick={onRemote}>
             <svg className="top-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 9.6a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2zM4.6 4.6l1 1a3.4 3.4 0 0 0 0 4.8l-1 1a4.8 4.8 0 0 1 0-6.8zm6.8 0a4.8 4.8 0 0 1 0 6.8l-1-1a3.4 3.4 0 0 0 0-4.8zM2.4 2.4l1 1a6.5 6.5 0 0 0 0 9.2l-1 1a7.9 7.9 0 0 1 0-11.2zm11.2 0a7.9 7.9 0 0 1 0 11.2l-1-1a6.5 6.5 0 0 0 0-9.2z" /></svg>
@@ -128,9 +137,9 @@ export function TopBar({ info, chrome, status, on, powerBusy, powerDisabled, onP
             <span className="top-txt">{t.remoteSimple}</span>
           </button>
         )}
-        <button className="icon-btn" type="button" aria-label={t.help} title={`${t.help} (F1)`} onClick={onHelp}>?</button>
+        <button className="icon-btn" type="button" data-tour="help" aria-label={t.help} title={`${t.help} (F1)`} onClick={onHelp}>?</button>
         <button className="icon-btn" type="button" aria-label={t.settings} title={t.settings} onClick={onSettings}>⚙</button>
-        <div className="power-wrap" ref={power} data-tauri-drag-region="false">
+        <div className="power-wrap" data-tour="power" ref={power} data-tauri-drag-region="false">
           <button className="power" type="button" aria-pressed={on} aria-expanded={askOff} disabled={powerBusy || powerDisabled} onClick={askOff ? onCancelOff : onPower}>
             <span className="lamp" />
             <span className="power-txt">{powerBusy ? t.powerBusy : on ? t.powerOn : t.powerOff}</span>
