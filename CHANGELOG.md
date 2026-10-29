@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.18.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.17.0...v0.18.0) (2026-10-29)
+
+
+### Features
+
+* **ui:** a guided tour and one-time tips for new users ([b621b18](https://github.com/juantoledo/shortwave-atlas/commit/b621b183ffa72eba131b88bdd152a9f35974fb6c))
+* **ui:** a guided tour and one-time tips for new users ([d2591da](https://github.com/juantoledo/shortwave-atlas/commit/d2591da0bcaebddd8c858b1e58aa954a42d10cc6))
+* **ui:** a guided tour and one-time tips for new users ([ab39382](https://github.com/juantoledo/shortwave-atlas/commit/ab393826a89159ab0f54bff84f89ab1120c6a740))
+
+
+### Bug Fixes
+
+* **rig:** a scan keeps the mode it started in across a band change ([d2591da](https://github.com/juantoledo/shortwave-atlas/commit/d2591da0bcaebddd8c858b1e58aa954a42d10cc6))
+* **rig:** a scan keeps the mode it started in across a band change ([ab39382](https://github.com/juantoledo/shortwave-atlas/commit/ab393826a89159ab0f54bff84f89ab1120c6a740))
+
 ## [0.17.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.16.0...v0.17.0) (2026-10-22)
 
 
