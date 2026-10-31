@@ -1,21 +1,21 @@
 {
   "note": "radiomap's published counts for this CSV (data/shortwave.js meta); written by assets/sync_eibi.py. atlas_keeps: stations radiomap drops as utilities that Atlas keeps as broadcasts.",
-  "radiomap_commit": "2106cb1f1593aa1cd5f16d81adf95cf1ef28a96d",
+  "radiomap_commit": "330a4f6783e94eb3005fe1736ab9ed30f33b3d75",
   "source_file": "sked-a26.csv",
-  "sha256": "60830fc5db384d160c17d3144bd15966d4c3f5cb9b29f4600a6d7c11eacd4dd4",
-  "rows": 5926,
+  "sha256": "2451b7daebc445c3a270849d52bb47ac1e941e37e64029411229e154ba48577a",
+  "rows": 6136,
   "skipped": {
     "invalid": 0,
-    "band": 797,
-    "inactive": 80,
-    "utility": 2621,
+    "band": 807,
+    "inactive": 78,
+    "utility": 2600,
     "not_broadcast": 4,
-    "no_site": 14
+    "no_site": 17
   },
-  "sites": 171,
+  "sites": 173,
   "precise_sites": 153,
-  "stations": 262,
-  "day_patterns": 76,
+  "stations": 273,
+  "day_patterns": 83,
   "atlas_keeps": [
     "CNR5 Cross-Strait Radio"
   ]
