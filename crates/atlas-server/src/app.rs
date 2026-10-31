@@ -501,7 +501,8 @@ impl Atlas {
                 json(serde_json::to_value(c))
             }
             Call::Search(q) => json(
-                self.cpu(move |a| a.known(&q, now, |cat, k| serde_json::to_value(lens::search(cat, &q, now, k)))).await?,
+                self.cpu(move |a| a.known(&q, now, |cat, k| serde_json::to_value(lens::search(cat, &q, now, k))))
+                    .await?,
             ),
             Call::Timetable(q) => json(
                 self.cpu(move |a| a.known(&q, now, |cat, k| serde_json::to_value(timetable(cat, &q, now, k)))).await?,
@@ -702,8 +703,13 @@ impl Atlas {
         } else {
             Default::default()
         };
-        let known =
-            Known { logbook: &logbook, signals: &signals, favorites: &favorites, listened: &listened, scan: scan.as_ref() };
+        let known = Known {
+            logbook: &logbook,
+            signals: &signals,
+            favorites: &favorites,
+            listened: &listened,
+            scan: scan.as_ref(),
+        };
         f(&cat, &known)
     }
 

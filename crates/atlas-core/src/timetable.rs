@@ -132,7 +132,8 @@ mod tests {
         }
 
         fn table(&self, q: &StationQuery, unix: i64, max: usize) -> Timetable {
-            let k = Known { logbook: &[], signals: &[], favorites: &self.favorites, listened: &self.listened, scan: None };
+            let k =
+                Known { logbook: &[], signals: &[], favorites: &self.favorites, listened: &self.listened, scan: None };
             capped(&self.cat, q, unix, &k, max)
         }
 
