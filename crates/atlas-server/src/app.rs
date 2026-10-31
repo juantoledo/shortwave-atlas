@@ -21,8 +21,9 @@ use atlas_core::remote::{validate_remote, RemoteChoice};
 use atlas_core::rig::RigCommand;
 use atlas_core::scan::{plan, ScanRequest, ScanStatus};
 use atlas_core::setup::{validate_choice, BackendKind, RigChoice, RigModel};
-use atlas_core::stations::{Catalog, CatalogCell, Lens, LOOKUP_TOLERANCE_HZ};
+use atlas_core::stations::{Catalog, CatalogCell, Lens, StationQuery, LOOKUP_TOLERANCE_HZ};
 use atlas_core::stats::{freq_heat, listened_ids, stats, trend_for, NowListening};
+use atlas_core::timetable::timetable;
 use atlas_rig::{discover, Rig, RigConfig, ScanStop};
 use serde_json::Value;
 use tokio::sync::OnceCell;
@@ -500,27 +501,10 @@ impl Atlas {
                 json(serde_json::to_value(c))
             }
             Call::Search(q) => json(
-                self.cpu(move |a| {
-                    let cat = a.stations.get();
-                    let (logbook, signals, favorites) =
-                        (a.scan.logbook_for(&cat), a.scan.signals(), a.favorites.list());
-                    let scan = q.scan.as_deref().and_then(|id| a.scan.summary(id));
-                    // only the Listened lens needs the history
-                    let listened = if q.lens == Lens::Listened {
-                        a.listening.with(now, |l, open| listened_ids(l.iter().chain(open), &cat))
-                    } else {
-                        Default::default()
-                    };
-                    let known = Known {
-                        logbook: &logbook,
-                        signals: &signals,
-                        favorites: &favorites,
-                        listened: &listened,
-                        scan: scan.as_ref(),
-                    };
-                    serde_json::to_value(lens::search(&cat, &q, now, &known))
-                })
-                .await?,
+                self.cpu(move |a| a.known(&q, now, |cat, k| serde_json::to_value(lens::search(cat, &q, now, k)))).await?,
+            ),
+            Call::Timetable(q) => json(
+                self.cpu(move |a| a.known(&q, now, |cat, k| serde_json::to_value(timetable(cat, &q, now, k)))).await?,
             ),
             Call::Overview => json(serde_json::to_value(self.stations.get().overview(now))),
             Call::StationsMeta => json(serde_json::to_value(self.stations.get().meta(now))),
@@ -707,6 +691,22 @@ impl Atlas {
         }
     }
 
+    /// `f` on the running catalog and what the lenses of `q` draw on besides it.
+    fn known<T>(&self, q: &StationQuery, now: i64, f: impl FnOnce(&Catalog, &Known) -> T) -> T {
+        let cat = self.stations.get();
+        let (logbook, signals, favorites) = (self.scan.logbook_for(&cat), self.scan.signals(), self.favorites.list());
+        let scan = q.scan.as_deref().and_then(|id| self.scan.summary(id));
+        // only the Listened lens needs the history
+        let listened = if q.lens == Lens::Listened {
+            self.listening.with(now, |l, open| listened_ids(l.iter().chain(open), &cat))
+        } else {
+            Default::default()
+        };
+        let known =
+            Known { logbook: &logbook, signals: &signals, favorites: &favorites, listened: &listened, scan: scan.as_ref() };
+        f(&cat, &known)
+    }
+
     /// Run a pass over the catalog or the listening history on the blocking pool: over a long
     /// history it takes tens of ms, which the async threads owe the WebSocket, the rig and the audio.
     async fn cpu<T: Send + 'static>(&self, f: impl FnOnce(&Atlas) -> T + Send + 'static) -> Result<T, ApiError> {
@@ -751,6 +751,20 @@ pub(crate) mod tests {
             }
         }
         panic!("{} stayed locked", dir.display())
+    }
+
+    #[tokio::test]
+    async fn timetable_through_calls() {
+        let atlas = Atlas::start(AppConfig::default(), None, None, no_updates()).unwrap();
+        let t = atlas.call(Call::Timetable(StationQuery::default())).await.unwrap();
+        let rows = t["rows"].as_array().unwrap();
+        assert!(!rows.is_empty() && t["total"].as_u64().unwrap() >= rows.len() as u64);
+        assert!(rows.iter().all(|r| !r["windows"].as_array().unwrap().is_empty()), "{}", rows[0]);
+        // the list's filters narrow it the same way
+        let first = rows[0]["row"]["freq_hz"].as_u64().unwrap();
+        let q = StationQuery { q: format!("{}", first as f64 / 1000.0), ..Default::default() };
+        let t = atlas.call(Call::Timetable(q)).await.unwrap();
+        assert!(t["rows"].as_array().unwrap().iter().all(|r| r["row"]["freq_hz"].as_u64() == Some(first)), "{t}");
     }
 
     #[tokio::test]

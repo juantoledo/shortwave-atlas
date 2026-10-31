@@ -13,7 +13,7 @@ use ts_rs::TS;
 use crate::eibi::names::band_of;
 use crate::favorites::{off_schedule, Favorite};
 use crate::rig::Mode;
-use crate::scan::{scan_marks, unidentified, Logged, ScanSummary, Signal, StationRef};
+use crate::scan::{scan_marks, unidentified, Logged, ScanMarks, ScanSummary, Signal, StationRef};
 use crate::stations::{page_limit, Catalog, Lens, Sort, StationPage, StationQuery, StationRow, LOOKUP_TOLERANCE_HZ};
 use crate::text::fold;
 
@@ -107,18 +107,7 @@ pub fn search(cat: &Catalog, q: &StationQuery, unix: i64, k: &Known) -> StationP
     }
     let off_favs = off_schedule(k.favorites, cat);
     let marks = k.scan.map(|s| scan_marks(cat, s));
-    let logged: HashSet<u32> = k.logbook.iter().map(|l| l.station_id).collect();
-    let lens: Option<HashSet<u32>> = match q.lens {
-        // Favorites returned above
-        Lens::All | Lens::Favorites => None,
-        Lens::Heard => Some(logged),
-        Lens::Listened => Some(k.listened.clone()),
-    };
-    let only = match (lens, &marks) {
-        (lens, None) => lens,
-        (None, Some(m)) => Some(m.ids()),
-        (Some(l), Some(m)) => Some(m.ids().intersection(&l).copied().collect()),
-    };
+    let only = kept_ids(cat, q, k, marks.as_ref());
     let heard_list = q.lens == Lens::Heard && q.scan.is_none();
     let mut page =
         if heard_list { cat.matching(q, unix, only.as_ref()) } else { cat.search_in(q, unix, only.as_ref()) };
@@ -167,6 +156,27 @@ pub fn search(cat: &Catalog, q: &StationQuery, unix: i64, k: &Known) -> StationP
     page
 }
 
+/// The station ids the lens and the scan filter keep (`marks` is that scan's), `None` for every
+/// one. Under a scan filter whose scan is gone `Catalog::matching` keeps nothing anyway.
+pub(crate) fn kept_ids(cat: &Catalog, q: &StationQuery, k: &Known, marks: Option<&ScanMarks>) -> Option<HashSet<u32>> {
+    let lens: Option<HashSet<u32>> = match q.lens {
+        Lens::All => None,
+        Lens::Heard => Some(k.logbook.iter().map(|l| l.station_id).collect()),
+        Lens::Listened => Some(k.listened.clone()),
+        Lens::Favorites => Some(favorite_ids(cat, k.favorites).into_iter().flatten().collect()),
+    };
+    match (lens, marks) {
+        (lens, None) => lens,
+        (None, Some(m)) => Some(m.ids()),
+        (Some(l), Some(m)) => Some(m.ids().intersection(&l).copied().collect()),
+    }
+}
+
+/// Each favorite's station id in `cat`, if it has one there.
+fn favorite_ids(cat: &Catalog, favorites: &[Favorite]) -> Vec<Option<u32>> {
+    favorites.iter().map(|f| f.station.as_ref().and_then(|s| s.find(cat)).map(|st| st.id)).collect()
+}
+
 /// The rows off the schedule that the band and text filters keep. The others (language,
 /// country, region, site, source) are about catalog rows: with any of them set, none.
 fn filter_off(mut rows: Vec<OffSchedule>, q: &StationQuery) -> Vec<OffSchedule> {
@@ -190,8 +200,7 @@ fn filter_off(mut rows: Vec<OffSchedule>, q: &StationQuery) -> Vec<OffSchedule> 
 /// The Favorites lens: every favorite, one row each, by frequency. Only the text narrows it; the
 /// other filters (band, language, country, region, source, site, scan) are about the schedule.
 fn favorites(cat: &Catalog, q: &StationQuery, unix: i64, k: &Known) -> StationPage {
-    let found: Vec<Option<u32>> =
-        k.favorites.iter().map(|f| f.station.as_ref().and_then(|s| s.find(cat)).map(|st| st.id)).collect();
+    let found = favorite_ids(cat, k.favorites);
     let ids: HashSet<u32> = found.iter().flatten().copied().collect();
     let all = StationQuery { lens: Lens::Favorites, ..Default::default() };
     let mut page = cat.matching(&StationQuery { facets: q.facets, ..all.clone() }, unix, Some(&ids));

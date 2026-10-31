@@ -1,9 +1,10 @@
-// Over the stage, bottom right: globe or flat map, zoom, back to the QTH, and whether a route is
+// Over the stage, bottom right: globe, flat map or timetable, zoom, back to the QTH, and whether a route is
 // framed once it lands.
 
 import { useT } from '../../i18n';
 import type { MapMode } from '../../hooks/useDisplay';
 import { ZOOM_STEP } from './fx';
+import { MapModeSwitch } from './MapModeSwitch';
 import type { Stage } from './useStage';
 
 interface Props {
@@ -21,13 +22,7 @@ export function Controls({ stage, mode, onMode, noGlobe, framing, onFrame }: Pro
   const off = !stage.ready;
   return (
     <div className="globe-ctl" role="group" aria-label={t.globeControls}>
-      <div className="seg map-mode" role="radiogroup" aria-label={t.mapView}>
-        {(['globe', 'flat'] as const).map((m) => (
-          <button key={m} type="button" role="radio" aria-checked={mode === m} disabled={m === 'globe' && noGlobe} onClick={() => onMode(m)}>
-            {m === 'globe' ? t.mapGlobe : t.mapFlat}
-          </button>
-        ))}
-      </div>
+      <MapModeSwitch mode={mode} onMode={onMode} noGlobe={noGlobe} />
       <div className="zoom">
         <button className="icon-btn" type="button" disabled={off} aria-label={t.zoomIn} title={t.zoomIn} onClick={() => stage.zoom(ZOOM_STEP)}>+</button>
         <button className="icon-btn" type="button" disabled={off} aria-label={t.zoomOut} title={t.zoomOut} onClick={() => stage.zoom(1 / ZOOM_STEP)}>−</button>

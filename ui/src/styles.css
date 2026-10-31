@@ -287,6 +287,78 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 }
 .globe-view { position: absolute; inset: 0; pointer-events: none; }
 
+/* The stage as a timetable (components/Timetable.tsx): a label column, then 00–24 UTC across,
+   a grid line each hour; lanes are absolutely placed (only those in sight are drawn), LANE_PX
+   tall (components/timetableView.ts), and the "now" line spans them at --now of the track. */
+.timetable {
+  --tt-label: 200px;
+  position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column;
+  background: rgba(5, 10, 17, 0.88); font: 400 12px var(--font-mono);
+}
+.tt-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.tt-scope { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; min-width: 0; letter-spacing: 0.06em; text-transform: uppercase; font-size: 11px; }
+.tt-head .seg button:disabled { opacity: 0.4; cursor: default; }
+.tt-count { color: var(--dim); }
+.tt-head .seg { min-height: var(--hit); border-radius: 999px; }
+.tt-head .seg button { display: inline-flex; align-items: center; gap: 7px; padding: 0 11px; text-transform: uppercase; }
+.tt-head .seg button::before { content: ""; width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--dim); }
+.tt-head .seg button[aria-checked="true"] { background: transparent; color: var(--text); }
+.tt-head .seg button[aria-checked="true"]::before { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 8px var(--amber); }
+.tt-axis { display: flex; padding: 6px 12px 4px 0; border-bottom: 1px solid var(--line); color: var(--dim); font-size: 10px; line-height: 1.3; }
+.tt-zone { flex: none; width: var(--tt-label); padding-left: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+.tt-hours { position: relative; flex: 1; height: 2.6em; }
+.tt-hours span { position: absolute; top: 0; transform: translateX(-50%); text-align: center; }
+.tt-hours span:first-child { transform: none; text-align: left; }
+.tt-hours span:last-child { transform: translateX(-100%); text-align: right; }
+.tt-hours small { font-size: 9.5px; opacity: 0.75; }
+.tt-body { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 12px; }
+.tt-lanes { position: relative; min-height: 100%; }
+.tt-lane {
+  position: absolute; left: 0; right: 0; height: 24px; box-sizing: border-box; display: flex; align-items: center; padding: 0;
+  background: transparent; border: 0; border-top: 1px solid rgba(140, 185, 230, 0.04); color: var(--text); font: inherit; text-align: left;
+}
+/* the stations on one frequency are one block: a divider over it, the frequency on its first lane */
+.tt-lane.first { border-top-color: rgba(140, 185, 230, 0.2); }
+.tt-lane:not(.first) .tt-label .rf { visibility: hidden; }
+/* the others on the tuned channel: a faint version of the tuned lane's light */
+.tt-lane.co { background: rgba(255, 179, 63, 0.08); box-shadow: inset 2px 0 0 rgba(255, 179, 63, 0.45); }
+.tt-lane.co .tt-label .rf { color: var(--amber); }
+.tt-lane.co .tt-track i { background: rgba(255, 179, 63, 0.5); }
+.tt-lane:hover:not(:disabled) { background: rgba(140, 185, 230, 0.06); }
+.tt-lane:disabled { cursor: default; color: var(--dim); }
+/* the tuned station: an amber edge and rule, its name and bars lit */
+.tt-lane[aria-current="true"] {
+  z-index: 1;
+  background: linear-gradient(to right, rgba(255, 179, 63, 0.24), rgba(255, 179, 63, 0.07));
+  box-shadow: inset 3px 0 0 var(--amber), inset 0 1px 0 rgba(255, 179, 63, 0.55), inset 0 -1px 0 rgba(255, 179, 63, 0.55);
+}
+.tt-lane[aria-current="true"] .tt-label { color: var(--amber); font-weight: 600; }
+.tt-lane[aria-current="true"] .tt-label .rf { color: var(--amber); }
+.tt-lane[aria-current="true"] .tt-track i { top: 5px; bottom: 5px; background: rgba(255, 179, 63, 0.7); }
+.tt-lane[aria-current="true"] .tt-track i.on { background: #ffd28a; box-shadow: 0 0 10px var(--amber); }
+.tt-label { flex: none; width: var(--tt-label); display: flex; align-items: center; gap: 6px; padding: 0 8px 0 12px; overflow: hidden; white-space: nowrap; }
+.tt-label .rf { flex: none; min-width: 3.6em; text-align: right; color: var(--dim); }
+.tt-lane.lit .tt-label .rf { color: var(--amber); }
+.tt-name { overflow: hidden; text-overflow: ellipsis; }
+.tt-track {
+  position: relative; flex: 1; align-self: stretch;
+  background: repeating-linear-gradient(to right, rgba(140, 185, 230, 0.07) 0 1px, transparent 1px calc(100% / 24));
+}
+.tt-track i { position: absolute; top: 7px; bottom: 7px; border-radius: 2px; background: rgba(255, 179, 63, 0.35); }
+.tt-track i.on { background: var(--amber); box-shadow: 0 0 6px rgba(255, 179, 63, 0.55); }
+.tt-now {
+  position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; pointer-events: none;
+  left: calc(var(--tt-label) + (100% - var(--tt-label)) * var(--now)); background: var(--text); opacity: 0.7;
+}
+.tt-empty, .tt-more { margin: 0; padding: 16px 12px; color: var(--dim); text-align: center; }
+.tt-empty { position: absolute; inset: 0 0 auto; }
+.tt-more { padding: 6px 12px; border-top: 1px solid var(--line); font-size: 11px; }
+@media (max-width: 599px) {
+  .timetable { --tt-label: 128px; }
+  .tt-label .rf { min-width: 3.2em; }
+  .tt-label .flag { display: none; }
+}
+
 /* The globe behind the whole window (Settings → Display; data-globe="full"). The canvas and the
    stars are fixed to the window under the grid (z-index -1 inside the isolated .app); Globe.tsx
    centres the globe on the stage, which keeps the HUD and the controls but no frame. Clicks go
@@ -302,7 +374,7 @@ svg.top-ico { width: 13px; height: 13px; fill: currentColor; }
 .app[data-globe="full"] > *:not(.stage) { pointer-events: auto; }
 .app[data-globe="full"] .stage { border-color: transparent; background: none; }
 .app[data-globe="full"] :is(.stars, #globe) { position: fixed; z-index: -1; }
-.app[data-globe="full"] :is(#globe, .globe-ctl, .stage-msg) { pointer-events: auto; }
+.app[data-globe="full"] :is(#globe, .globe-ctl, .stage-msg, .timetable) { pointer-events: auto; }
 /* a dim band under the top bar, over the globe (last in the tree, so it paints over the canvas) */
 .app[data-globe="full"]::after {
   content: ""; position: fixed; z-index: -1; left: 0; right: 0; top: 0; height: 110px; pointer-events: none;

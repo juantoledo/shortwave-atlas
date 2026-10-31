@@ -45,6 +45,7 @@ import type { StationPage } from '../types/generated/StationPage';
 import type { StationQuery } from '../types/generated/StationQuery';
 import type { Stats } from '../types/generated/Stats';
 import type { StatsQuery } from '../types/generated/StatsQuery';
+import type { Timetable } from '../types/generated/Timetable';
 import type { TrendPoint } from '../types/generated/TrendPoint';
 import type { UpdatePrefs } from '../types/generated/UpdatePrefs';
 import type { UpdateStatus } from '../types/generated/UpdateStatus';
@@ -60,6 +61,7 @@ export class Api {
   rig = (args: RigCommand) => this.transport.call({ cmd: 'rig', args }) as Promise<null>;
   lookup = (freq_hz: number) => this.transport.call({ cmd: 'lookup', args: { freq_hz } }) as Promise<Candidate[]>;
   search = (args: StationQuery) => this.transport.call({ cmd: 'search', args }) as Promise<StationPage>;
+  timetable = (args: StationQuery) => this.transport.call({ cmd: 'timetable', args }) as Promise<Timetable>;
   overview = () => this.transport.call({ cmd: 'overview' }) as Promise<Overview>;
   stationsMeta = () => this.transport.call({ cmd: 'stations_meta' }) as Promise<CatalogMeta>;
   setQth = (args: Qth) => this.transport.call({ cmd: 'set_qth', args }) as Promise<null>;
