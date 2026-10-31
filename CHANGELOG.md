@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.19.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.18.0...v0.19.0) (2026-10-31)
+
+
+### Features
+
+* **ui:** a timetable view of today's hours on the air ([7be5806](https://github.com/juantoledo/shortwave-atlas/commit/7be580642f99fa5d312bc8b788873102548cd64a))
+* **ui:** a timetable view of today's hours on the air ([3e22119](https://github.com/juantoledo/shortwave-atlas/commit/3e2211943260f4581c1f2c4cc3a552c6501b3ec5))
+
+
+### Bug Fixes
+
+* **eibi:** refresh the EiBi sked-a26.csv schedule ([55bc01d](https://github.com/juantoledo/shortwave-atlas/commit/55bc01d629bb3cc59c88c615eaed19b8a669e4a2))
+* **eibi:** refresh the EiBi sked-a26.csv schedule ([db7c464](https://github.com/juantoledo/shortwave-atlas/commit/db7c46428ce0fca06f790148726ff56031ee2c68))
+
 ## [0.18.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.17.0...v0.18.0) (2026-10-29)
 
 
