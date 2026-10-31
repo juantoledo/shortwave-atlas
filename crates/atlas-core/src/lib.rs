@@ -27,6 +27,7 @@ pub mod source;
 pub mod stations;
 pub mod stats;
 pub mod text;
+pub mod timetable;
 pub mod tools;
 pub mod update;
 pub mod user_stations;

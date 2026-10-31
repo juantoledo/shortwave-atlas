@@ -11,6 +11,8 @@ import { Dossier } from './components/Dossier';
 import { FavStar } from './components/FavStar';
 import { asMode, favAt } from './components/favorites';
 import { Globe } from './components/Globe';
+import { Timetable } from './components/Timetable';
+import { scopeBand, timetableFilters, utcDay, wholeSchedule, type TimetableScope } from './components/timetableView';
 import { Hud } from './components/Hud';
 import { ScanBar } from './components/ScanBar';
 import type { StatsTab } from './components/stats/StatsView';
@@ -42,6 +44,7 @@ import { useTour } from './hooks/useTour';
 import { useWelcome } from './hooks/useWelcome';
 import { useFreqHeat, useListening, useStats } from './hooks/useStats';
 import { useNetCountries, useNetOverview, useNetSearch } from './hooks/useNetSearch';
+import { useTimetable } from './hooks/useTimetable';
 import { useNetFavorites } from './hooks/useNetFavorites';
 import { NetDossier } from './components/NetDossier';
 import type { NetFace } from './components/Tuner';
@@ -194,6 +197,11 @@ export function App() {
   const netActive = isNet(filters, netEnabled);
   // Favorites lists every favorite on any band, NET included
   const search = useStationSearch(netActive && filters.lens !== 'favorites' ? null : api, filters, lensKey);
+  // the stage's timetable: the list's stations, or the dial's band when the list has them all
+  const timetableOn = display.map === 'timetable';
+  const [ttScope, setTtScope] = usePersisted<TimetableScope>('swatlas.timetableScope', 'band', oneOf('band', 'all'));
+  const ttFilters = useMemo(() => timetableFilters(filters, win.w.band, ttScope), [filters, win.w.band, ttScope]);
+  const timetable = useTimetable(api, ttFilters, timetableOn && !netActive && page !== 'stats', lensKey, utcDay(now));
   // the directory: the NET band's list (its Favorites lens lists the favorites kept instead), or
   // the internet stations shown among a radio search's results
   const netMixed = netEnabled && !netActive && mixesNet(filters);
@@ -626,7 +634,20 @@ export function App() {
         />
 
         <main className="stage" data-tour="globe" aria-label={t.globe}>
-          {qth && (
+          {timetableOn ? (
+            <Timetable
+              state={timetable}
+              scope={wholeSchedule(filters) ? { scope: ttScope, onScope: setTtScope, band: scopeBand(win.w.band) } : null}
+              net={netActive}
+              now={now}
+              on={on}
+              selId={on && !netNow ? sel?.station.id ?? null : null}
+              tunedHz={on && !netNow ? freqHz : null}
+              onPick={pick}
+              mode={display.map}
+              onMode={display.setMap}
+            />
+          ) : qth && (
             <Globe
               sel={on && !netNow ? sel : null}
               net={netPin}
@@ -651,7 +672,7 @@ export function App() {
               onMode={display.setMap}
             />
           )}
-          <Hud faded={touchedGlobe} flat={display.map === 'flat'} />
+          {!timetableOn && <Hud faded={touchedGlobe} flat={display.map === 'flat'} />}
         </main>
 
         <section className={'panel browse' + (folds.folded('browse') ? ' folded' : '')} id="panel-browse" data-tour="browse" aria-label={t.stations}>

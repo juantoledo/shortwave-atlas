@@ -1,6 +1,6 @@
 // How this window draws, kept per device (the GPU it costs is this device's): the globe behind
-// the whole window with frosted panels, or framed in the stage with solid ones; the globe or the
-// flat map (the switch on the stage); and whether Stats shows its game layer (Collection).
+// the whole window with frosted panels, or framed in the stage with solid ones; the globe, the
+// flat map or the timetable (the switch on the stage); and whether Stats shows its game layer (Collection).
 
 import { useCallback, useState } from 'react';
 
@@ -8,8 +8,9 @@ const FULL_KEY = 'swatlas.fullGlobe';
 const COLLECTION_KEY = 'swatlas.collection';
 const MAP_KEY = 'swatlas.map';
 
-/** How the stage shows the world. */
-export type MapMode = 'globe' | 'flat';
+/** How the stage shows the stations: where (the globe, the flat map) or when (the timetable). */
+export type MapMode = 'globe' | 'flat' | 'timetable';
+const MAP_MODES: readonly string[] = ['globe', 'flat', 'timetable'];
 
 /** On unless this device turned it off (the page works without storage). */
 function load(key: string): boolean {
@@ -19,7 +20,10 @@ function save(key: string, on: boolean) {
   try { localStorage.setItem(key, on ? '1' : '0'); } catch { /* private window: this session only */ }
 }
 function loadMap(): MapMode {
-  try { return localStorage.getItem(MAP_KEY) === 'flat' ? 'flat' : 'globe'; } catch { return 'globe'; }
+  try {
+    const m = localStorage.getItem(MAP_KEY);
+    return m && MAP_MODES.includes(m) ? (m as MapMode) : 'globe';
+  } catch { return 'globe'; }
 }
 
 export interface DisplayApi {

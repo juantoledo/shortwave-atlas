@@ -56,6 +56,9 @@ pub enum Call {
     },
     /// Filtered, paged station list (result: `StationPage`).
     Search(StationQuery),
+    /// The stations a list query keeps, with their hours on the air today (UTC), unpaged up to
+    /// `timetable::TIMETABLE_MAX_ROWS` (result: `Timetable`).
+    Timetable(StationQuery),
     /// Every transmitter site with what is on the air now (result: `Overview`).
     Overview,
     /// Code tables and facts about the station data (result: `CatalogMeta`).
