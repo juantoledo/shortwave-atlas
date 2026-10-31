@@ -225,7 +225,7 @@ dependencies = [
 
 [[package]]
 name = "atlas-core"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "pulldown-cmark",
  "qrcode",
@@ -239,7 +239,7 @@ dependencies = [
 
 [[package]]
 name = "atlas-rig"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "async-trait",
  "atlas-core",
@@ -253,7 +253,7 @@ dependencies = [
 
 [[package]]
 name = "atlas-server"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "async-trait",
  "atlas-core",
@@ -4162,7 +4162,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "swatlas"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "async-trait",
  "atlas-core",
