@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.1](https://github.com/juantoledo/shortwave-atlas/compare/v0.18.0...v0.18.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* **eibi:** refresh the EiBi sked-a26.csv schedule ([55bc01d](https://github.com/juantoledo/shortwave-atlas/commit/55bc01d629bb3cc59c88c615eaed19b8a669e4a2))
+* **eibi:** refresh the EiBi sked-a26.csv schedule ([db7c464](https://github.com/juantoledo/shortwave-atlas/commit/db7c46428ce0fca06f790148726ff56031ee2c68))
+
 ## [0.18.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.17.0...v0.18.0) (2026-10-29)
 
 
