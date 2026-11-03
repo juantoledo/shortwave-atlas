@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.20.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.19.0...v0.20.0) (2026-11-03)
+
+
+### Features
+
+* **eibi:** EiBi sked-b26.csv schedule ([bc22b0f](https://github.com/juantoledo/shortwave-atlas/commit/bc22b0f654207e3f17537720dddf3174b8bf84ad))
+* **eibi:** EiBi sked-b26.csv schedule ([fc58a39](https://github.com/juantoledo/shortwave-atlas/commit/fc58a39bf9458ec1355ac7ff23b86e1ccfa5b8ce))
+
+
+### Bug Fixes
+
+* **deps:** bump pulldown-cmark and async-executor ([e6770aa](https://github.com/juantoledo/shortwave-atlas/commit/e6770aa20ad508f95e3b2830f3f9084fc9cb5798))
+
 ## [0.19.0](https://github.com/juantoledo/shortwave-atlas/compare/v0.18.0...v0.19.0) (2026-10-31)
 
 
